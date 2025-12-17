@@ -11,18 +11,28 @@ document.addEventListener('DOMContentLoaded', () => {
   // ====== Access control (show/hide links) ======
   // مفاتيح lowercase للمقارنة الثابتة
   const PAGE_SELECTORS = {
-    'current orders':            'a[href="/orders"]',
-    'create new order':          'a[href="/orders/new"]',
-    'stocktaking':               'a[href="/stocktaking"]',
-    'requested orders':          'a[href="/orders/requested"]',
-    'schools requested orders':  'a[href="/orders/requested"]',
-    'assigned schools requested orders': 'a[href="/orders/assigned"]',
-    'funds':                     'a[href="/funds"]',
-    // ★ موجودة عندك مسبقًا:
-    's.v schools orders':        'a[href="/orders/sv-orders"]',
-    // ★ NEW:
-    'damaged assets':            'a[href="/damaged-assets"]'
-  };
+  // ===== Orders =====
+  'current orders':            'a[href="/orders"]',
+  'create new order':          'a[href="/orders/new"]',
+  'stocktaking':               'a[href="/stocktaking"]',
+  'requested orders':          'a[href="/orders/requested"]',
+  'schools requested orders':  'a[href="/orders/requested"]',
+  'assigned schools requested orders': 'a[href="/orders/assigned"]',
+  's.v schools orders':        'a[href="/orders/sv-orders"]',
+
+  // ===== Logistics =====
+  'logistics':                 'a[href="/logistics"]',
+
+  // ===== Expenses =====
+  'my expenses':               'a[href="/expenses"]',
+  'expenses by user':          'a[href="/expenses/users"]',
+
+  // ===== Finance =====
+  'funds':                     'a[href="/funds"]',
+
+  // ===== Assets =====
+  'damaged assets':            'a[href="/damaged-assets"]'
+};
   const toKey = (s) => String(s || '').trim().toLowerCase();
 
   function hideEl(el){ if (el){ el.style.display = 'none'; el.setAttribute('aria-hidden','true'); } }
@@ -30,18 +40,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // أظهر المسموح وأخفِ غير المسموح (حتمي)
   function applyAllowedPages(allowed){
-    if (!Array.isArray(allowed) || allowed.length === 0) return;
-    const set = new Set(allowed.map(toKey));
+  if (!Array.isArray(allowed)) return;
 
-    Object.entries(PAGE_SELECTORS).forEach(([key, selector]) => {
-      const link = document.querySelector(selector);
-      if (!link) return;
-      const li = link.closest('li') || link;
-      if (set.has(key)) showEl(li);
-      else hideEl(li);
-    });
-  }
+  const set = new Set(allowed.map(toKey));
 
+  // 🔒 Default deny: اخفي كل اللينكات الأول
+  Object.values(PAGE_SELECTORS).forEach(selector => {
+    const link = document.querySelector(selector);
+    if (!link) return;
+    const li = link.closest('li') || link;
+    hideEl(li);
+  });
+
+  // ✅ أظهر المسموح فقط
+  Object.entries(PAGE_SELECTORS).forEach(([key, selector]) => {
+    const link = document.querySelector(selector);
+    if (!link) return;
+    const li = link.closest('li') || link;
+    if (set.has(key)) showEl(li);
+  });
+}
   function cacheAllowedPages(arr){ try { sessionStorage.setItem(CACHE_ALLOWED, JSON.stringify(arr || [])); } catch {} }
   function getCachedAllowedPages(){
     try { const r = sessionStorage.getItem(CACHE_ALLOWED); const a = JSON.parse(r); return Array.isArray(a) ? a : null; }
