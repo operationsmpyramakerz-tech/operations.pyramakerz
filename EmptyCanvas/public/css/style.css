@@ -3093,3 +3093,7 @@ body.sidebar-mini .container-full-width { padding-left: 24px !important; }
   color: #fff;
   box-shadow: 0 12px 30px rgba(139,92,246,0.6);
 }
+/* 🔒 Prevent sidebar flash before permissions load */
+body.permissions-loading .sidebar li {
+  display: none !important;
+}
