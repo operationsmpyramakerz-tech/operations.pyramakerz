@@ -31,8 +31,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // ===== Finance =====
   'funds':                     'a[href="/funds"]',
 
-  // ===== Assets =====
-  'damaged assets':            'a[href="/damaged-assets"]'
+// ===== Assets =====
+'damaged assets':            'a[href="/damaged-assets"]',
 's.v schools assets':        'a[href="/assets/sv-schools"]',
 'reviewed damaged assets':   'a[href="/damaged-assets/reviewed"]'
 };
