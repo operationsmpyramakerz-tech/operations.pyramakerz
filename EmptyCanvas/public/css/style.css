@@ -3099,5 +3099,5 @@ body.permissions-loading .sidebar li {
 }
 /* 🔒 Global: hide sidebar until permissions are resolved */
 .sidebar {
-  visibility: hidden;
+  visibility: hidden !important;
 }
