@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>S.V Schools Assets</title>
+
+  <link rel="stylesheet" href="/css/style.css"/>
+  <script src="https://unpkg.com/feather-icons"></script>
+</head>
+<body>
+<script>
+  (function () {
+    try {
+      if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+        document.body.classList.add('sidebar-mini');
+      }
+    } catch (e) {}
+  })();
+</script>
+
+<div class="app-container">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Dashboard</h2>
+      <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true">
+        <i data-feather="chevrons-left"></i>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <ul class="nav-list">
+        <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Schools Requested Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/assigned"><i data-feather="user-check"></i><span class="nav-label">Storage</span></a></li>
+        <li><a class="nav-link" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+        <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+        <li><a class="nav-link" href="/logistics"><i data-feather="truck"></i><span class="nav-label">Logistics</span></a></li>
+        <li><a class="nav-link" href="/funds"><i data-feather="dollar-sign"></i><span class="nav-label">Funds</span></a></li>
+        <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+        <li><a class="nav-link" href="/damaged-assets"><i data-feather="alert-triangle"></i><span class="nav-label">Damaged Assets</span></a></li>
+        <li><a class="nav-link active" href="/sv-assets"><i data-feather="layers"></i><span class="nav-label">S.V Schools Assets</span></a></li>
+        <li>
+  <a class="nav-link" href="/damaged-assets-reviewed">
+    <i data-feather="check-circle"></i>
+    <span class="nav-label">Reviewed Damaged Assets</span>
+  </a>
+</li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button id="logoutBtn" class="logout-btn"><i data-feather="log-out"></i> Logout</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="main-header">
+      <div class="header-row1">
+        <div class="left">
+          <div class="greeting-pill" aria-live="polite">
+            <span class="greeting-avatar"><img src="/images/greeting-icon.png" alt="Hi icon"/></span>
+            <div class="greet-text">
+              <div class="greet-title">Hi, <span data-username>...</span> 👋</div>
+              <div class="greet-sub">Start your day with operations</div>
+            </div>
+          </div>
+
+          <div class="searchbar" id="assets-searchbar" role="search">
+            <i data-feather="search"></i>
+            <input id="assetsSearch" type="search" placeholder="Search by product, note, or batch time..." aria-label="Search"/>
+          </div>
+        </div>
+        <div class="right topbar-right">
+          <a class="account-mini" href="/account" aria-label="My account" title="My account">
+            <span class="ico-circle"><img src="/images/logo.png" alt="Logo"/></span>
+            <span class="label">My account</span>
+          </a>
+        </div>
+      </div>
+      <div class="header-row2">
+        <h1 class="page-title">S.V Schools Assets</h1>
+      </div>
+    </header>
+
+    <main class="container-full-width">
+  <section class="card card--elevated">
+    <div class="card-header">
+      <h2><i data-feather="layers"></i> Assets Batches</h2>
+      <p class="card-subtitle">Each card groups all components created in the same timestamp (batch).</p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs" style="display:flex;gap:10px;border-bottom:1px solid #ddd;margin-bottom:10px;">
+      <button id="tabNotStarted" class="tab-btn active" style="padding:8px 16px;border:none;background:none;border-bottom:3px solid var(--primary);cursor:pointer;">
+        Not Started
+      </button>
+      <button id="tabReviewed" class="tab-btn" style="padding:8px 16px;border:none;background:none;cursor:pointer;">
+        Reviewed
+      </button>
+    </div>
+
+    <div class="toolbar" style="display:flex;gap:10px;align-items:center;">
+      <button id="refreshBtn" class="btn btn-outline-pill" type="button"><i data-feather="refresh-ccw"></i> Refresh</button>
+      <span id="totalBatches" class="muted"></span>
+      <span id="fetchStatus" class="muted" style="margin-left:auto;"></span>
+    </div>
+
+    <div id="assetsLoader" class="loader" style="display:none;margin:20px 0;">
+      <div class="spinner"></div>
+    </div>
+
+    <div id="emptyState" class="empty-state" style="display:none;">
+      <div class="empty-illustration"><i data-feather="inbox"></i></div>
+      <h3>No assets yet</h3>
+      <p>Try changing your search.</p>
+    </div>
+
+    <!-- Grids -->
+    <div id="assetsGridNotStarted" class="orders-grid"></div>
+    <div id="assetsGridReviewed" class="orders-grid" style="display:none;"></div>
+
+    <div id="endOfList" style="text-align:center;margin:20px 0;color:#6b7280;">
+      End of assets list
+    </div>
+  </section>
+</main>
+  </div>
+</div>
+
+<script>feather.replace();</script>
+<script src="/js/common-ui.js"></script>
+<script src="/js/sv-assets.js"></script>
+</body>
+</html>

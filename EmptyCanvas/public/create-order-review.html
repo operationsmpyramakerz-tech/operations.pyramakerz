@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Create Order — Review & Submit</title>
+<link href="/css/style.css" rel="stylesheet"/>
+<script src="https://unpkg.com/feather-icons"></script>
+
+<style>
+  .create-order-layout {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem;
+  }
+
+  /* Stepper أنيق مع أيقونات */
+  .stepper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 2.5rem;
+    list-style: none;
+    padding: 0;
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    font-weight: 500;
+    color: #6b7280;
+    position: relative;
+  }
+  .step.completed .circle { background: #10b981; border-color: #10b981; color: white; }
+  .step.active .circle { background: #3b82f6; border-color: #3b82f6; color: white; box-shadow: 0 0 0 6px rgba(59,130,246,0.2); }
+  .step .circle {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: #f3f4f6;
+    border: 3px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 14px;
+    transition: all 0.3s ease;
+    z-index: 1;
+  }
+  .step.completed .circle::after { content: "✓"; font-weight: bold; font-size: 19px; }
+  .step .label { font-size: 0.95rem; white-space: nowrap; }
+  .step .bar { flex: 1; height: 3px; background: #e5e7eb; margin: 0 12px; }
+  .step.completed + .step .bar { background: #10b981; }
+
+  /* الكروت */
+  .modern-card {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 8px 25px -6px rgba(0,0,0,0.08);
+    border: 1px solid #e5e7eb;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+  }
+  .section-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin: 0;
+    padding: 1.4rem 1.6rem 0;
+  }
+
+  /* Summary */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.2rem;
+    padding: 0 1.6rem 1.6rem;
+  }
+  .summary-item {
+    background: #f8fafc;
+    padding: 1rem 1.3rem;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+  }
+  .summary-label {
+    font-size: 0.82rem;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .summary-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #1e40af;
+    margin-top: 0.4rem;
+  }
+
+  /* قائمة المنتجات - عرض كامل + خط بسيط */
+  .product-cards-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0 1.6rem 1rem;
+  }
+  .product-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 0;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background 0.2s;
+  }
+  .product-card:hover {
+    background: #f8fafc;
+  }
+  .product-card:last-child {
+    border-bottom: none;
+  }
+
+  .product-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0; /* مهم جدًا عشان النص الطويل ما يكسرش التصميم */
+  }
+  .product-name {
+    font-weight: 600;
+    color: #1f2937;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .product-reason {
+    font-size: 0.82rem;
+    color: #6b7280;
+    margin-top: 0.2rem;
+  }
+
+  .product-qty {
+    background: #ecfdf5;
+    color: #065f46;
+    padding: 0.35rem 0.75rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.88rem;
+    min-width: 70px;
+    text-align: center;
+  }
+
+  /* الأزرار */
+  .form-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.4rem 1.6rem;
+    background: #f8fafc;
+    border-top: 1px solid #e5e7eb;
+  }
+  .btn-secondary {
+    padding: 0.7rem 1.4rem;
+    background: white;
+    border: 1.5px solid #cbd5e1;
+    color: #374151;
+    border-radius: 12px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+  }
+  .btn-secondary:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+  }
+  .submit-btn.elevated {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0.8rem 1.8rem;
+    background: #10b981;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 1rem;
+    box-shadow: 0 6px 14px -4px rgba(16,185,129,0.35);
+    transition: all 0.3s;
+  }
+  .submit-btn.elevated:hover {
+    background: #059669;
+    transform: translateY(-1px);
+  }
+
+  /* Loading */
+  .loading-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 380px;
+    color: #64748b;
+    font-size: 1rem;
+  }
+  .spinner {
+    width: 44px;
+    height: 44px;
+    border: 4px solid #e2e8f0;
+    border-top: 4px solid #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 0.8rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .product-card {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.6rem;
+    }
+    .product-qty {
+      align-self: flex-end;
+    }
+    .form-actions {
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .submit-btn.elevated,
+    .btn-secondary {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+</style>
+</head>
+<body>
+<script>
+  (function() {
+    try {
+      if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+        document.body.classList.add('sidebar-mini');
+      }
+    } catch(e) {}
+  })();
+</script>
+
+<div class="app-container">
+  <!-- Sidebar & Header بدون أي تغيير -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Dashboard</h2>
+      <button aria-expanded="true" aria-label="Toggle sidebar" class="sidebar-toggle" id="sidebar-toggle">
+        <i data-feather="chevrons-left"></i>
+      </button>
+    </div>
+    <nav class="sidebar-nav">
+      <ul class="nav-list">
+        <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Schools Requested Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/assigned"><i data-feather="user-check"></i><span class="nav-label">Storage</span></a></li>
+        <li><a class="nav-link active" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+        <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+        <li><a class="nav-link" href="/logistics"><i data-feather="truck"></i><span class="nav-label">Logistics</span></a></li>
+        <li><a class="nav-link" href="/funds"><i data-feather="dollar-sign"></i><span class="nav-label">Funds</span></a></li>
+        <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+        <li><a class="nav-link" href="/damaged-assets"><i data-feather="alert-triangle"></i><span class="nav-label">Damaged Assets</span></a></li>
+        <li><a class="nav-link" href="/sv-assets"><i data-feather="layers"></i><span class="nav-label">S.V Schools Assets</span></a></li>
+        <li><a class="nav-link" href="/damaged-assets-reviewed"><i data-feather="check-circle"></i><span class="nav-label">Reviewed Damaged Assets</span></a></li>
+        <li>
+  <a class="nav-link" href="/expenses">
+    <i data-feather="dollar-sign"></i>
+    <span class="nav-label">Expenses</span>
+  </a>
+</li>
+      </ul>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" id="logoutBtn"><i data-feather="log-out"></i> Logout</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="main-header">
+      <div class="header-row1">
+        <div class="left">
+          <div aria-live="polite" class="greeting-pill">
+            <span class="greeting-avatar"><img alt="Hi icon" src="/images/greeting-icon.png"/></span>
+            <div class="greet-text">
+              <div class="greet-title">Hi, <span data-username="">...</span></div>
+              <div class="greet-sub">Start your day with operations</div>
+            </div>
+          </div>
+        </div>
+        <div class="right topbar-right">
+          <a aria-label="My account" class="account-mini" href="/account" title="My account">
+            <span class="ico-circle"><img alt="Logo" src="/images/logo.png"/></span>
+            <span class="label">My account</span>
+          </a>
+        </div>
+      </div>
+      <div class="header-row2">
+        <h1 class="page-title">Create New Order</h1>
+      </div>
+    </header>
+
+    <main class="container create-order-layout">
+      <!-- Stepper -->
+      <section class="page-stepper">
+        <ol class="stepper" aria-label="Order steps">
+          <li class="step completed"><span class="circle"><i data-feather="package"></i></span><span class="label">Products</span><span class="bar"></span></li>
+          <li class="step active"><span class="circle"><i data-feather="eye"></i></span><span class="label">Review & Submit</span></li>
+        </ol>
+      </section>
+
+      <!-- Loading -->
+      <div class="loading-panel" id="loading-indicator">
+        <div class="spinner"></div>
+        <p>Loading Order Details...</p>
+      </div>
+
+      <!-- Content -->
+      <div id="order-details" style="display:none;">
+        <!-- Summary -->
+        <section class="card modern-card">
+          <h2 class="section-title">Order Summary</h2>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <span class="summary-label">Total Items</span>
+              <span class="summary-value" id="summary-total-value">0</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Products List -->
+        <section class="card modern-card">
+          <h2 class="section-title">Products to be Ordered</h2>
+          <div class="product-cards-grid" id="summary-products-list">
+            <!-- يتم ملؤها بواسطة JS -->
+          </div>
+
+          <div class="form-actions">
+            <a href="/orders/new/products" class="btn-secondary">Back to Edit</a>
+            <button class="submit-btn elevated" id="submitOrderBtn">
+              <i data-feather="send"></i> Submit Order
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- Toast Stack -->
+<div id="toast-stack"></div>
+
+<script>feather.replace();</script>
+<script src="/js/common-ui.js"></script>
+<script src="/js/order-review.step.js"></script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login - Operations Dashboard</title>
+  
+  <!-- احتفظنا بالـ CSS القديم + أضفنا أنيميشنز فقط -->
+  <link rel="stylesheet" href="/css/login.css" />
+
+  <style>
+    /* أنيميشنز جديدة فقط - بدون تغيير الخلفية أو الألوان الأساسية */
+    .login-card {
+      animation: cardSlideUp 0.8s ease-out forwards;
+      opacity: 0;
+      transform: translateY(50px);
+    }
+
+    @keyframes cardSlideUp {
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .login-logo {
+      animation: logoFloat 3s infinite ease-in-out;
+    }
+
+    @keyframes logoFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-15px); }
+    }
+
+    /* Floating Labels أنيقة */
+    .form-group {
+      position: relative;
+      margin-bottom: 28px;
+    }
+
+    .form-group label {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      color: #999;
+      font-size: 14px;
+      font-weight: 500;
+      pointer-events: none;
+      transition: all 0.3s ease;
+      transform-origin: left top;
+      background: white;
+      padding: 0 4px;
+    }
+
+    .form-group input:focus ~ label,
+    .form-group input:not(:placeholder-shown) ~ label {
+      top: -8px;
+      left: 12px;
+      font-size: 12px;
+      color: #667eea;
+      font-weight: 600;
+    }
+
+    .form-group input {
+      transition: all 0.3s ease;
+    }
+
+    .form-group input:focus {
+      transform: scale(1.02);
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+    }
+
+    /* Ripple Effect على الزرار */
+    .login-btn {
+      position: relative;
+      overflow: hidden;
+      transition: all 0.4s ease;
+    }
+
+    .login-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+    }
+
+    .login-btn::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      transition: width 0.6s, height 0.6s;
+      z-index: 0;
+    }
+
+    .login-btn:active::before {
+      width: 300px;
+      height: 300px;
+    }
+
+    .login-btn span {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* رسالة الخطأ تهز */
+    .error-message {
+      animation: shake 0.6s ease-in-out;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-10px); }
+      40%, 80% { transform: translateX(10px); }
+    }
+
+    /* تحسين toggle password */
+    .toggle-password {
+      transition: all 0.3s ease;
+    }
+
+    .toggle-password:hover {
+      background: rgba(0,0,0,0.05);
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-container">
+    <div class="login-card">
+      <div class="login-header">
+        <img src="/images/logo.png" alt="Logo" class="login-logo" />
+        <h1>Operations</h1>
+        <p>Please sign in to continue</p>
+      </div>
+
+      <form id="loginForm" class="login-form">
+        <div class="form-group">
+          <input type="text" id="username" name="username" required placeholder=" " autocomplete="username" />
+          <label for="username">Username</label>
+        </div>
+
+        <div class="form-group">
+          <div class="password-wrapper">
+            <input type="password" id="password" name="password" required placeholder=" " autocomplete="current-password" />
+            <label for="password">Password</label>
+            <button type="button" id="togglePassword" class="toggle-password" aria-label="Show password" aria-pressed="false">
+              <svg class="icon-eye" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg class="icon-eye-off" style="display:none" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a20.7 20.7 0 0 1 5.06-6.94"/>
+                <path d="M1 1l22 22"/>
+                <path d="M9.88 9.88A3 3 0 0 0 12 15a3 3 0 0 0 2.12-.88"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="login-btn">
+          <span>Sign In</span>
+        </button>
+      </form>
+
+      <div id="error-message" class="error-message" style="display: none;"></div>
+    </div>
+  </div>
+
+  <!-- الـ JS بتاعك الأصلي 100% بدون أي تعديل -->
+  <script src="/js/login.js"></script>
+
+  <!-- بس أضفنا سطر صغير عشان Floating Labels تشتغل لو في قيمة من البداية -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.form-group input').forEach(input => {
+        if (input.value.trim() !== '') {
+          input.classList.add('not-empty');
+        }
+        input.addEventListener('blur', () => {
+          if (input.value.trim() !== '') {
+            input.classList.add('not-empty');
+          } else {
+            input.classList.remove('not-empty');
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

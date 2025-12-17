@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Expenses by User</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+  <script src="https://unpkg.com/feather-icons"></script>
+
+  <style>
+
+    /* Modern Animated Loader */
+.loader {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 4px solid #e2e8f0;
+  border-top-color: #6366f1;
+  animation: spin 0.9s cubic-bezier(.55,.3,.55,.8) infinite;
+  margin: 40px auto;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+#usersInfo {
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+    .sort-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.sort-select {
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1.3px solid #d1d5db;
+  font-size: 0.9rem;
+}
+    .download-wrapper {
+  position: relative;
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+
+.download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #357ae8;
+  color: white;
+  padding: 0.55rem 1rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.download-btn .arrow {
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+
+.download-menu {
+  position: absolute;
+  top: 110%;
+  left: 0;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  display: none;
+  min-width: 180px;
+  z-index: 100;
+}
+
+.download-option {
+  padding: 0.7rem 1rem;
+  width: 100%;
+  background: white;
+  border: none;
+  text-align: left;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.download-option:hover {
+  background: #f3f4f6;
+}
+
+    .date-filter {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.date-filter input {
+  padding: 0.4rem 0.6rem;
+  border: 1.4px solid #d1d5db;
+  border-radius: 8px;
+}
+
+.filter-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: none;
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+}
+
+.reset-btn {
+  background: #6b7280;
+}
+    .expenses-layout {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .page-title {
+      font-size: 1.6rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+    }
+
+    .page-sub {
+      color: #64748b;
+      margin-bottom: 1.5rem;
+    }
+
+    /* Tabs bar */
+    /* ============================= */
+/*     MODERN USER TABS UI      */
+/* ============================= */
+
+.user-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.3rem;
+  justify-content: center;
+  margin: 2rem auto 2.8rem;
+  max-width: 900px;
+}
+
+/* Modern Card Tab */
+.user-tab {
+  min-width: 260px;
+  padding: 1.4rem 1.8rem;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #ffffff, #f4f4f7);
+  border: 2px solid #e5e7eb;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #374151;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+
+  box-shadow: 0 8px 20px rgba(0,0,0,0.05);
+  transition:
+    transform 0.3s cubic-bezier(.25,.8,.25,1),
+    box-shadow 0.3s cubic-bezier(.25,.8,.25,1),
+    border-color 0.25s,
+    background 0.25s,
+    color 0.25s;
+
+  /* Animation entrance */
+  opacity: 0;
+  transform: translateY(20px) scale(.95);
+  animation: userTabPop .45s cubic-bezier(.25,.8,.25,1) forwards;
+}
+
+/* Stagger effect */
+.user-tab:nth-child(2) { animation-delay: .05s; }
+.user-tab:nth-child(3) { animation-delay: .1s; }
+.user-tab:nth-child(4) { animation-delay: .15s; }
+.user-tab:nth-child(5) { animation-delay: .2s; }
+
+@keyframes userTabPop {
+  0%   { opacity:0; transform: translateY(20px) scale(.93); }
+  100% { opacity:1; transform: translateY(0) scale(1); }
+}
+
+/* Hover effect */
+.user-tab:hover {
+  transform: translateY(-8px) scale(1.04);
+  border-color: #6366f1;
+  box-shadow: 0 16px 40px rgba(99,102,241,0.18);
+}
+
+/* Activated tab (selected) */
+.user-tab.active {
+  background: linear-gradient(135deg, #6366f1, #818cf8);
+  color: #ffffff;
+  border-color: #6366f1;
+  box-shadow: 0 20px 50px rgba(99,102,241,0.35);
+  transform: translateY(-6px) scale(1.03);
+}
+
+/* Glow effect inside active card */
+.user-tab.active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top left,
+      rgba(255,255,255,0.25),
+      rgba(255,255,255,0) 70%);
+  opacity: 1;
+}
+
+/* Text inside card */
+.user-total {
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: #4f46e5;
+}
+
+.user-tab.active .user-total {
+  color: #fff;
+}
+
+.user-count {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+    /* Modal (bottom sheet style) */
+
+    .ios-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      backdrop-filter: blur(4px);
+      display: none;
+      justify-content: center;
+      align-items: flex-end;
+      z-index: 99999;
+    }
+
+    .ios-sheet {
+      width: 100%;
+      max-width: 720px;
+      background: #ffffff;
+      border-radius: 22px 22px 0 0;
+      padding: 1.4rem 1.4rem 1.1rem;
+      box-shadow: 0 -6px 30px rgba(0,0,0,0.15);
+
+      transform: translateY(100%);
+      transition: transform 0.35s cubic-bezier(.25,.1,.25,1);
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .ios-drag {
+      width: 45px;
+      height: 5px;
+      background: #ddd;
+      border-radius: 4px;
+      margin: 0 auto 14px;
+    }
+
+    .user-expenses-header {
+      text-align: center;
+      margin-bottom: 0.5rem;
+    }
+
+    .user-expenses-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 0.2rem;
+    }
+
+    .user-expenses-sub {
+      font-size: 0.9rem;
+      color: #6b7280;
+    }
+
+    .user-expenses-total {
+      font-size: 1.3rem;
+      font-weight: 800;
+      margin-top: 0.3rem;
+    }
+
+    #userExpensesList {
+      flex: 1;
+      overflow-y: auto;
+      margin-top: 1rem;
+      padding-right: 4px;
+    }
+
+    #userExpensesList::-webkit-scrollbar {
+      width: 6px;
+    }
+    #userExpensesList::-webkit-scrollbar-thumb {
+      background: #d4d4d4;
+      border-radius: 10px;
+    }
+
+    .expense-item {
+      background: white;
+      border-radius: 18px;
+      padding: 1rem 1rem;
+      margin-bottom: 0.8rem;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.06);
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      border: 1px solid #e5e7eb;
+    }
+
+    .expense-icon {
+      width: 46px;
+      height: 46px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f9fafb;
+      font-size: 1.4rem;
+    }
+
+    .arrow-icon {
+      font-size: 1.6rem;
+      font-weight: 900;
+    }
+
+    .arrow-in {
+      color: #16a34a;
+    }
+    .arrow-out {
+      color: #dc2626;
+    }
+
+    .expense-details {
+      flex: 1;
+    }
+
+    .expense-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 0.1rem;
+    }
+
+    .expense-person {
+      font-size: 0.85rem;
+      color: #6b7280;
+    }
+
+    .expense-amount {
+      margin-left: auto;
+      font-size: 1.05rem;
+      font-weight: 800;
+      text-align: right;
+    }
+
+    .expense-amount span {
+      display: block;
+    }
+
+    .modal-close-btn {
+      margin-top: 0.7rem;
+      width: 100%;
+      padding: 0.9rem;
+      border: none;
+      background: #ef4444;
+      color: white;
+      border-radius: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+  </style>
+</head>
+
+<body>
+<script>
+  (function() {
+    if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+      document.body.classList.add('sidebar-mini');
+    }
+  })();
+</script>
+
+<div class="app-container">
+
+  <!-- Sidebar (انسخ نفس اللي في باقي الصفحات عندك وعدل active لو حابب) -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Dashboard</h2>
+      <button id="sidebar-toggle" class="sidebar-toggle">
+        <i data-feather="chevrons-left"></i>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <ul class="nav-list">
+        <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Schools Requested Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/assigned"><i data-feather="user-check"></i><span class="nav-label">Storage</span></a></li>
+        <li><a class="nav-link" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+        <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+        <li><a class="nav-link" href="/logistics"><i data-feather="truck"></i><span class="nav-label">Logistics</span></a></li>
+        <li><a class="nav-link" href="/funds"><i data-feather="dollar-sign"></i><span class="nav-label">Funds</span></a></li>
+        <li><a class="nav-link" href="/expenses"><i data-feather="credit-card"></i><span class="nav-label">My Expenses</span></a></li>
+        <li><a class="nav-link active" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses by User</span></a></li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button id="logoutBtn" class="logout-btn"><i data-feather="log-out"></i> Logout</button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    <header class="main-header">
+      <div class="header-row1">
+        <div class="left">
+          <div class="greeting-pill">
+            <span class="greeting-avatar"><img src="/images/greeting-icon.png" alt="Hi icon"/></span>
+            <div class="greet-text">
+              <div class="greet-title">Hi, <span data-username="">User</span>!</div>
+              <div class="greet-sub">Review expenses by team member</div>
+            </div>
+          </div>
+        </div>
+        <div class="right topbar-right">
+          <a class="account-mini" href="/account">
+            <span class="ico-circle"><img src="/images/logo.png"/></span>
+            <span class="label">My account</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="header-row2">
+        <h1 class="page-title">Expenses by User</h1>
+      </div>
+    </header>
+
+    <main class="expenses-layout">
+      <div id="userTabs" class="user-tabs">
+        <!-- Tabs will be injected here -->
+      </div>
+
+    <div id="usersInfo" class="users-empty">
+  <div class="loader"></div>
+</div>
+    </main>
+  </div>
+</div>
+
+<!-- Modal: User Expenses Bottom Sheet -->
+<div id="userExpensesModal" class="ios-modal">
+  <div class="ios-sheet" id="userExpensesSheet">
+    <div class="ios-drag"></div>
+
+    <div class="user-expenses-header">
+      <div class="user-expenses-title" id="userExpensesTitle">User Expenses</div>
+      <div class="user-expenses-sub">
+        All expenses for this team member
+      </div>
+      <div class="user-expenses-total" id="userExpensesTotal">Total: £0</div>
+    </div>
+
+    <div class="download-wrapper">
+  <button id="downloadBtn" class="download-btn">
+    Download
+    <span class="arrow">▼</span>
+  </button>
+
+  <div id="downloadMenu" class="download-menu">
+    <button class="download-option" id="downloadPdfBtn">Download as PDF</button>
+    <button class="download-option" id="downloadExcelBtn">Download as Excel</button>
+  </div>
+</div>
+    <!-- SORTING DROPDOWN -->
+<div class="sort-wrapper">
+  <label style="font-weight:600;">Sort:</label>
+  <select id="sortSelect" class="sort-select">
+    <option value="newest">Newest first</option>
+    <option value="oldest">Oldest first</option>
+    <option value="high">Highest amount</option>
+    <option value="low">Lowest amount</option>
+  </select>
+</div>
+    <!-- DATE FILTER -->
+<div class="date-filter">
+  <label>From:</label>
+  <input type="date" id="dateFrom" />
+
+  <label>To:</label>
+  <input type="date" id="dateTo" />
+
+  <button id="applyDateFilterBtn" class="filter-btn">
+    Apply Filter
+  </button>
+
+  <button id="resetDateFilterBtn" class="filter-btn reset-btn">
+    Reset
+  </button>
+</div>
+
+    <div id="userExpensesList">
+      <!-- list items -->
+    </div>
+
+    <button class="modal-close-btn" onclick="closeUserExpensesModal()">
+      Close
+    </button>
+  </div>
+</div>
+
+<script>feather.replace();</script>
+<script src="/js/common-ui.js"></script>
+<script src="/js/expenses-users.js"></script>
+
+</body>
+</html>

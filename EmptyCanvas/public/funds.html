@@ -1,0 +1,183 @@
+
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Funds</title>
+<link href="/css/style.css" rel="stylesheet"/>
+<script src="https://unpkg.com/feather-icons"></script>
+</head>
+<body>
+<script>
+    (function() {
+      try {
+        if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+          document.body.classList.add('sidebar-mini');
+        }
+      } catch(e) {}
+    })();
+  </script>
+<div class="app-container">
+<aside class="sidebar">
+<div class="sidebar-header">
+<h2>Dashboard</h2>
+<button aria-expanded="true" aria-label="Toggle sidebar" class="sidebar-toggle" id="sidebar-toggle">
+<i data-feather="chevrons-left"></i>
+</button>
+</div>
+<!-- Sidebar: flat links -->
+<nav class="sidebar-nav">
+<ul class="nav-list">
+<li>
+<a class="nav-link" href="/orders">
+<i data-feather="list"></i>
+<span class="nav-label">Current Orders</span>
+</a>
+</li>
+<li>
+<a class="nav-link" href="/orders/requested">
+<i data-feather="users"></i>
+<span class="nav-label">Schools Requested Orders</span>
+</a>
+</li>
+<li>
+<a class="nav-link" href="/orders/assigned">
+<i data-feather="user-check"></i>
+<span class="nav-label">Storage</span>
+</a>
+</li>
+<li>
+<a class="nav-link" href="/orders/new">
+<i data-feather="plus-circle"></i>
+<span class="nav-label">Create New Order</span>
+</a>
+</li>
+<li>
+<a class="nav-link" href="/stocktaking">
+<i data-feather="archive"></i>
+<span class="nav-label">Stocktaking</span>
+</a>
+</li>
+<li><a class="nav-link" href="/logistics"><i data-feather="truck"></i><span class="nav-label">Logistics</span></a></li><li>
+<a class="nav-link active" href="/funds">
+<i data-feather="dollar-sign"></i>
+<span class="nav-label">Funds</span>
+</a>
+</li>
+<li>
+  <a class="nav-link" href="/orders/sv-orders">
+    <i data-feather="award"></i>
+    <span class="nav-label">S.V schools orders</span>
+  </a>
+</li>
+    <li>
+  <a class="nav-link" href="/damaged-assets">
+    <i data-feather="alert-triangle"></i>
+    <span class="nav-label">Damaged Assets</span>
+  </a>
+    </li>
+    <li>
+  <a class="nav-link" href="/sv-assets">
+    <i data-feather="layers"></i>
+    <span class="nav-label">S.V Schools Assets</span>
+  </a>
+</li>
+    <li>
+  <a class="nav-link" href="/damaged-assets-reviewed">
+    <i data-feather="check-circle"></i>
+    <span class="nav-label">Reviewed Damaged Assets</span>
+  </a>
+</li>
+    <li>
+  <a class="nav-link" href="/expenses">
+    <i data-feather="dollar-sign"></i>
+    <span class="nav-label">Expenses</span>
+  </a>
+</li>
+</ul>
+</nav>
+<div class="sidebar-footer">
+<button class="logout-btn" id="logoutBtn"><i data-feather="log-out"></i> Logout</button>
+</div>
+</aside>
+<div class="main-content">
+<header class="main-header">
+<div class="header-row1">
+<div class="left">
+<div aria-live="polite" class="greeting-pill">
+<span class="greeting-avatar">
+<img alt="Hi icon" src="/images/greeting-icon.png"/>
+</span>
+<div class="greet-text">
+<div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
+<div class="greet-sub">Start your day with operations</div>
+</div>
+</div>
+<!-- Hidden searchbar to prevent JS errors -->
+<div class="searchbar" id="orders-searchbar" role="search" style="display: none;">
+<i data-feather="search"></i>
+<input aria-label="Search" id="orderSearch" placeholder="Search..." type="search"/>
+</div>
+</div>
+<div class="right topbar-right">
+<a aria-label="My account" class="account-mini" href="/account" title="My account">
+<span class="ico-circle"><img alt="Logo" src="/images/logo.png"/></span>
+<span class="label">My account</span>
+</a>
+</div>
+</div>
+<div class="header-row2">
+<h1 class="page-title">Funds</h1>
+</div>
+</header>
+<main class="container-full-width">
+<section class="card card--elevated">
+<div class="card-header">
+<h2><i data-feather="clipboard"></i> Mission Expenses</h2>
+<p class="card-subtitle">Enter mission details and related expenses</p>
+</div>
+<form class="form-container" id="fundsForm">
+<!-- Mission Assignment -->
+<div class="form-group">
+<label class="form-label" for="assignment">
+<i data-feather="target"></i>
+                Assignment (Mission Name) *
+              </label>
+<input class="form-input" id="assignment" name="assignment" placeholder="Enter the mission name" required="" type="text"/>
+</div>
+<!-- Expenses Section -->
+<div class="expenses-section">
+<div class="section-header">
+<h3><i data-feather="receipt"></i> Expenses</h3>
+<button class="btn btn-outline-pill" id="addExpenseBtn" type="button">
+<i data-feather="plus"></i> Add Expense
+                </button>
+</div>
+<div class="expenses-list" id="expensesList">
+<!-- Dynamic expense entries will be added here -->
+</div>
+</div>
+<!-- Form Actions -->
+<div class="form-actions">
+<button class="submit-btn" id="submitBtn" type="submit">
+<i data-feather="save"></i>
+                Submit Mission Expenses
+              </button>
+<button class="btn btn-secondary" type="reset">
+<i data-feather="x-circle"></i>
+                Clear Form
+              </button>
+</div>
+</form>
+</section>
+</main>
+</div>
+</div>
+<!-- Scripts -->
+<script>feather.replace();</script>
+<script src="/js/common-ui.js"></script>
+<script src="/js/funds.js"></script>
+</body>
+</html>

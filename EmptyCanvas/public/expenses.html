@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Expenses</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+  <script src="https://unpkg.com/feather-icons"></script>
+
+  <style>
+    /* ============================
+   iOS Style Bottom Sheet Modal
+   ============================ */
+
+.ios-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  backdrop-filter: blur(4px);
+  display: none;
+  justify-content: center;
+  align-items: flex-end;
+  z-index: 99999;
+}
+
+/* Sheet box */
+.ios-sheet {
+  width: 100%;
+  max-width: 540px;
+  background: white;
+  border-radius: 22px 22px 0 0;
+  padding: 1.4rem;
+  box-shadow: 0 -6px 30px rgba(0,0,0,0.15);
+
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(.25,.1,.25,1);
+}
+
+/* drag handle */
+.ios-drag {
+  width: 45px;
+  height: 5px;
+  background: #ddd;
+  border-radius: 4px;
+  margin: 0 auto 14px;
+}
+
+/* scroll area */
+#allExpensesList {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Smooth scroll */
+#allExpensesList::-webkit-scrollbar {
+  width: 5px;
+}
+#allExpensesList::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 10px;
+}
+    .expenses-layout {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    /* ===== Expenses Header Above Cards ===== */
+.expenses-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 1rem 0 0.5rem;
+  padding: 0 0.2rem;
+}
+
+.expenses-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+/* View All Chip Style */
+.view-all-chip {
+  background: #f2f2f2;
+  border: none;
+  padding: 0.35rem 0.9rem;
+  border-radius: 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+
+  transition: 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.view-all-chip:hover {
+  background: #e4e4e4;
+}
+    /* ============================================
+   OPTION C — MATERIAL YOU (GOOGLE PIXEL STYLE)
+   ============================================ */
+
+.expense-item {
+  background: #ffffff;
+  border-radius: 22px;
+  padding: 1.4rem 1.25rem;
+  margin-bottom: 1.3rem;
+
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+
+  /* Material-style elevation */
+  box-shadow:
+    0 2px 5px rgba(0,0,0,0.06),
+    0 4px 12px rgba(0,0,0,0.08);
+
+  transition: all 0.25s cubic-bezier(.25,.1,.25,1);
+
+  /* Entrance animation */
+  opacity: 0;
+  transform: translateY(14px);
+  animation: matFade 0.45s ease forwards;
+}
+
+/* Stagger effect */
+.expense-item:nth-child(1){ animation-delay: .05s }
+.expense-item:nth-child(2){ animation-delay: .10s }
+.expense-item:nth-child(3){ animation-delay: .15s }
+.expense-item:nth-child(4){ animation-delay: .20s }
+
+/* Hover = lift */
+.expense-item:hover {
+  transform: translateY(-4px) scale(1.015);
+  box-shadow:
+    0 4px 8px rgba(0,0,0,0.10),
+    0 10px 20px rgba(0,0,0,0.12);
+}
+
+/* Tap Ripple Effect */
+.expense-item:active {
+  transform: scale(0.98);
+}
+
+/* Icon styling */
+.expense-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: linear-gradient(135deg, #e8ecf2, #ffffff);
+  border: 1px solid #e5e7eb;
+  font-size: 1.3rem;
+  color: #475569;
+
+  box-shadow:
+    inset 0 1px 2px rgba(255,255,255,0.7),
+    inset 0 -2px 4px rgba(0,0,0,0.05);
+}
+    /* Arrow icon inside card */
+.arrow-icon {
+  font-size: 1.9rem;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.arrow-in {
+  color: #16a34a; /* green */
+  text-shadow: 0 2px 4px rgba(22, 163, 74, 0.25);
+}
+
+.arrow-out {
+  color: #dc2626; /* red */
+  text-shadow: 0 2px 4px rgba(220, 38, 38, 0.25);
+}
+
+/* Title */
+.expense-title {
+  font-size: 1.12rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 0.25rem;
+}
+
+/* Details */
+.expense-person {
+  font-size: 0.92rem;
+  color: #64748b;
+}
+
+/* Amount */
+.expense-amount {
+  margin-left: auto;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+/* Fade animation */
+@keyframes matFade {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+    /* Total Card */
+    .total-card {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: white;
+      border-radius: 24px;
+      padding: 2rem 1.8rem;
+      text-align: center;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+      margin-bottom: 2rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .total-card::before {
+      content: '';
+      position: absolute;
+      top: -50%; left: -50%;
+      width: 200%; height: 200%;
+      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+      animation: shine 8s infinite;
+    }
+    @keyframes shine {
+      0% { transform: translateX(-100%) translateY(-100%) rotate(30deg); }
+      100% { transform: translateX(100%) translateY(100%) rotate(30deg); }
+    }
+    .total-amount {
+      font-size: 3.2rem;
+      font-weight: 800;
+      margin: 0.5rem 0;
+      letter-spacing: -1px;
+    }
+    .total-label {
+      font-size: 1.1rem;
+      opacity: 0.9;
+      margin-bottom: 0.5rem;
+    }
+    .view-all-btn {
+      background: rgba(255,255,255,0.15);
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+    }
+
+    .expense-buttons {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2rem;
+    }
+
+    .cash-btn {
+      flex: 1;
+      padding: 1rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      border-radius: 16px;
+      border: none;
+      cursor: pointer;
+      color: white;
+      transition: 0.2s;
+    }
+
+    .cash-in { background: linear-gradient(135deg, #22c55e, #16a34a); margin-right: 0.7rem; }
+    .cash-out { background: linear-gradient(135deg, #ef4444, #dc2626); margin-left: 0.7rem; }
+
+    .cash-btn:hover { transform: scale(1.05); }
+
+    /************** MODALS ******************/
+    .ex-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    }
+
+    .ex-modal-box {
+      background: white;
+      padding: 1.8rem;
+      width: 90%;
+      max-width: 420px;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+
+    .ex-modal-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+    }
+
+    .ex-input {
+      width: 100%;
+      padding: 0.8rem;
+      border-radius: 12px;
+      border: 1.5px solid #d1d5db;
+      margin-bottom: 1rem;
+      font-size: 1rem;
+    }
+
+    .ex-modal-actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 1rem;
+    }
+
+    .ex-btn {
+      padding: 0.7rem 1.4rem;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .ex-primary { background: #3b82f6; color: white; }
+    .ex-danger { background: #ef4444; color: white; }
+
+    .section-date {
+      font-size: 0.95rem;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 1.8rem 0 1rem;
+      padding-left: 0.5rem;
+    }
+
+    .expense-item {
+      background: white;
+      border-radius: 20px;
+      padding: 1.3rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.07);
+      border: 1px solid #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      transition: all 0.3s;
+    }
+    .expense-item:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 15px 35px rgba(0,0,0,0.12);
+    }
+
+  </style>
+</head>
+
+<body>
+
+<script>
+  (function() {
+    if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+      document.body.classList.add('sidebar-mini');
+    }
+  })();
+</script>
+
+<div class="app-container">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Dashboard</h2>
+      <button id="sidebar-toggle" class="sidebar-toggle"><i data-feather="chevrons-left"></i></button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <ul class="nav-list">
+        <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Schools Requested Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/assigned"><i data-feather="user-check"></i><span class="nav-label">Storage</span></a></li>
+        <li><a class="nav-link" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+        <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+        <li><a class="nav-link" href="/logistics"><i data-feather="truck"></i><span class="nav-label">Logistics</span></a></li>
+        <li><a class="nav-link" href="/funds"><i data-feather="dollar-sign"></i><span class="nav-label">Funds</span></a></li>
+        <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+        <li><a class="nav-link" href="/damaged-assets"><i data-feather="alert-triangle"></i><span class="nav-label">Damaged Assets</span></a></li>
+        <li><a class="nav-link" href="/sv-assets"><i data-feather="layers"></i><span class="nav-label">S.V Schools Assets</span></a></li>
+        <li><a class="nav-link" href="/damaged-assets-reviewed"><i data-feather="check-circle"></i><span class="nav-label">Reviewed Damaged Assets</span></a></li>
+        <li><a class="nav-link active" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button id="logoutBtn" class="logout-btn"><i data-feather="log-out"></i> Logout</button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <div class="main-content">
+
+    <header class="main-header">
+      <div class="header-row1">
+        <div class="left">
+          <div class="greeting-pill">
+            <span class="greeting-avatar"><img src="/images/greeting-icon.png" alt="Hi icon"/></span>
+            <div class="greet-text">
+              <div class="greet-title">Hi, <span data-username="">Abdullah</span>!</div>
+              <div class="greet-sub">Track your expenses</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="right topbar-right">
+          <a class="account-mini" href="/account">
+            <span class="ico-circle"><img src="/images/logo.png"/></span>
+            <span class="label">My account</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="header-row2">
+        <h1 class="page-title">Expenses</h1>
+      </div>
+    </header>
+
+    <main class="expenses-layout">
+
+      <!-- Total Card -->
+<div class="total-card">
+  <div class="total-label">All Expenses</div>
+  <div class="total-amount" id="totalAmount">£0</div>
+  <div>EGP</div>
+</div>
+
+<!-- Title + View All button -->
+<div class="expenses-header">
+    <span class="expenses-title">All Expenses</span>
+    <button id="viewAllBtn" class="view-all-chip">View All</button>
+</div>
+
+      <!-- Buttons -->
+      <div class="expense-buttons">
+        <button id="cashInBtn" class="cash-btn cash-in">+ CASH IN</button>
+        <button id="cashOutBtn" class="cash-btn cash-out">− CASH OUT</button>
+      </div>
+
+      <!-- Render expenses here -->
+      <div id="expensesContent"></div>
+
+    </main>
+  </div>
+</div>
+
+<!-- CASH IN MODAL -->
+<div id="cashInModal" class="ex-modal">
+  <div class="ex-modal-box">
+
+    <h3 class="ex-modal-title">Add Cash In</h3>
+
+    <label>Date</label>
+    <input id="ci_date" type="date" class="ex-input"/>
+
+    <label>Cash in</label>
+    <input id="ci_cash" type="number" class="ex-input"/>
+
+    <label>Cash in from</label>
+    <input id="ci_from" type="text" class="ex-input"/>
+
+    <div class="ex-modal-actions">
+      <button id="ci_submit" class="ex-btn ex-primary">Submit</button>
+      <button class="ex-btn ex-danger" onclick="closeCashInModal()">Close</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- CASH OUT MODAL -->
+<div id="cashOutModal" class="ex-modal">
+  <div class="ex-modal-box">
+
+    <h3 class="ex-modal-title">Add Cash Out</h3>
+
+    <label>Funds Type</label>
+    <select id="co_type" class="ex-input"></select>
+
+    <label>Reason</label>
+    <input id="co_reason" type="text" class="ex-input"/>
+
+    <label>Date</label>
+    <input id="co_date" type="date" class="ex-input"/>
+
+    <label>From</label>
+    <input id="co_from" type="text" class="ex-input"/>
+
+    <label>To</label>
+    <input id="co_to" type="text" class="ex-input"/>
+
+    <div id="co_km_block" style="display:none;">
+      <label>Kilometer</label>
+      <input id="co_km" type="number" class="ex-input"/>
+    </div>
+
+    <div id="co_cash_block">
+      <label>Cash out</label>
+      <input id="co_cash" type="number" class="ex-input"/>
+    </div>
+
+    <div class="ex-modal-actions">
+      <button id="co_submit" class="ex-btn ex-primary">Submit</button>
+      <button class="ex-btn ex-danger" onclick="closeCashOutModal()">Close</button>
+    </div>
+
+  </div>
+</div>
+  
+
+  <!-- iOS STYLE ALL EXPENSES MODAL -->
+<div id="allExpenses" class="ios-modal">
+  <div class="ios-sheet" id="iosSheet">
+
+    <div class="ios-drag"></div>
+
+    <h3 class="ex-modal-title" style="text-align:center;">All Expenses</h3>
+
+    <div id="allExpensesList"></div>
+
+    <button onclick="closeAllExpensesModal()" 
+            style="margin-top:1rem; width:100%; padding:0.9rem;
+                   border:none; background:#ef4444; color:white;
+                   border-radius:14px; font-weight:700;">
+      Close
+    </button>
+
+  </div>
+</div>
+<script>feather.replace();</script>
+<script src="/js/common-ui.js"></script>
+<script src="/js/expenses.js"></script>
+
+  
+</body>
+</html>
