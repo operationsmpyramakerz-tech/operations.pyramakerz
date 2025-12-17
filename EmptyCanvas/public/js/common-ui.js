@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const logoutBtn     = document.getElementById('logoutBtn');
   const menuToggle    = document.getElementById('menu-toggle');   // قد لا يوجد
   const sidebarToggle = document.getElementById('sidebar-toggle'); // موجود
+  // 🔒 Hide sidebar links by default to prevent flash
+document.body.classList.add('permissions-loading');
 
   const KEY_MINI = 'ui.sidebarMini';       // 1 = mini على الديسكتوب
   const CACHE_ALLOWED = 'allowedPages';     // sessionStorage key
@@ -128,6 +130,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (Array.isArray(data.allowedPages)) {
         cacheAllowedPages(data.allowedPages);
         applyAllowedPages(data.allowedPages); // يُظهر/يخفي بشكل حتمي
+        // ✅ Permissions loaded, allow sidebar to appear
+document.body.classList.remove('permissions-loading');
       }
     } catch {}
   }
