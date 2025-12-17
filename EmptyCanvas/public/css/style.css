@@ -3097,3 +3097,7 @@ body.sidebar-mini .container-full-width { padding-left: 24px !important; }
 body.permissions-loading .sidebar li {
   display: none !important;
 }
+/* 🔒 Global: hide sidebar until permissions are resolved */
+.sidebar {
+  visibility: hidden;
+}
