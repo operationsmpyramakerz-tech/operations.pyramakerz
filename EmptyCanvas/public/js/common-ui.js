@@ -33,6 +33,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ===== Assets =====
   'damaged assets':            'a[href="/damaged-assets"]'
+'s.v schools assets':        'a[href="/assets/sv-schools"]',
+'reviewed damaged assets':   'a[href="/damaged-assets/reviewed"]'
 };
   const toKey = (s) => String(s || '').trim().toLowerCase();
 
