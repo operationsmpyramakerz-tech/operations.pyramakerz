@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ===== Expenses =====
   'my expenses':               'a[href="/expenses"]',
-  'expenses by user':          'a[href="/expenses/users"]',
+  'expenses by user': 'a[href^="/expenses/users"]',
 
   // ===== Finance =====
   'funds':                     'a[href="/funds"]',
