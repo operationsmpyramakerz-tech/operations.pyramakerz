@@ -56,15 +56,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ✅ أظهر المسموح فقط
-  Object.values(PAGE_SELECTORS).forEach(selector => {
+  Object.entries(PAGE_SELECTORS).forEach(([key, selector]) => {
   const link = document.querySelector(selector);
   if (!link) return;
 
-const href = toKey(link.getAttribute('href'));
   const li = link.closest('li') || link;
 
-  // لو الـ href موجود في allowedPages
-  if (set.has(href)) {
+  if (set.has(key)) {
     showEl(li);
   }
 });
