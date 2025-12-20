@@ -11,30 +11,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ====== Access control (show/hide links) ======
   // مفاتيح lowercase للمقارنة الثابتة
- const PAGE_SELECTORS = {
-  // ===== Orders =====
+const PAGE_SELECTORS = {
+  // ===== Orders (backend names) =====
   'current orders': 'a[href="/orders"]',
   'create new order': 'a[href="/orders/new"]',
   'stocktaking': 'a[href="/stocktaking"]',
   'requested orders': 'a[href="/orders/requested"]',
+  'schools requested orders': 'a[href="/orders/requested"]',
   'assigned schools requested orders': 'a[href="/orders/assigned"]',
   's.v schools orders': 'a[href="/orders/sv-orders"]',
 
   // ===== Logistics =====
   'logistics': 'a[href="/logistics"]',
 
-  // ===== Expenses =====
- // ===== Expenses =====
-'my expenses':        'a[href="/expenses"]',
-'expenses by user':  'a[href^="/expenses/users"]',
-
   // ===== Finance =====
   'funds': 'a[href="/funds"]',
 
+  // ===== Expenses (backend uses: Expenses / Expenses Users) =====
+  'expenses': 'a[href="/expenses"]',
+  'my expenses': 'a[href="/expenses"]',                 // alias
+  'expenses users': 'a[href^="/expenses/users"]',
+  'expenses by user': 'a[href^="/expenses/users"]',     // alias
+  'expenses by users': 'a[href^="/expenses/users"]',    // alias
+
   // ===== Assets =====
   'damaged assets': 'a[href="/damaged-assets"]',
+  'damaged assets reviewed': 'a[href="/damaged-assets-reviewed"]',
+  'reviewed damaged assets': 'a[href="/damaged-assets-reviewed"]', // alias
   's.v schools assets': 'a[href="/sv-assets"]',
-  'reviewed damaged assets': 'a[href="/damaged-assets-reviewed"]'
 };
   const toKey = (s) => String(s || '').trim().toLowerCase();
 
@@ -42,13 +46,30 @@ document.addEventListener('DOMContentLoaded', () => {
   function showEl(el){ if (el){ el.style.display = ''; el.removeAttribute('aria-hidden'); } }
 
   // أظهر المسموح وأخفِ غير المسموح (حتمي)
-  function applyAllowedPages(allowed){
+
+  function cacheAllowedPages(arr){ try { sessionStorage.setItem(CACHE_ALLOWED, JSON.stringify(arr || [])); } catch {} }
+  functionxpenses/users"]',    // alias
+
+  // ===== Assets =====
+  'damaged assets': 'a[href="/damaged-assets"]',
+  'damaged assets reviewed': 'a[href="/damaged-assets-reviewed"]',
+  'reviewed damaged assets': 'a[href="/damaged-assets-reviewed"]', // alias
+  's.v schools assets': 'a[href="/sv-assets"]',
+};
+  const toKey = (s) => String(s || '').trim().toLowerCase();
+
+  function hideEl(el){ if (el){ el.style.display = 'none'; el.setAttribute('aria-hidden','true'); } }
+  function showEl(el){ if (el){ el.style.display = ''; el.removeAttribute('aria-hidden'); } }
+
+  // أظهر المسموح وأخفِ غير المسموح (حتمي)
+ function applyAllowedPages(allowed) {
   if (!Array.isArray(allowed)) return;
 
-  const set = new Set(allowed.map(toKey));
+  // allowedPages ممكن تكون أسماء (Expenses Users) أو مسارات (/expenses/users)
+  const allowedSet = new Set(allowed.map(toKey));
 
   // 🔒 Default deny: اخفي كل اللينكات الأول
-  Object.values(PAGE_SELECTORS).forEach(selector => {
+  Object.values(PAGE_SELECTORS).forEach((selector) => {
     const link = document.querySelector(selector);
     if (!link) return;
     const li = link.closest('li') || link;
@@ -56,17 +77,20 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ✅ أظهر المسموح فقط
- Object.values(PAGE_SELECTORS).forEach(selector => {
-  const link = document.querySelector(selector);
-  if (!link) return;
+  Object.entries(PAGE_SELECTORS).forEach(([key, selector]) => {
+    const link = document.querySelector(selector);
+    if (!link) return;
 
-  const href = link.getAttribute('href');
-  const li = link.closest('li') || link;
+    const li = link.closest('li') || link;
 
-  if (set.has(href)) {
-    showEl(li);
-  }
-});
+    // href كـ path للمقارنة (lowercase)
+    const href = toKey(link.getAttribute('href') || '');
+
+    // السماح لو الاسم (key) موجود أو المسار (href) موجود داخل allowedPages
+    if (allowedSet.has(key) || (href && allowedSet.has(href))) {
+      showEl(li);
+    }
+  });
 }
   function cacheAllowedPages(arr){ try { sessionStorage.setItem(CACHE_ALLOWED, JSON.stringify(arr || [])); } catch {} }
   function getCachedAllowedPages(){
@@ -81,24 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-username]').forEach(el => el.textContent = n || 'User');
   };
 
-  // ★ Inject the S.V link once so it exists for show/hide
-  function ensureSVOrdersLink() {
-    const nav = document.querySelector('.sidebar .nav-list, .sidebar nav ul, .sidebar ul');
-    if (!nav) return;
-    if (nav.querySelector('a[href="/orders/sv-orders"]')) return; // already inserted
-
-    const li = document.createElement('li');
-    const a  = document.createElement('a');
-    a.className = 'nav-link';
-    a.href = '/orders/sv-orders';// hidden until allowed
-    a.innerHTML = `<i data-feather="award"></i><span class="nav-label">S.V schools orders</span>`;
-    li.appendChild(a);
-    nav.appendChild(li);
-    if (window.feather) feather.replace();
-  }
-
-  // ★ NEW: Inject Damaged Assets link مرة واحدة بنفس أسلوب S.V
-  function ensureDamagedAssetsLink() {
+  // ★ InjnsureDamagedAssetsLink() {
     const nav = document.querySelector('.sidebar .nav-list, .sidebar nav ul, .sidebar ul');
     if (!nav) return;
     if (nav.querySelector('a[href="/damaged-assets"]')) return; // already inserted
