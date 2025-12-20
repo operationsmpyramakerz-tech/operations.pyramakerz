@@ -228,6 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // لو عندك لينكات بتتعمل inject في صفحات معينة:
   ensureLink({ href: '/orders/sv-orders', label: 'S.V schools orders', icon: 'award' });
   ensureLink({ href: '/damaged-assets', label: 'Damaged Assets', icon: 'alert-octagon' });
+  ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
 
   ensureGreetingAndPages();
 
