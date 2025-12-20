@@ -56,13 +56,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ✅ أظهر المسموح فقط
-  Object.entries(PAGE_SELECTORS).forEach(([key, selector]) => {
+ Object.values(PAGE_SELECTORS).forEach(selector => {
   const link = document.querySelector(selector);
   if (!link) return;
 
+  const href = link.getAttribute('href');
   const li = link.closest('li') || link;
 
-  if (set.has(key)) {
+  if (set.has(href)) {
     showEl(li);
   }
 });
