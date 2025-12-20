@@ -129,56 +129,7 @@
 </main>
 </div>
 </div>
-<script>feather.replace();</script>
-<script src="/js/common-ui.js"></script>
-<script src="/js/script.js"></script>
-<script src="/js/account.js"></script>
-    <script>
-(() => {
-  const GROUP_KEY = 'ui.sidebar.nrr.open';
-  const group = document.querySelector('.nav-group[data-group="nrr"]');
-  if (!group) return;
 
-  const toggle = group.querySelector('.nav-group-toggle');
-  const sub    = group.querySelector('.nav-sub');
-
-  function setOpen(open) {
-    group.classList.toggle('is-open', open);
-    toggle.setAttribute('aria-expanded', String(open));
-    // animate height
-    if (sub) sub.style.maxHeight = open ? sub.scrollHeight + 'px' : '0px';
-    try { localStorage.setItem(GROUP_KEY, open ? '1' : '0'); } catch {}
-  }
-
-  // open if saved OR if current page is the NRR page
-  const saved = (() => { try { return localStorage.getItem(GROUP_KEY) === '1'; } catch { return false; }})();
-  const onNRR = location.pathname.endsWith('/new-report-request.html');
-  setOpen(saved || onNRR);
-
-  toggle.addEventListener('click', (e) => {
-    e.preventDefault();
-    setOpen(!group.classList.contains('is-open'));
-  });
-
-  // highlight active sub item by ?view=
-  const params = new URLSearchParams(location.search);
-  const view = params.get('view') || 'request';
-  group.querySelectorAll('.nav-sublink').forEach(a => {
-    const isActive = a.getAttribute('href')?.endsWith('view=' + view);
-    a.classList.toggle('active', !!isActive);
-  });
-
-  // keep feather icons updated
-  if (window.feather) feather.replace();
-
-  // keep height correct if fonts load / window resizes
-  window.addEventListener('resize', () => {
-    if (group.classList.contains('is-open')) {
-      sub.style.maxHeight = sub.scrollHeight + 'px';
-    }
-  });
-})();
-</script>
     </body>
 
 </html>
