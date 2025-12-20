@@ -171,6 +171,13 @@ async function submitCashOut() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
+        // Screenshot (optional)
+const screenshotEl = document.getElementById("co_screenshot");
+const screenshotFile = screenshotEl && screenshotEl.files ? screenshotEl.files[0] : null;
+if (screenshotFile) {
+  body.screenshotName = screenshotFile.name || `screenshot-${Date.now()}.png`;
+  body.screenshotDataUrl = await fileToDataURL(screenshotFile);
+}
 
         const data = await res.json();
         if (data.success) {
@@ -179,6 +186,8 @@ async function submitCashOut() {
         } else {
             alert("Error: " + (data.error || "Unknown error"));
         }
+        const ss = document.getElementById("co_screenshot");
+if (ss) ss.value = "";
     } catch (err) {
         console.error("Cash-out submit error:", err);
         alert("Failed to submit cash out.");
@@ -313,6 +322,16 @@ if (viewAllBtn) {
         });
     }
 });
+
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve(null);
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('File read failed'));
+    reader.readAsDataURL(file);
+  });
+}
 
 // OPEN iOS Bottom Sheet
 function openAllExpensesModal() {
