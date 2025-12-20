@@ -128,13 +128,19 @@ document.addEventListener('DOMContentLoaded', () => {
         renderGreeting('User');
       }
 
-      if (Array.isArray(data.allowedPages)) {
-        cacheAllowedPages(data.allowedPages);
-        applyAllowedPages(data.allowedPages); // يُظهر/يخفي بشكل حتمي
-        // ✅ Permissions resolved → show sidebar
-const sidebar = document.querySelector('.sidebar');
-if (sidebar) sidebar.style.visibility = 'visible';
-      }
+    if (Array.isArray(data.allowedPages)) {
+  cacheAllowedPages(data.allowedPages);
+
+  // 🔒 تأكيد إخفاء كل اللينكات
+  applyAllowedPages([]);
+
+  // ✅ إظهار المسموح فقط
+  applyAllowedPages(data.allowedPages);
+
+  // 👁️ إظهار الـ sidebar بعد اكتمال الصلاحيات
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) sidebar.style.visibility = 'visible';
+}
     } catch {}
   }
 
