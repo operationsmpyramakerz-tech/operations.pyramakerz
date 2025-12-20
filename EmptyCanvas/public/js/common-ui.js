@@ -11,30 +11,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ====== Access control (show/hide links) ======
   // مفاتيح lowercase للمقارنة الثابتة
-  const PAGE_SELECTORS = {
+ const PAGE_SELECTORS = {
   // ===== Orders =====
-  'current orders':            'a[href="/orders"]',
-  'create new order':          'a[href="/orders/new"]',
-  'stocktaking':               'a[href="/stocktaking"]',
-  'requested orders':          'a[href="/orders/requested"]',
-  'schools requested orders':  'a[href="/orders/requested"]',
+  'current orders': 'a[href="/orders"]',
+  'create new order': 'a[href="/orders/new"]',
+  'stocktaking': 'a[href="/stocktaking"]',
+  'requested orders': 'a[href="/orders/requested"]',
   'assigned schools requested orders': 'a[href="/orders/assigned"]',
-  's.v schools orders':        'a[href="/orders/sv-orders"]',
+  's.v schools orders': 'a[href="/orders/sv-orders"]',
 
   // ===== Logistics =====
-  'logistics':                 'a[href="/logistics"]',
+  'logistics': 'a[href="/logistics"]',
 
   // ===== Expenses =====
-  '/expenses':        'a[href="/expenses"]',
-'/expenses/users':  'a[href^="/expenses/users"]',9
+  'my expenses': 'a[href="/expenses"]',
+  'expenses by user': 'a[href^="/expenses/users"]',
 
   // ===== Finance =====
-  'funds':                     'a[href="/funds"]',
+  'funds': 'a[href="/funds"]',
 
-// ===== Assets =====
-'damaged assets':            'a[href="/damaged-assets"]',
-'s.v schools assets':        'a[href="/sv-assets"]',
-'reviewed damaged assets':   'a[href="/damaged-assets-reviewed"]'
+  // ===== Assets =====
+  'damaged assets': 'a[href="/damaged-assets"]',
+  's.v schools assets': 'a[href="/sv-assets"]',
+  'reviewed damaged assets': 'a[href="/damaged-assets-reviewed"]'
 };
   const toKey = (s) => String(s || '').trim().toLowerCase();
 
