@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const link = document.querySelector(selector);
   if (!link) return;
 
-  const href = link.getAttribute('href');
+const href = toKey(link.getAttribute('href'));
   const li = link.closest('li') || link;
 
   // لو الـ href موجود في allowedPages
