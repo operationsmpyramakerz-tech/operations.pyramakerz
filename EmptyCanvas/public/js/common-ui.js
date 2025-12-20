@@ -56,14 +56,18 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ✅ أظهر المسموح فقط
-  Object.entries(PAGE_SELECTORS).forEach(([key, selector]) => {
-    const link = document.querySelector(selector);
-    if (!link) return;
-    const li = link.closest('li') || link;
-   if (set.has(key)) {
-  showEl(li);
-}
-  });
+  Object.values(PAGE_SELECTORS).forEach(selector => {
+  const link = document.querySelector(selector);
+  if (!link) return;
+
+  const href = link.getAttribute('href');
+  const li = link.closest('li') || link;
+
+  // لو الـ href موجود في allowedPages
+  if (set.has(href)) {
+    showEl(li);
+  }
+});
 }
   function cacheAllowedPages(arr){ try { sessionStorage.setItem(CACHE_ALLOWED, JSON.stringify(arr || [])); } catch {} }
   function getCachedAllowedPages(){
