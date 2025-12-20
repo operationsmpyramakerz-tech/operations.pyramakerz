@@ -25,8 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
   'logistics':                 'a[href="/logistics"]',
 
   // ===== Expenses =====
-  'my expenses':               'a[href="/expenses"]',
-'/expenses/users': 'a[href^="/expenses/users"]',
+  '/expenses':        'a[href="/expenses"]',
+'/expenses/users':  'a[href^="/expenses/users"]',9
 
   // ===== Finance =====
   'funds':                     'a[href="/funds"]',
@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const link = document.querySelector(selector);
     if (!link) return;
     const li = link.closest('li') || link;
-    if (set.has(key) || set.has(key.replace('/', ''))) {
+   if (set.has(key)) {
   showEl(li);
 }
   });
