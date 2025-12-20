@@ -13,27 +13,28 @@ document.addEventListener('DOMContentLoaded', () => {
   // مفاتيح lowercase للمقارنة الثابتة
  const PAGE_SELECTORS = {
   // ===== Orders =====
-  'current_orders': '[data-page="current_orders"]',
-  'create_new_order': '[data-page="create_new_order"]',
-  'stocktaking': '[data-page="stocktaking"]',
-  'requested_orders': '[data-page="requested_orders"]',
-  'assigned_schools_requested_orders': '[data-page="assigned_schools_requested_orders"]',
-  'sv_schools_orders': '[data-page="sv_schools_orders"]',
+  'current orders': 'a[href="/orders"]',
+  'create new order': 'a[href="/orders/new"]',
+  'stocktaking': 'a[href="/stocktaking"]',
+  'requested orders': 'a[href="/orders/requested"]',
+  'assigned schools requested orders': 'a[href="/orders/assigned"]',
+  's.v schools orders': 'a[href="/orders/sv-orders"]',
 
   // ===== Logistics =====
-  'logistics': '[data-page="logistics"]',
+  'logistics': 'a[href="/logistics"]',
 
   // ===== Expenses =====
-  'my_expenses': '[data-page="my_expenses"]',
-  'expenses_by_user': '[data-page="expenses_by_user"]',
+ // ===== Expenses =====
+'my expenses':        'a[href="/expenses"]',
+'expenses by user':  'a[href^="/expenses/users"]',
 
   // ===== Finance =====
-  'funds': '[data-page="funds"]',
+  'funds': 'a[href="/funds"]',
 
   // ===== Assets =====
-  'damaged_assets': '[data-page="damaged_assets"]',
-  'sv_schools_assets': '[data-page="sv_schools_assets"]',
-  'reviewed_damaged_assets': '[data-page="reviewed_damaged_assets"]'
+  'damaged assets': 'a[href="/damaged-assets"]',
+  's.v schools assets': 'a[href="/sv-assets"]',
+  'reviewed damaged assets': 'a[href="/damaged-assets-reviewed"]'
 };
   const toKey = (s) => String(s || '').trim().toLowerCase();
 
@@ -59,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const link = document.querySelector(selector);
     if (!link) return;
     const li = link.closest('li') || link;
-   if (set.has(key) || set.has(key.replace(/_/g, ' '))) {
+   if (set.has(key)) {
   showEl(li);
 }
   });
