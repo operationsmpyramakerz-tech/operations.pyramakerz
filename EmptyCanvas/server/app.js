@@ -2369,7 +2369,7 @@ app.get("/api/expenses/types", async (req, res) => {
 });
 
 app.post("/api/expenses/cash-out", async (req, res) => {
-  const { fundsType, reason, date, from, to, amount, kilometer } = req.body;
+  const { fundsType, reason, date, from, to, amount, kilometer, screenshotDataUrl, screenshotName } = req.body;
 
   try {
     const teamMemberPageId = await getCurrentUserRelationPage(req);
@@ -2417,7 +2417,12 @@ app.post("/api/expenses/cash-out", async (req, res) => {
         number: Number(kilometer) || 0
       };
     }
-
+// Optional Screenshot (Notion property: "Screenshot" - Files & media)
+if (screenshotDataUrl) {
+  const filename = (screenshotName && String(screenshotName).trim()) || `screenshot-${Date.now()}.png`;
+  const url = await uploadToBlobFromBase64(screenshotDataUrl, filename);
+  props["Screenshot"] = { files: [makeExternalFile(filename, url)] };
+}
     await notion.pages.create({
       parent: { database_id: process.env.Expenses_Database },
       properties: props
