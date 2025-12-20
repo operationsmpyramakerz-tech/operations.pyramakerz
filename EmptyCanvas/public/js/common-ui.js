@@ -1,101 +1,106 @@
 // public/js/common-ui.js
 document.addEventListener('DOMContentLoaded', () => {
   const logoutBtn     = document.getElementById('logoutBtn');
-  const menuToggle    = document.getElementById('menu-toggle');   // قد لا يوجد
-  const sidebarToggle = document.getElementById('sidebar-toggle'); // موجود
+  const menuToggle    = document.getElementById('menu-toggle');     // قد لا يوجد
+  const sidebarToggle = document.getElementById('sidebar-toggle');  // موجود
 
-
-  const KEY_MINI = 'ui.sidebarMini';       // 1 = mini على الديسكتوب
-  const CACHE_ALLOWED = 'allowedPages';     // sessionStorage key
+  const KEY_MINI       = 'ui.sidebarMini';   // 1 = mini على الديسكتوب
+  const CACHE_ALLOWED  = 'allowedPages';     // sessionStorage key
   const isMobile = () => window.innerWidth <= 768;
 
   // ====== Access control (show/hide links) ======
   // مفاتيح lowercase للمقارنة الثابتة
-const PAGE_SELECTORS = {
-  // ===== Orders (backend names) =====
-  'current orders': 'a[href="/orders"]',
-  'create new order': 'a[href="/orders/new"]',
-  'stocktaking': 'a[href="/stocktaking"]',
-  'requested orders': 'a[href="/orders/requested"]',
-  'schools requested orders': 'a[href="/orders/requested"]',
-  'assigned schools requested orders': 'a[href="/orders/assigned"]',
-  's.v schools orders': 'a[href="/orders/sv-orders"]',
+  const PAGE_SELECTORS = {
+    // ===== Orders =====
+    'current orders': 'a[href="/orders"]',
+    'create new order': 'a[href="/orders/new"]',
+    'stocktaking': 'a[href="/stocktaking"]',
 
-  // ===== Logistics =====
-  'logistics': 'a[href="/logistics"]',
+    'requested orders': 'a[href="/orders/requested"]',
+    'schools requested orders': 'a[href="/orders/requested"]',
 
-  // ===== Finance =====
-  'funds': 'a[href="/funds"]',
+    'assigned schools requested orders': 'a[href="/orders/assigned"]',
+    'storage': 'a[href="/orders/assigned"]',
 
-  // ===== Expenses (backend uses: Expenses / Expenses Users) =====
-  'expenses': 'a[href="/expenses"]',
-  'my expenses': 'a[href="/expenses"]',                 // alias
-  'expenses users': 'a[href^="/expenses/users"]',
-  'expenses by user': 'a[href^="/expenses/users"]',     // alias
-  'expenses by users': 'a[href^="/expenses/users"]',    // alias
+    's.v schools orders': 'a[href="/orders/sv-orders"]',
 
-  // ===== Assets =====
-  'damaged assets': 'a[href="/damaged-assets"]',
-  'damaged assets reviewed': 'a[href="/damaged-assets-reviewed"]',
-  'reviewed damaged assets': 'a[href="/damaged-assets-reviewed"]', // alias
-  's.v schools assets': 'a[href="/sv-assets"]',
-};
+    // ===== Logistics =====
+    'logistics': 'a[href="/logistics"]',
+
+    // ===== Expenses =====
+    'my expenses': 'a[href="/expenses"]',
+    'expenses': 'a[href="/expenses"]',
+
+    'expenses users': 'a[href^="/expenses/users"]',
+    'expenses by user': 'a[href^="/expenses/users"]',
+
+    // ===== Finance =====
+    'funds': 'a[href="/funds"]',
+
+    // ===== Assets =====
+    'damaged assets': 'a[href="/damaged-assets"]',
+    's.v schools assets': 'a[href="/sv-assets"]',
+    'damaged assets reviewed': 'a[href="/damaged-assets-reviewed"]',
+    'reviewed damaged assets': 'a[href="/damaged-assets-reviewed"]'
+  };
+
   const toKey = (s) => String(s || '').trim().toLowerCase();
+  const normPath = (s) => toKey(s).replace(/\/+$/, ''); // يشيل / في الآخر لو موجود
 
   function hideEl(el){ if (el){ el.style.display = 'none'; el.setAttribute('aria-hidden','true'); } }
   function showEl(el){ if (el){ el.style.display = ''; el.removeAttribute('aria-hidden'); } }
 
   // أظهر المسموح وأخفِ غير المسموح (حتمي)
+  function applyAllowedPages(allowed){
+    if (!Array.isArray(allowed)) return;
 
-  function cacheAllowedPages(arr){ try { sessionStorage.setItem(CACHE_ALLOWED, JSON.stringify(arr || [])); } catch {} }
-  functionxpenses/users"]',    // alias
+    // allowedPages ممكن تيجي:
+    // 1) أسماء صفحات: "Expenses Users"
+    // 2) مسارات: "/expenses/users" أو "expenses/users"
+    const allowedSet = new Set();
+    allowed.forEach(v => {
+      const k = toKey(v);
+      const p = normPath(v);
+      allowedSet.add(k);
+      allowedSet.add(p);
+      if (p && !p.startsWith('/')) allowedSet.add('/' + p);
+      if (p && p.startsWith('/')) allowedSet.add(p.slice(1));
+    });
 
-  // ===== Assets =====
-  'damaged assets': 'a[href="/damaged-assets"]',
-  'damaged assets reviewed': 'a[href="/damaged-assets-reviewed"]',
-  'reviewed damaged assets': 'a[href="/damaged-assets-reviewed"]', // alias
-  's.v schools assets': 'a[href="/sv-assets"]',
-};
-  const toKey = (s) => String(s || '').trim().toLowerCase();
+    // 🔒 Default deny: اخفي كل اللينكات الأول
+    Object.values(PAGE_SELECTORS).forEach(selector => {
+      const link = document.querySelector(selector);
+      if (!link) return;
+      hideEl(link.closest('li') || link);
+    });
 
-  function hideEl(el){ if (el){ el.style.display = 'none'; el.setAttribute('aria-hidden','true'); } }
-  function showEl(el){ if (el){ el.style.display = ''; el.removeAttribute('aria-hidden'); } }
+    // ✅ أظهر المسموح فقط
+    Object.entries(PAGE_SELECTORS).forEach(([key, selector]) => {
+      const link = document.querySelector(selector);
+      if (!link) return;
 
-  // أظهر المسموح وأخفِ غير المسموح (حتمي)
- function applyAllowedPages(allowed) {
-  if (!Array.isArray(allowed)) return;
+      const li = link.closest('li') || link;
+      const href = link.getAttribute('href') || '';
+      const hrefKey = normPath(href); // "/expenses/users"
 
-  // allowedPages ممكن تكون أسماء (Expenses Users) أو مسارات (/expenses/users)
-  const allowedSet = new Set(allowed.map(toKey));
+      // matching على:
+      // - اسم الصفحة (key)
+      // - أو href path (مع normalize)
+      if (allowedSet.has(key) || allowedSet.has(hrefKey)) {
+        showEl(li);
+      }
+    });
+  }
 
-  // 🔒 Default deny: اخفي كل اللينكات الأول
-  Object.values(PAGE_SELECTORS).forEach((selector) => {
-    const link = document.querySelector(selector);
-    if (!link) return;
-    const li = link.closest('li') || link;
-    hideEl(li);
-  });
-
-  // ✅ أظهر المسموح فقط
-  Object.entries(PAGE_SELECTORS).forEach(([key, selector]) => {
-    const link = document.querySelector(selector);
-    if (!link) return;
-
-    const li = link.closest('li') || link;
-
-    // href كـ path للمقارنة (lowercase)
-    const href = toKey(link.getAttribute('href') || '');
-
-    // السماح لو الاسم (key) موجود أو المسار (href) موجود داخل allowedPages
-    if (allowedSet.has(key) || (href && allowedSet.has(href))) {
-      showEl(li);
-    }
-  });
-}
-  function cacheAllowedPages(arr){ try { sessionStorage.setItem(CACHE_ALLOWED, JSON.stringify(arr || [])); } catch {} }
+  function cacheAllowedPages(arr){
+    try { sessionStorage.setItem(CACHE_ALLOWED, JSON.stringify(arr || [])); } catch {}
+  }
   function getCachedAllowedPages(){
-    try { const r = sessionStorage.getItem(CACHE_ALLOWED); const a = JSON.parse(r); return Array.isArray(a) ? a : null; }
-    catch { return null; }
+    try {
+      const r = sessionStorage.getItem(CACHE_ALLOWED);
+      const a = JSON.parse(r);
+      return Array.isArray(a) ? a : null;
+    } catch { return null; }
   }
 
   // ====== Greeting ======
@@ -105,23 +110,21 @@ const PAGE_SELECTORS = {
     document.querySelectorAll('[data-username]').forEach(el => el.textContent = n || 'User');
   };
 
-  // ★ InjnsureDamagedAssetsLink() {
+  // ★ Inject links once so they exist for show/hide (لو مش موجودين في الـ HTML)
+  function ensureLink({ href, label, icon }) {
     const nav = document.querySelector('.sidebar .nav-list, .sidebar nav ul, .sidebar ul');
     if (!nav) return;
-    if (nav.querySelector('a[href="/damaged-assets"]')) return; // already inserted
+    if (nav.querySelector(`a[href="${href}"]`)) return;
 
     const li = document.createElement('li');
     const a  = document.createElement('a');
     a.className = 'nav-link';
-    a.href = '/damaged-assets'; // هتتخبي/تظهر حسب Allowed pages
-    a.innerHTML = '<i data-feather="alert-octagon"></i><span class="nav-label">Damaged Assets</span>';
+    a.href = href;
+    a.innerHTML = `<i data-feather="${icon}"></i><span class="nav-label">${label}</span>`;
     li.appendChild(a);
     nav.appendChild(li);
-    if (window.feather && typeof feather.replace === 'function') feather.replace();
+    if (window.feather) feather.replace();
   }
-
-  // لا نطبق الكاش القديم قبل جلب /api/account لتجنّب الإخفاء الخاطئ
-  // const early = getCachedAllowedPages(); if (early) applyAllowedPages(early);
 
   async function ensureGreetingAndPages(){
     const cached = getCachedName();
@@ -140,19 +143,17 @@ const PAGE_SELECTORS = {
         renderGreeting('User');
       }
 
-    if (Array.isArray(data.allowedPages)) {
-  cacheAllowedPages(data.allowedPages);
+      if (Array.isArray(data.allowedPages)) {
+        cacheAllowedPages(data.allowedPages);
 
-  // 🔒 تأكيد إخفاء كل اللينكات
-  applyAllowedPages([]);
+        // 🔒 اخفي الكل ثم أظهر المسموح
+        applyAllowedPages([]);
+        applyAllowedPages(data.allowedPages);
 
-  // ✅ إظهار المسموح فقط
-  applyAllowedPages(data.allowedPages);
-
-  // 👁️ إظهار الـ sidebar بعد اكتمال الصلاحيات
-  const sidebar = document.querySelector('.sidebar');
-  if (sidebar) sidebar.style.visibility = 'visible';
-}
+        // 👁️ إظهار الـ sidebar بعد اكتمال الصلاحيات
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar) sidebar.style.visibility = 'visible';
+      }
     } catch {}
   }
 
@@ -223,9 +224,11 @@ const PAGE_SELECTORS = {
 
   // Init
   applyInitial();
-  ensureSVOrdersLink();
-  ensureDamagedAssetsLink();  // ★ NEW: لازم قبل ensureGreetingAndPages()
-  // ★ ensure link exists before we apply allowed pages
+
+  // لو عندك لينكات بتتعمل inject في صفحات معينة:
+  ensureLink({ href: '/orders/sv-orders', label: 'S.V schools orders', icon: 'award' });
+  ensureLink({ href: '/damaged-assets', label: 'Damaged Assets', icon: 'alert-octagon' });
+
   ensureGreetingAndPages();
 
   window.addEventListener('user:updated', () => {
