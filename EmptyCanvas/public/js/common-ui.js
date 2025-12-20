@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ===== Expenses =====
   'my expenses':               'a[href="/expenses"]',
-  'expenses by user': 'a[href^="/expenses/users"]',
+'/expenses/users': 'a[href^="/expenses/users"]',
 
   // ===== Finance =====
   'funds':                     'a[href="/funds"]',
@@ -60,7 +60,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const link = document.querySelector(selector);
     if (!link) return;
     const li = link.closest('li') || link;
-    if (set.has(key)) showEl(li);
+    if (set.has(key) || set.has(key.replace('/', ''))) {
+  showEl(li);
+}
   });
 }
   function cacheAllowedPages(arr){ try { sessionStorage.setItem(CACHE_ALLOWED, JSON.stringify(arr || [])); } catch {} }
