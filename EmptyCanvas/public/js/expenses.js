@@ -139,85 +139,66 @@ async function submitCashIn() {
 /* =============================
    SUBMIT CASH OUT
    ============================= */
-async function submitCashOut() {
-    const typeEl   = document.getElementById("co_type");
-    const reasonEl = document.getElementById("co_reason");
-    const dateEl   = document.getElementById("co_date");
-    const fromEl   = document.getElementById("co_from");
-    const toEl     = document.getElementById("co_to");
 
-    const type   = typeEl   ? typeEl.value   : "";
-    const reason = reasonEl ? reasonEl.value : "";
-    const date   = dateEl   ? dateEl.value   : "";
-    const from   = fromEl   ? fromEl.value   : "";
-    const to     = toEl     ? toEl.value     : "";
+async function submitCashOut() {
+  try {
+    const type   = document.getElementById("co_type")?.value || "";
+    const reason = document.getElementById("co_reason")?.value || "";
+    const date   = document.getElementById("co_date")?.value || "";
+    const from   = document.getElementById("co_from")?.value || "";
+    const to     = document.getElementById("co_to")?.value || "";
 
     if (!type || !reason || !date) {
-        alert("Please fill required fields.");
-        return;
+      alert("Please fill required fields.");
+      return;
     }
 
     const body = {
-        fundsType: type,
-        reason,
-        date,
-        from,
-        to,
+      fundsType: type,
+      reason,
+      date,
+      from,
+      to,
     };
 
-      // ✅ Screenshot (MUST be before fetch)
-  const fileInput = document.getElementById("co_screenshot");
-  const file = fileInput?.files?.[0];
-
-  if (file) {
-    body.screenshotName = file.name;
-    body.screenshotDataUrl = await fileToDataURL(file);
-  }
-
-  const res = await fetch("/api/expenses/cash-out", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-    // Own car logic
+    // Own car vs Cash logic
     if (type === "Own car") {
-        const kmEl = document.getElementById("co_km");
-        body.kilometer = kmEl ? (kmEl.value || 0) : 0;
+      body.kilometer = Number(document.getElementById("co_km")?.value || 0);
     } else {
-        const cashEl = document.getElementById("co_cash");
-        body.amount = cashEl ? (cashEl.value || 0) : 0;
+      body.amount = Number(document.getElementById("co_cash")?.value || 0);
     }
 
-    try {
-        const res = await fetch("/api/expenses/cash-out", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
-        // Screenshot (optional)
-const screenshotEl = document.getElementById("co_screenshot");
-const screenshotFile = screenshotEl && screenshotEl.files ? screenshotEl.files[0] : null;
-if (screenshotFile) {
-  body.screenshotName = screenshotFile.name || `screenshot-${Date.now()}.png`;
-  body.screenshotDataUrl = await fileToDataURL(screenshotFile);
-}
-
-        const data = await res.json();
-        if (data.success) {
-            closeCashOutModal();
-            await loadExpenses();
-        } else {
-            alert("Error: " + (data.error || "Unknown error"));
-        }
-        const ss = document.getElementById("co_screenshot");
-if (ss) ss.value = "";
-    } catch (err) {
-        console.error("Cash-out submit error:", err);
-        alert("Failed to submit cash out.");
+    // Screenshot
+    const fileInput = document.getElementById("co_screenshot");
+    const file = fileInput?.files?.[0];
+    if (file) {
+      body.screenshotName = file.name;
+      body.screenshotDataUrl = await fileToDataURL(file);
     }
-}
 
+    const res = await fetch("/api/expenses/cash-out", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      alert("Error: " + (data.error || "Unknown error"));
+      return;
+    }
+
+    closeCashOutModal();
+    await loadExpenses();
+
+    if (fileInput) fileInput.value = "";
+
+  } catch (err) {
+    console.error("Cash-out submit error:", err);
+    alert("Failed to submit cash out.");
+  }
+}
 /* =============================
    LOAD EXPENSES FROM SERVER
    ============================= */
