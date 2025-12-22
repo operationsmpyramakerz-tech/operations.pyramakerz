@@ -227,6 +227,85 @@ async function getOrdersDBProps() {
   return db.properties || {};
 }
 
+// Expenses DB props helper
+async function getExpensesDBProps() {
+  const dbId = expensesDatabaseId || process.env.Expenses_Database;
+  if (!dbId) return {};
+  try {
+    const db = await notion.databases.retrieve({ database_id: dbId });
+    return db.properties || {};
+  } catch (err) {
+    console.error("Expenses DB props retrieve error:", err?.body || err);
+    return {};
+  }
+}
+
+function firstTitlePropName(propsObj = {}) {
+  for (const [k, v] of Object.entries(propsObj || {})) {
+    if (v && v.type === "title") return k;
+  }
+  return null;
+}
+
+function looksLikeNotionId(val) {
+  const s = String(val || "").trim();
+  if (!s) return false;
+  const noHyphen = s.replace(/-/g, "");
+  return /^[0-9a-fA-F]{32}$/.test(noHyphen);
+}
+
+function toHyphenatedUUID(val) {
+  const s = String(val || "").trim().replace(/-/g, "");
+  if (!/^[0-9a-fA-F]{32}$/.test(s)) return String(val || "").trim();
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
+}
+
+async function findOrCreatePageByTitle(databaseId, titleText) {
+  const name = String(titleText || "").trim();
+  if (!databaseId || !name) return null;
+
+  // Detect title property name dynamically
+  const db = await notion.databases.retrieve({ database_id: databaseId });
+  const titleProp = firstTitlePropName(db.properties || {});
+  if (!titleProp) {
+    throw new Error(`No title property found in related database ${databaseId}`);
+  }
+
+  // Try to find existing page by title
+  const q = await notion.databases.query({
+    database_id: databaseId,
+    page_size: 1,
+    filter: {
+      property: titleProp,
+      title: { equals: name },
+    },
+  });
+  if (q.results && q.results.length) return q.results[0].id;
+
+  // Otherwise create it
+  const created = await notion.pages.create({
+    parent: { database_id: databaseId },
+    properties: {
+      [titleProp]: {
+        title: [{ text: { content: name } }],
+      },
+    },
+  });
+  return created?.id || null;
+}
+
+async function pageTitleById(pageId) {
+  if (!pageId) return "";
+  try {
+    const p = await notion.pages.retrieve({ page_id: pageId });
+    const props = p.properties || {};
+    const titleProp = firstTitlePropName(props) || "Name";
+    return props?.[titleProp]?.title?.[0]?.plain_text || "";
+  } catch {
+    return "";
+  }
+}
+
 function pickPropName(propsObj, aliases = []) {
   const keys = Object.keys(propsObj || {});
   for (const k of keys) {
@@ -2451,31 +2530,80 @@ app.post("/api/expenses/cash-in", async (req, res) => {
   try {
     const teamMemberPageId = await getCurrentUserRelationPage(req);
 
+    if (!date || amount === undefined || amount === null || amount === "") {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+      });
+    }
+
+    const amountNum = Number(amount);
+    if (!Number.isFinite(amountNum)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid amount",
+      });
+    }
+
+    // Detect property type for "Cash in from" (some Notion schemas use relation)
+    const expProps = await getExpensesDBProps();
+    const cashInFromKey =
+      pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
+      "Cash in from";
+    const cashInFromProp = expProps?.[cashInFromKey];
+
+    let cashInFromValue = null;
+    const fromVal = String(cashInFrom || "").trim();
+
+    if (cashInFromProp?.type === "relation") {
+      // Notion expects: { relation: [{ id: "..." }] }
+      const relDbId = cashInFromProp?.relation?.database_id;
+
+      if (fromVal) {
+        let relPageId = null;
+
+        try {
+          if (looksLikeNotionId(fromVal)) {
+            relPageId = toHyphenatedUUID(fromVal);
+          } else if (relDbId) {
+            relPageId = await findOrCreatePageByTitle(relDbId, fromVal);
+          }
+        } catch (e) {
+          // If integration doesn't have permission on the related DB, don't fail the whole request
+          console.warn("Cash in from relation resolve failed:", e?.body || e);
+          relPageId = null;
+        }
+
+        cashInFromValue = { relation: relPageId ? [{ id: relPageId }] : [] };
+      } else {
+        cashInFromValue = { relation: [] };
+      }
+    } else if (cashInFromProp?.type === "rich_text") {
+      // Old schema uses rich_text
+      cashInFromValue = {
+        rich_text: [{ type: "text", text: { content: fromVal } }],
+      };
+    }
+
+    const propsToCreate = {
+      "Team Member": {
+        relation: teamMemberPageId ? [{ id: teamMemberPageId }] : [],
+      },
+      "Date": {
+        date: { start: date },
+      },
+      "Cash in": {
+        number: amountNum,
+      },
+    };
+
+    if (cashInFromValue) {
+      propsToCreate[cashInFromKey] = cashInFromValue;
+    }
+
     await notion.pages.create({
       parent: { database_id: process.env.Expenses_Database },
-      properties: {
-        "Team Member": {
-          type: "relation",
-          relation: teamMemberPageId ? [{ id: teamMemberPageId }] : []
-        },
-        "Date": {
-          type: "date",
-          date: { start: date }
-        },
-        "Cash in": {
-          type: "number",
-          number: parseFloat(amount)
-        },
-        "Cash in from": {
-          type: "rich_text",
-          rich_text: [
-            {
-              type: "text",
-              text: { content: cashInFrom || "" }
-            }
-          ]
-        }
-      }
+      properties: propsToCreate,
     });
 
     res.json({ success: true, message: "Cash in recorded" });
@@ -2512,19 +2640,62 @@ app.get("/api/expenses", async (req, res) => {
       sorts: [{ property: "Date", direction: "descending" }]
     });
 
-    // Format results
-    const formatted = list.results.map(page => ({
-      id: page.id,
-      date: page.properties["Date"]?.date?.start || null,
-      reason: page.properties["Reason"]?.rich_text?.[0]?.plain_text || "",
-      fundsType: page.properties["Funds Type"]?.select?.name || "",
-      from: page.properties["From"]?.rich_text?.[0]?.plain_text || "",
-      to: page.properties["To"]?.rich_text?.[0]?.plain_text || "",
-      kilometer: page.properties["Kilometer"]?.number || 0,
-      cashIn: page.properties["Cash in"]?.number || 0,
-      cashOut: page.properties["Cash out"]?.number || 0,
-      cashInFrom: page.properties["Cash in from"]?.rich_text?.[0]?.plain_text || ""
-    }));
+    // Format results (support Reason as title OR rich_text)
+    const expProps = await getExpensesDBProps();
+    const cashInFromKey =
+      pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
+      "Cash in from";
+
+    // If Cash in from is a relation in Notion, resolve related page titles once.
+    const cashInFromTitleMap = new Map();
+    const cashInFromIds = new Set();
+
+    for (const page of list.results) {
+      const p = page.properties?.[cashInFromKey];
+      if (p?.type === "relation") {
+        (p.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
+      }
+    }
+
+    for (const id of cashInFromIds) {
+      const t = await pageTitleById(id);
+      cashInFromTitleMap.set(id, t);
+    }
+
+    const formatted = list.results.map((page) => {
+      const props = page.properties || {};
+
+      const reasonProp = props["Reason"]; // property name in Notion DB
+      const reason =
+        reasonProp?.title?.[0]?.plain_text ||
+        reasonProp?.rich_text?.[0]?.plain_text ||
+        "";
+
+      // Cash in from can be rich_text OR relation
+      const cashInFromProp = props?.[cashInFromKey];
+      let cashInFrom = "";
+      if (cashInFromProp?.type === "rich_text") {
+        cashInFrom = cashInFromProp?.rich_text?.[0]?.plain_text || "";
+      } else if (cashInFromProp?.type === "relation") {
+        const names = (cashInFromProp?.relation || [])
+          .map((r) => cashInFromTitleMap.get(r.id) || "")
+          .filter(Boolean);
+        cashInFrom = names.join(", ");
+      }
+
+      return {
+        id: page.id,
+        date: props["Date"]?.date?.start || null,
+        reason,
+        fundsType: props["Funds Type"]?.select?.name || "",
+        from: props["From"]?.rich_text?.[0]?.plain_text || "",
+        to: props["To"]?.rich_text?.[0]?.plain_text || "",
+        kilometer: props["Kilometer"]?.number || 0,
+        cashIn: props["Cash in"]?.number || 0,
+        cashOut: props["Cash out"]?.number || 0,
+        cashInFrom,
+      };
+    });
 
     res.json({ success: true, items: formatted });
 
