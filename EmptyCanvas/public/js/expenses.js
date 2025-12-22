@@ -364,9 +364,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (cashInBtn)  cashInBtn.addEventListener("click", openCashInModal);
     if (cashOutBtn) cashOutBtn.addEventListener("click", openCashOutModal);
     const viewAllBtn = document.getElementById("viewAllBtn");
-if (viewAllBtn) {
-    viewAllBtn.addEventListener("click", openAllExpensesModal);
-}
+    if (viewAllBtn) {
+        // IMPORTANT:
+        // We have an "outside click" handler for the bottom sheet.
+        // Without stopping propagation, the same click that opens the sheet
+        // will bubble up and immediately close it.
+        viewAllBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openAllExpensesModal();
+        });
+    }
 
     // زرار الـ Submit جوه مودال الكاش إن
     const ciSubmit = document.getElementById("ci_submit");
@@ -384,6 +392,20 @@ if (viewAllBtn) {
             e.preventDefault();
             submitCashOut();
         });
+    }
+
+    // Bottom sheet: close ONLY when user clicks the overlay background.
+    // This prevents the "open then instantly close" issue on mobile,
+    // and avoids relying on a global document click handler.
+    const allExpensesModal = document.getElementById("allExpenses");
+    const iosSheet = document.getElementById("iosSheet");
+    if (allExpensesModal && iosSheet) {
+        allExpensesModal.addEventListener("click", (e) => {
+            if (e.target === allExpensesModal) closeAllExpensesModal();
+        });
+
+        // Stop bubbling from inside the sheet so clicking content won't close it.
+        iosSheet.addEventListener("click", (e) => e.stopPropagation());
     }
 });
 
@@ -486,14 +508,4 @@ function closeAllExpensesModal() {
     }, 300);
 }
 
-// Close when clicking outside
-document.addEventListener("click", (e) => {
-    const modal = document.getElementById("allExpenses");   // <-- كان allExpensesModal
-    const sheet = document.getElementById("iosSheet");
-
-    if (!modal || !sheet) return;
-
-    if (modal.style.display === "flex" && !sheet.contains(e.target)) {
-        closeAllExpensesModal();
-    }
-});
+// (outside click is handled via the overlay listener above)
