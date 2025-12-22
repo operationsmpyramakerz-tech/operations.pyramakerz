@@ -198,6 +198,41 @@
   color: #64748b;
 }
 
+    /* ============================
+       Form field label icons
+       ============================ */
+    .field-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 700;
+      color: #111;
+      margin-top: 0.6rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .field-label svg {
+      width: 16px;
+      height: 16px;
+      color: #111;
+      stroke: currentColor;
+    }
+
+    /* Receipt thumbnail inside expense cards */
+    .expense-screenshot-thumb {
+      width: 84px;
+      height: 84px;
+      border-radius: 14px;
+      object-fit: cover;
+      border: 1px solid #e5e7eb;
+      margin-top: 0.55rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .expense-screenshot-link {
+      display: inline-block;
+    }
+
 /* Amount */
 .expense-amount {
   margin-left: auto;
@@ -471,14 +506,14 @@
 
     <h3 class="ex-modal-title">Add Cash In</h3>
 
-    <label>Date</label>
+    <label class="field-label"><i data-feather="calendar"></i> Date</label>
     <input id="ci_date" type="date" class="ex-input"/>
 
-    <label>Cash in</label>
+    <label class="field-label"><i data-feather="plus-circle"></i> Cash in</label>
     <input id="ci_cash" type="number" class="ex-input"/>
 
-    <label>Cash in from</label>
-    <input id="ci_from" type="text" class="ex-input"/>
+    <label class="field-label"><i data-feather="user"></i> Cash in from</label>
+    <select id="ci_from" class="ex-input"></select>
 
     <div class="ex-modal-actions">
       <button id="ci_submit" class="ex-btn ex-primary">Submit</button>
@@ -494,35 +529,35 @@
 
     <h3 class="ex-modal-title">Add Cash Out</h3>
 
-    <label>Funds Type</label>
+    <label class="field-label"><i data-feather="tag"></i> Funds Type</label>
     <select id="co_type" class="ex-input"></select>
 
-    <label>Reason</label>
+    <label class="field-label"><i data-feather="edit-3"></i> Reason</label>
     <input id="co_reason" type="text" class="ex-input"/>
 
-    <label>Date</label>
+    <label class="field-label"><i data-feather="calendar"></i> Date</label>
     <input id="co_date" type="date" class="ex-input"/>
 
-    <label>From</label>
+    <label class="field-label"><i data-feather="log-out"></i> From</label>
     <input id="co_from" type="text" class="ex-input"/>
 
-    <label>To</label>
+    <label class="field-label"><i data-feather="log-in"></i> To</label>
     <input id="co_to" type="text" class="ex-input"/>
 
     <div id="co_km_block" style="display:none;">
-      <label>Kilometer</label>
+      <label class="field-label"><i data-feather="navigation"></i> Kilometer</label>
       <input id="co_km" type="number" class="ex-input"/>
     </div>
 
     <div id="co_cash_block">
       <!-- Screenshot (receipt) -->
 <div class="form-group">
-  <label for="co_screenshot">Screenshot</label>
+  <label for="co_screenshot" class="field-label"><i data-feather="image"></i> Screenshot</label>
   <input id="co_screenshot" type="file" accept="image/*" />
   <small class="help">Upload a receipt screenshot (JPG/PNG).</small>
 </div>
       
-      <label>Cash out</label>
+      <label class="field-label"><i data-feather="minus-circle"></i> Cash out</label>
       <input id="co_cash" type="number" class="ex-input"/>
     </div>
 
