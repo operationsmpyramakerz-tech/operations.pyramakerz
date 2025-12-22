@@ -90,6 +90,15 @@ function closeCashOutModal() {
     if (modal) modal.style.display = "none";
 }
 
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);     // data:*/*;base64,...
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
 /* =============================
    SUBMIT CASH IN
    ============================= */
@@ -155,6 +164,21 @@ async function submitCashOut() {
         from,
         to,
     };
+
+      // ✅ Screenshot (MUST be before fetch)
+  const fileInput = document.getElementById("co_screenshot");
+  const file = fileInput?.files?.[0];
+
+  if (file) {
+    body.screenshotName = file.name;
+    body.screenshotDataUrl = await fileToDataURL(file);
+  }
+
+  const res = await fetch("/api/expenses/cash-out", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 
     // Own car logic
     if (type === "Own car") {
