@@ -2447,6 +2447,67 @@ app.get("/api/expenses/types", async (req, res) => {
   }
 });
 
+// Cash In From Options (Relation)
+// The Notion property "Cash in from" in the Expenses DB is a Relation.
+// This endpoint returns dropdown options (id + name) from the related database.
+app.get(
+  "/api/expenses/cash-in-from/options",
+  requireAuth,
+  requirePage("Expenses"),
+  async (req, res) => {
+    try {
+      const expProps = await getExpensesDBProps();
+      const cashInFromKey =
+        pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
+        "Cash in from";
+
+      const cashInFromProp = expProps?.[cashInFromKey];
+      if (!cashInFromProp || cashInFromProp.type !== "relation") {
+        return res.json({ success: true, options: [] });
+      }
+
+      const relDbId = cashInFromProp?.relation?.database_id;
+      if (!relDbId) {
+        return res.json({ success: true, options: [] });
+      }
+
+      // Detect title property in the related DB
+      const relDb = await notion.databases.retrieve({ database_id: relDbId });
+      const titleProp = firstTitlePropName(relDb.properties || {});
+
+      const options = [];
+      let hasMore = true;
+      let cursor = undefined;
+
+      while (hasMore) {
+        const q = await notion.databases.query({
+          database_id: relDbId,
+          start_cursor: cursor,
+          page_size: 100,
+          ...(titleProp
+            ? { sorts: [{ property: titleProp, direction: "ascending" }] }
+            : {}),
+        });
+
+        for (const p of q.results || []) {
+          const name =
+            (titleProp && p.properties?.[titleProp]?.title?.[0]?.plain_text) ||
+            "Unnamed";
+          options.push({ id: p.id, name });
+        }
+
+        hasMore = q.has_more;
+        cursor = q.next_cursor;
+      }
+
+      res.json({ success: true, options });
+    } catch (err) {
+      console.error("Cash in from options error:", err?.body || err);
+      res.json({ success: false, options: [], error: "Cannot load options" });
+    }
+  },
+);
+
 app.post("/api/expenses/cash-out", async (req, res) => {
   const { fundsType, reason, date, from, to, amount, kilometer, screenshotDataUrl, screenshotName } = req.body;
 
@@ -2683,6 +2744,19 @@ app.get("/api/expenses", async (req, res) => {
         cashInFrom = names.join(", ");
       }
 
+      // Optional screenshot (Notion property: "Screenshot" - files)
+      let screenshotUrl = "";
+      let screenshotName = "";
+      const screenshotProp = props?.["Screenshot"];
+      if (screenshotProp?.type === "files") {
+        const f = (screenshotProp.files || [])[0];
+        if (f) {
+          screenshotName = f.name || "";
+          if (f.type === "external") screenshotUrl = f.external?.url || "";
+          if (f.type === "file") screenshotUrl = f.file?.url || "";
+        }
+      }
+
       return {
         id: page.id,
         date: props["Date"]?.date?.start || null,
@@ -2694,6 +2768,8 @@ app.get("/api/expenses", async (req, res) => {
         cashIn: props["Cash in"]?.number || 0,
         cashOut: props["Cash out"]?.number || 0,
         cashInFrom,
+        screenshotUrl,
+        screenshotName,
       };
     });
 
