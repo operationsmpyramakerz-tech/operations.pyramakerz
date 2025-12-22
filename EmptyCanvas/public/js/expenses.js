@@ -4,6 +4,17 @@
 
 let FUNDS_TYPES = [];
 
+let CASH_IN_FROM_OPTIONS = [];
+
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /* =============================
    LOAD FUNDS TYPES FROM SERVER
    ============================= */
@@ -38,6 +49,32 @@ async function loadFundsTypes() {
             }
         });
     }
+}
+
+/* =============================
+   LOAD CASH-IN-FROM OPTIONS (RELATION)
+   ============================= */
+async function loadCashInFromOptions() {
+  const sel = document.getElementById("ci_from");
+  if (!sel) return;
+
+  // Reset
+  sel.innerHTML = `<option value="">Select user...</option>`;
+  CASH_IN_FROM_OPTIONS = [];
+
+  try {
+    const res = await fetch("/api/expenses/cash-in-from/options");
+    const data = await res.json();
+    if (data && data.success && Array.isArray(data.options)) {
+      CASH_IN_FROM_OPTIONS = data.options;
+      data.options.forEach((o) => {
+        if (!o || !o.id) return;
+        sel.innerHTML += `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name || "Unnamed")}</option>`;
+      });
+    }
+  } catch (err) {
+    console.error("Cash-in-from options load error:", err);
+  }
 }
 
 /* =============================
@@ -109,7 +146,9 @@ async function submitCashIn() {
 
     const date = dateInput ? dateInput.value : "";
     const amount = amountInput ? amountInput.value : "";
-    const cashInFrom = fromInput ? fromInput.value : "";
+    // Cash in from is a Notion Relation → we send the related page id
+    // "Cash in from" is a Relation dropdown (value = Notion page id)
+    const cashInFrom = fromInput ? String(fromInput.value || "").trim() : "";
 
     if (!date || !amount) {
         alert("Please fill required fields.");
@@ -266,15 +305,34 @@ async function loadExpenses() {
                     ? `<span class="arrow-icon arrow-in">↙</span>`
                     : `<span class="arrow-icon arrow-out">↗</span>`;
 
+                const title = isIn ? "Cash In" : (it.fundsType || "Cash Out");
+                const dateLine = it.date ? `<div class="expense-person"><strong>Date:</strong> ${escapeHtml(it.date)}</div>` : "";
+
+                const line1 = isIn
+                  ? `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
+                  : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it.reason || "")}</div>`;
+
+                const line2 = (!isIn && (it.from || it.to))
+                  ? `<div class="expense-person">${escapeHtml(it.from || "")} → ${escapeHtml(it.to || "")}</div>`
+                  : "";
+
+                const screenshotHtml = (!isIn && it.screenshotUrl)
+                  ? `<a class="expense-screenshot-link" href="${escapeHtml(it.screenshotUrl)}" target="_blank" rel="noopener noreferrer">
+                        <img class="expense-screenshot-thumb" src="${escapeHtml(it.screenshotUrl)}" alt="Receipt screenshot" />
+                      </a>`
+                  : "";
+
                 html += `
                 <div class="expense-item">
 
                     <div class="expense-icon">${arrow}</div>
 
                     <div class="expense-details">
-                        <div class="expense-title">${it.fundsType || ""}</div>
-                        <div class="expense-person"><strong>Reason:</strong> ${it.reason || ""}</div>
-                        <div class="expense-person">${it.from || ""} → ${it.to || ""}</div>
+                        <div class="expense-title">${escapeHtml(title)}</div>
+                        ${dateLine}
+                        ${line1}
+                        ${line2}
+                        ${screenshotHtml}
                     </div>
 
                     <div class="expense-amount">
@@ -298,6 +356,7 @@ async function loadExpenses() {
    ============================= */
 document.addEventListener("DOMContentLoaded", async () => {
     await loadFundsTypes();
+    await loadCashInFromOptions();
     await loadExpenses();
 
     const cashInBtn  = document.getElementById("cashInBtn");
@@ -377,13 +436,29 @@ function openAllExpensesModal() {
                     ? `<span class="arrow-icon arrow-in">↙</span>`
                     : `<span class="arrow-icon arrow-out">↗</span>`;
 
+                const title = isIn ? "Cash In" : (it.fundsType || "Cash Out");
+                const dateLine = it.date ? `<div class="expense-person"><strong>Date:</strong> ${escapeHtml(it.date)}</div>` : "";
+                const line1 = isIn
+                  ? `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
+                  : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it.reason || "")}</div>`;
+                const line2 = (!isIn && (it.from || it.to))
+                  ? `<div class="expense-person">${escapeHtml(it.from || "")} → ${escapeHtml(it.to || "")}</div>`
+                  : "";
+                const screenshotHtml = (!isIn && it.screenshotUrl)
+                  ? `<a class="expense-screenshot-link" href="${escapeHtml(it.screenshotUrl)}" target="_blank" rel="noopener noreferrer">
+                        <img class="expense-screenshot-thumb" src="${escapeHtml(it.screenshotUrl)}" alt="Receipt screenshot" />
+                      </a>`
+                  : "";
+
                 list.innerHTML += `
                     <div class="expense-item" style="margin:0 0 1rem 0;">
                         <div class="expense-icon">${arrow}</div>
                         <div class="expense-details">
-                            <div class="expense-title">${it.fundsType || ""}</div>
-                            <div class="expense-person"><strong>Reason:</strong> ${it.reason || ""}</div>
-                            <div class="expense-person">${it.from || ""} → ${it.to || ""}</div>
+                            <div class="expense-title">${escapeHtml(title)}</div>
+                            ${dateLine}
+                            ${line1}
+                            ${line2}
+                            ${screenshotHtml}
                         </div>
                         <div class="expense-amount">
                             ${it.cashIn ? `+£${it.cashIn}` : `-£${it.cashOut || 0}`}
@@ -419,6 +494,6 @@ document.addEventListener("click", (e) => {
     if (!modal || !sheet) return;
 
     if (modal.style.display === "flex" && !sheet.contains(e.target)) {
-        closeAllExpenses();
+        closeAllExpensesModal();
     }
 });
