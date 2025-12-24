@@ -6,6 +6,10 @@
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Account Info</title>
 <link href="/css/style.css" rel="stylesheet"/>
+<style>
+  /* 🔒 Critical: prevent sidebar links flash before permissions load */
+  body.permissions-loading .sidebar li { display: none !important; }
+</style>
 <script src="https://unpkg.com/feather-icons"></script>
 </head>
 <body class="permissions-loading">
@@ -19,7 +23,7 @@
     })();
   </script>
 <div class="app-container">
-<aside class="sidebar" style="visibility:hidden">
+<aside class="sidebar">
 <div class="sidebar-header">
 <h2>Dashboard</h2>
 <button aria-expanded="true" aria-label="Toggle sidebar" class="sidebar-toggle" id="sidebar-toggle">
