@@ -1,5 +1,10 @@
 // public/js/common-ui.js
 document.addEventListener('DOMContentLoaded', () => {
+  // 🔒 مهم: نخفي روابط السايدبار من البداية لتجنب "فلاش" كل الصفحات
+  // لازم الـ body يبقى عليه الكلاس ده قبل ما الصلاحيات تتطبق.
+  // هنضيفه هنا كـ safety (وكمان هنضيفه في الـ HTML body كـ default).
+  document.body.classList.add('permissions-loading');
+
   const logoutBtn     = document.getElementById('logoutBtn');
   const menuToggle    = document.getElementById('menu-toggle');     // قد لا يوجد
   const sidebarToggle = document.getElementById('sidebar-toggle');  // موجود
@@ -150,9 +155,9 @@ document.addEventListener('DOMContentLoaded', () => {
         applyAllowedPages([]);
         applyAllowedPages(data.allowedPages);
 
-        // 👁️ إظهار الـ sidebar بعد اكتمال الصلاحيات
-        const sidebar = document.querySelector('.sidebar');
-        if (sidebar) sidebar.style.visibility = 'visible';
+        // ✅ بعد ما طبقنا الصلاحيات، نكشف اللي مسموح بس (بدون فلاش)
+        document.body.classList.remove('permissions-loading');
+        document.body.classList.add('permissions-ready');
       }
     } catch {}
   }
