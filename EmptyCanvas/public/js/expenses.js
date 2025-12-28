@@ -6,6 +6,33 @@ let FUNDS_TYPES = [];
 
 let CASH_IN_FROM_OPTIONS = [];
 
+function renderCashInFromSelect(filterText = "") {
+  const sel = document.getElementById("ci_from");
+  if (!sel) return;
+
+  const current = String(sel.value || "");
+  const q = String(filterText || "").trim().toLowerCase();
+
+  sel.innerHTML = `<option value="">Select user...</option>`;
+
+  const filtered = CASH_IN_FROM_OPTIONS.filter((o) => {
+    if (!o) return false;
+    if (!q) return true;
+    return String(o.name || "").toLowerCase().includes(q);
+  });
+
+  filtered.forEach((o) => {
+    if (!o || !o.id) return;
+    sel.innerHTML += `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name || "Unnamed")}</option>`;
+  });
+
+  // try to keep selection if still present after filtering
+  if (current) {
+    const exists = filtered.some((o) => String(o.id) === current);
+    if (exists) sel.value = current;
+  }
+}
+
 function escapeHtml(str) {
   return String(str ?? "")
     .replace(/&/g, "&amp;")
@@ -58,23 +85,27 @@ async function loadCashInFromOptions() {
   const sel = document.getElementById("ci_from");
   if (!sel) return;
 
-  // Reset
-  sel.innerHTML = `<option value="">Select user...</option>`;
   CASH_IN_FROM_OPTIONS = [];
+  renderCashInFromSelect(document.getElementById("ci_from_search")?.value || "");
 
   try {
     const res = await fetch("/api/expenses/cash-in-from/options");
     const data = await res.json();
     if (data && data.success && Array.isArray(data.options)) {
       CASH_IN_FROM_OPTIONS = data.options;
-      data.options.forEach((o) => {
-        if (!o || !o.id) return;
-        sel.innerHTML += `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name || "Unnamed")}</option>`;
-      });
+      renderCashInFromSelect(document.getElementById("ci_from_search")?.value || "");
     }
   } catch (err) {
     console.error("Cash-in-from options load error:", err);
   }
+}
+
+function setupCashInFromSearch() {
+  const search = document.getElementById("ci_from_search");
+  if (!search) return;
+  search.addEventListener("input", () => {
+    renderCashInFromSelect(search.value);
+  });
 }
 
 /* =============================
@@ -84,9 +115,12 @@ function openCashInModal() {
     const d = document.getElementById("ci_date");
     const c = document.getElementById("ci_cash");
     const f = document.getElementById("ci_from");
+    const s = document.getElementById("ci_from_search");
     if (d) d.value = "";
     if (c) c.value = "";
     if (f) f.value = "";
+    if (s) s.value = "";
+    renderCashInFromSelect("");
     const modal = document.getElementById("cashInModal");
     if (modal) modal.style.display = "flex";
 }
@@ -120,6 +154,12 @@ function openCashOutModal() {
 
     const modal = document.getElementById("cashOutModal");
     if (modal) modal.style.display = "flex";
+
+    // Reset screenshot upload UI
+    const fileInput = document.getElementById("co_screenshot");
+    const fileName  = document.getElementById("co_screenshot_name");
+    if (fileInput) fileInput.value = "";
+    if (fileName) fileName.textContent = "No file chosen";
 }
 
 function closeCashOutModal() {
@@ -232,10 +272,83 @@ async function submitCashOut() {
     await loadExpenses();
 
     if (fileInput) fileInput.value = "";
+    const fileName = document.getElementById("co_screenshot_name");
+    if (fileName) fileName.textContent = "No file chosen";
 
   } catch (err) {
     console.error("Cash-out submit error:", err);
     alert("Failed to submit cash out.");
+  }
+}
+
+/* =============================
+   MODERN UPLOAD UI
+   ============================= */
+function setupScreenshotUploadUI() {
+  const input = document.getElementById("co_screenshot");
+  const btn = document.getElementById("co_screenshot_btn");
+  const nameEl = document.getElementById("co_screenshot_name");
+  if (!input || !btn || !nameEl) return;
+
+  btn.addEventListener("click", () => input.click());
+
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    nameEl.textContent = file ? file.name : "No file chosen";
+  });
+}
+
+/* =============================
+   SETTLE ACCOUNT
+   ============================= */
+function openSettleModal() {
+  const receipt = document.getElementById("settle_receipt");
+  if (receipt) receipt.value = "";
+  const modal = document.getElementById("settleModal");
+  if (modal) modal.style.display = "flex";
+}
+
+function closeSettleModal() {
+  const modal = document.getElementById("settleModal");
+  if (modal) modal.style.display = "none";
+}
+
+async function submitSettleAccount() {
+  const receiptInput = document.getElementById("settle_receipt");
+  const receiptNumber = String(receiptInput?.value || "").trim();
+
+  if (!receiptNumber) {
+    alert("Please enter receipt number.");
+    return;
+  }
+
+  const btn = document.getElementById("settle_submit");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+  }
+
+  try {
+    const res = await fetch("/api/expenses/settle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ receiptNumber }),
+    });
+    const data = await res.json();
+    if (!data?.success) {
+      alert("Error: " + (data?.error || "Unknown error"));
+      return;
+    }
+    closeSettleModal();
+    await loadExpenses();
+  } catch (err) {
+    console.error("Settle account error:", err);
+    alert("Failed to settle account.");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Submit";
+    }
   }
 }
 /* =============================
@@ -359,6 +472,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadCashInFromOptions();
     await loadExpenses();
 
+    setupCashInFromSearch();
+    setupScreenshotUploadUI();
+
     const cashInBtn  = document.getElementById("cashInBtn");
     const cashOutBtn = document.getElementById("cashOutBtn");
     if (cashInBtn)  cashInBtn.addEventListener("click", openCashInModal);
@@ -406,6 +522,23 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         // Stop bubbling from inside the sheet so clicking content won't close it.
         iosSheet.addEventListener("click", (e) => e.stopPropagation());
+    }
+
+    // Settled my account
+    const settleBtn = document.getElementById("settleAccountBtn");
+    if (settleBtn) {
+      settleBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        openSettleModal();
+      });
+    }
+
+    const settleSubmit = document.getElementById("settle_submit");
+    if (settleSubmit) {
+      settleSubmit.addEventListener("click", (e) => {
+        e.preventDefault();
+        submitSettleAccount();
+      });
     }
 });
 
