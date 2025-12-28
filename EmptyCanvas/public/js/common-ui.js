@@ -1,12 +1,60 @@
 // public/js/common-ui.js
 document.addEventListener('DOMContentLoaded', () => {
+  // ✅ Ensure viewport meta exists (some HTML pages might miss it)
+  // This improves mobile layout on iOS/Android without needing to edit every HTML file.
+  (function ensureViewportMeta(){
+    try {
+      if (!document.querySelector('meta[name="viewport"]')) {
+        const meta = document.createElement('meta');
+        meta.name = 'viewport';
+        meta.content = 'width=device-width, initial-scale=1.0';
+        document.head.appendChild(meta);
+      }
+    } catch {}
+  })();
+
   // 🔒 مهم: نخفي روابط السايدبار من البداية لتجنب "فلاش" كل الصفحات
   // لازم الـ body يبقى عليه الكلاس ده قبل ما الصلاحيات تتطبق.
   // هنضيفه هنا كـ safety (وكمان هنضيفه في الـ HTML body كـ default).
   document.body.classList.add('permissions-loading');
 
+  // ===== Mobile helpers: menu button + backdrop =====
+  function ensureMobileMenuButton(){
+    // Inject a hamburger button in the header if the page doesn't have one.
+    // Many pages were designed for desktop first and miss a mobile menu toggle.
+    if (document.getElementById('menu-toggle')) return;
+    const headerLeft = document.querySelector('.main-header .header-row1 .left')
+      || document.querySelector('.main-header .header-row1')
+      || null;
+    if (!headerLeft) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'menu-toggle';
+    btn.className = 'menu-toggle';
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Open menu');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.innerHTML = '<i data-feather="menu"></i>';
+    headerLeft.prepend(btn);
+    try { if (window.feather) feather.replace(); } catch {}
+  }
+
+  function ensureSidebarBackdrop(){
+    let el = document.getElementById('sidebar-backdrop');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'sidebar-backdrop';
+    el.className = 'sidebar-backdrop';
+    el.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(el);
+    return el;
+  }
+
+  ensureMobileMenuButton();
+  const sidebarBackdrop = ensureSidebarBackdrop();
+
   const logoutBtn     = document.getElementById('logoutBtn');
-  const menuToggle    = document.getElementById('menu-toggle');     // قد لا يوجد
+  const menuToggle    = document.getElementById('menu-toggle');     // injected on many pages
   const sidebarToggle = document.getElementById('sidebar-toggle');  // موجود
 
   const KEY_MINI       = 'ui.sidebarMini';   // 1 = mini على الديسكتوب
@@ -173,7 +221,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function applyInitial(){
     if (isMobile()){
       document.body.classList.remove('sidebar-mini');
-      document.body.classList.remove('sidebar-collapsed');
+      // Mobile: sidebar is hidden by default, and opens as an overlay.
+      document.body.classList.add('sidebar-collapsed');
     } else {
       const pref = localStorage.getItem(KEY_MINI);
       if (pref === '1') document.body.classList.add('sidebar-mini');
@@ -198,16 +247,30 @@ document.addEventListener('DOMContentLoaded', () => {
   sidebarToggle && sidebarToggle.addEventListener('click', toggleSidebar);
   menuToggle    && menuToggle.addEventListener('click', toggleSidebar);
 
-  // إغلاق السايدبار بالضغط خارجها (موبايل)
+  // Close sidebar on mobile when tapping the backdrop or outside the sidebar
+  const closeMobileSidebar = () => {
+    if (!isMobile()) return;
+    if (document.body.classList.contains('sidebar-collapsed')) return;
+    document.body.classList.add('sidebar-collapsed');
+    setAria();
+  };
+
+  sidebarBackdrop && sidebarBackdrop.addEventListener('click', closeMobileSidebar);
+
   document.addEventListener('click', (event) => {
     if (!isMobile()) return;
-    const clickedInteractive = event.target.closest('button,[type="button"],[type="submit"],a,input,select,textarea,.choices,.form-actions');
-    if (clickedInteractive) return;
     const insideSidebar = event.target.closest('.sidebar');
     const onToggles = event.target.closest('#menu-toggle, #sidebar-toggle');
     if (insideSidebar || onToggles) return;
-    if (!document.body.classList.contains('sidebar-collapsed')) return;
-    toggleSidebar(event);
+    // If sidebar is open, clicking outside closes it.
+    closeMobileSidebar();
+  });
+
+  // Close sidebar after navigation on mobile (better UX)
+  document.querySelectorAll('.sidebar a').forEach(a => {
+    a.addEventListener('click', () => {
+      if (isMobile()) closeMobileSidebar();
+    });
   });
 
   document.addEventListener('keydown', (e) => {
