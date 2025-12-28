@@ -93,7 +93,7 @@ body.sidebar-collapsed .sidebar{ transform:translateX(calc(-100% - 14px)); }
 }
 .sidebar-footer{ padding:1.5rem; border-top:1px solid #1F2937; }
 
-.main-content{ flex-grow:1; padding-left:var(--aside-w); transition:padding-left .3s ease; }
+.main-content{ flex-grow:1; padding-left:0; transition:padding-left .3s ease; }
 body.sidebar-collapsed .main-content{ padding-left:0; }
 
 /* =================================
@@ -243,6 +243,7 @@ hr{ border:none; border-top:1px solid #eee; margin:1.5rem 0; }
 @media (max-width:900px){ .container{ grid-template-columns:1fr; gap:1.5rem; } }
 @media (max-width:768px){
   .sidebar{ transform:translateX(calc(-100% - 14px)); width:var(--aside-w); }
+  body:not(.sidebar-collapsed) .sidebar{ transform:none; }
   .main-content{ padding-left:0; }
   .header-row1{ flex-wrap:wrap; gap:8px; }
   .searchbar{ max-width:none; width:100%; order:2; }
@@ -253,10 +254,10 @@ hr{ border:none; border-top:1px solid #eee; margin:1.5rem 0; }
 
 @media (min-width:769px){
   .sidebar{ transform:none !important; width:var(--aside-w); }
-  body.sidebar-collapsed .sidebar{ transform:none !important; width:var(--aside-w); }
-  .main-content{ padding-left:var(--aside-w) !important; }
-  body.sidebar-collapsed .main-content{ padding-left:var(--aside-w) !important; }
+  /* ✅ Overlay layout: keep the page content full-width (no reserved space for sidebar) */
+  .main-content{ padding-left:0 !important; }
 }
+
 
 .sidebar-nav .nav-group-title{
   cursor:pointer; display:flex; justify-content:space-between; align-items:center;
@@ -307,7 +308,7 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
 }
 @media (min-width: 769px){
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed); }
-  body.sidebar-mini .main-content { padding-left: var(--aside-w-collapsed); }
+  body.sidebar-mini .main-content { padding-left: 0; }
 
   body.sidebar-mini .sidebar-header h2 { display: none; }
   body.sidebar-mini .nav-label { display: none; }
@@ -658,13 +659,11 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
   bottom: auto !important;
   align-items: center;
 }
-.sidebar { transform: none !important; }
-
 body.sidebar-collapsed .sidebar {
   transform: translateX(calc(-100% - 14px)) !important;
 }
 
-.main-content { padding-left: var(--aside-w) !important; }
+.main-content { padding-left: 0 !important; }
 body.sidebar-collapsed .main-content { padding-left: 0 !important; }
 
 @media (min-width: 769px){
@@ -1255,7 +1254,7 @@ body.sidebar-collapsed .main-content { padding-left: 0 !important; }
 /* وضع mini على الديسكتوب */
 @media (min-width: 769px) {
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed) !important; }
-  body.sidebar-mini .main-content { padding-left: var(--aside-w-collapsed) !important; }
+  body.sidebar-mini .main-content { padding-left: 0 !important; }
 
   body.sidebar-mini .sidebar-header h2 { display: none; }
   body.sidebar-mini .nav-label { display: none !important; }
@@ -2692,20 +2691,20 @@ aside.sidebar {
 /* >>> This is the actual "gap" between sidebar and page content <<< */
 /* When sidebar is OPEN */
 body:not(.sidebar-mini) aside.sidebar + .main-content {
-  padding-left: 16px !important;   /* <-- adjust this value to taste */
+  padding-left: 0 !important;   /* <-- adjust this value to taste */
 }
 
 /* When sidebar is COLLAPSED (mini) */
 body.sidebar-mini aside.sidebar + .main-content {
-  padding-left: 24px !important;   /* slightly larger looks better when mini */
+  padding-left: 0 !important;   /* slightly larger looks better when mini */
 }
 
 /* Keep inner sections aligned with the same left gap */
 body:not(.sidebar-mini) .main-header,
-body:not(.sidebar-mini) .container-full-width { padding-left: 16px !important; }
+body:not(.sidebar-mini) .container-full-width { padding-left: 0 !important; }
 
 body.sidebar-mini .main-header,
-body.sidebar-mini .container-full-width { padding-left: 24px !important; }
+body.sidebar-mini .container-full-width { padding-left: 0 !important; }
 
 .container-full-width {
     max-width: 100% !important;
