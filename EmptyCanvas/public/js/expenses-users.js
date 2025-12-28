@@ -222,8 +222,8 @@ function renderUserExpenses(items, totalEl, listEl) {
       </div>
 
       <div class="expense-amount">
-        ${cashIn ? `<span style="color:#16a34a;">+£${cashIn.toLocaleString()}</span>` : ""}
-        ${cashOut ? `<span style="color:#dc2626;">-£${cashOut.toLocaleString()}</span>` : ""}
+        ${cashIn ? `<span class="amount-in">+£${cashIn.toLocaleString()}</span>` : ""}
+        ${cashOut ? `<span class="amount-out">-£${cashOut.toLocaleString()}</span>` : ""}
       </div>
     `;
 

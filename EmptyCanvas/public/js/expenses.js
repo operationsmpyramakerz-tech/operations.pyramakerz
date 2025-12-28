@@ -336,8 +336,8 @@ async function loadExpenses() {
                     </div>
 
                     <div class="expense-amount">
-                        ${it.cashIn ? `+£${it.cashIn}` : ""}
-                        ${it.cashOut ? `-£${it.cashOut}` : ""}
+                        ${it.cashIn ? `<span class="amount-in">+£${Number(it.cashIn).toLocaleString()}</span>` : ""}
+                        ${it.cashOut ? `<span class="amount-out">-£${Number(it.cashOut).toLocaleString()}</span>` : ""}
                     </div>
 
                 </div>`;
@@ -473,7 +473,7 @@ function openAllExpensesModal() {
                   : "";
 
                 list.innerHTML += `
-                    <div class="expense-item" style="margin:0 0 1rem 0;">
+                    <div class="expense-item">
                         <div class="expense-icon">${arrow}</div>
                         <div class="expense-details">
                             <div class="expense-title">${escapeHtml(title)}</div>
@@ -483,7 +483,8 @@ function openAllExpensesModal() {
                             ${screenshotHtml}
                         </div>
                         <div class="expense-amount">
-                            ${it.cashIn ? `+£${it.cashIn}` : `-£${it.cashOut || 0}`}
+                            ${it.cashIn ? `<span class="amount-in">+£${Number(it.cashIn).toLocaleString()}</span>` : ""}
+                            ${it.cashOut ? `<span class="amount-out">-£${Number(it.cashOut).toLocaleString()}</span>` : ""}
                         </div>
                     </div>`;
             });
