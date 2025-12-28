@@ -6,6 +6,16 @@
 let CURRENT_USER_ITEMS = [];
 let FILTERED_ITEMS = [];
 
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+
 // ---------------------------
 // LOAD USERS + BUILD TABS
 // ---------------------------
@@ -155,6 +165,7 @@ function applyFiltersAndSorting() {
 // ---------------------------
 // RENDER EXPENSES LIST
 // ---------------------------
+
 function renderUserExpenses(items, totalEl, listEl) {
   if (!items || items.length === 0) {
     totalEl.textContent = "Total: £0";
@@ -170,9 +181,31 @@ function renderUserExpenses(items, totalEl, listEl) {
     const cashOut = Number(it.cashOut || 0);
     total += cashIn - cashOut;
 
-    const arrow = cashIn > 0
+    const isIn = cashIn > 0;
+
+    const arrow = isIn
       ? `<span class="arrow-icon arrow-in">↙</span>`
       : `<span class="arrow-icon arrow-out">↗</span>`;
+
+    const title = isIn ? "Cash In" : (it.fundsType || "Cash Out");
+
+    const dateLine = it.date
+      ? `<div class="expense-person"><strong>Date:</strong> ${escapeHtml(it.date)}</div>`
+      : "";
+
+    const line1 = isIn
+      ? `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
+      : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it.reason || "")}</div>`;
+
+    const line2 = (!isIn && (it.from || it.to))
+      ? `<div class="expense-person">${escapeHtml(it.from || "")}${it.to ? " → " + escapeHtml(it.to) : ""}</div>`
+      : "";
+
+    const screenshotHtml = (!isIn && it.screenshotUrl)
+      ? `<a class="expense-screenshot-link" href="${escapeHtml(it.screenshotUrl)}" target="_blank" rel="noopener noreferrer">
+            <img class="expense-screenshot-thumb" src="${escapeHtml(it.screenshotUrl)}" alt="Receipt screenshot" />
+         </a>`
+      : "";
 
     const div = document.createElement("div");
     div.className = "expense-item";
@@ -181,21 +214,16 @@ function renderUserExpenses(items, totalEl, listEl) {
       <div class="expense-icon">${arrow}</div>
 
       <div class="expense-details">
-        <div class="expense-title">
-          ${it.fundsType || ""} <span style="color:#9ca3af;">${it.date}</span>
-        </div>
-
-        <!-- CLEAR & VISIBLE REASON -->
-        <div class="expense-reason" style="font-size:0.95rem; font-weight:700; color:#111827; margin-bottom:4px;">
-          ${it.reason || ""}
-        </div>
-
-        <div class="expense-person">${it.from || ""} ${it.to ? "→ " + it.to : ""}</div>
+        <div class="expense-title">${escapeHtml(title)}</div>
+        ${dateLine}
+        ${line1}
+        ${line2}
+        ${screenshotHtml}
       </div>
 
       <div class="expense-amount">
-        ${cashIn ? `<span style="color:#16a34a;">+£${cashIn}</span>` : ""}
-        ${cashOut ? `<span style="color:#dc2626;">-£${cashOut}</span>` : ""}
+        ${cashIn ? `<span style="color:#16a34a;">+£${cashIn.toLocaleString()}</span>` : ""}
+        ${cashOut ? `<span style="color:#dc2626;">-£${cashOut.toLocaleString()}</span>` : ""}
       </div>
     `;
 
@@ -204,6 +232,7 @@ function renderUserExpenses(items, totalEl, listEl) {
 
   totalEl.textContent = `Total: £${total.toLocaleString()}`;
 }
+
 
 // ---------------------------
 // FILTER BUTTON
