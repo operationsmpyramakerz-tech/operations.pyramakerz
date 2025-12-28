@@ -78,6 +78,35 @@ body.sidebar-collapsed{ padding-left:0; }
 }
 body.sidebar-collapsed .sidebar{ transform:translateX(calc(-100% - 14px)); }
 
+/* ================================
+   Mobile sidebar behavior
+   - Sidebar should OVERLAY content
+   - Content should always use full width
+   ================================ */
+@media (max-width:768px){
+  /* Never reserve space for sidebar on mobile */
+  .main-content{ padding-left:0 !important; }
+
+  /* Sidebar becomes a full-height drawer */
+  .sidebar{
+    top:0; left:0; bottom:0;
+    border-radius:0;
+    width: min(86vw, var(--aside-w));
+    transform: translateX(-110%);
+    box-shadow: 0 24px 48px rgba(0,0,0,.28);
+  }
+
+  /* Open state */
+  body:not(.sidebar-collapsed) .sidebar{ transform: translateX(0); }
+  body.sidebar-collapsed .sidebar{ transform: translateX(-110%); }
+
+  /* Backdrop only on mobile when sidebar is open */
+  body:not(.sidebar-collapsed) .sidebar-backdrop{
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 /* Backdrop (used on mobile when sidebar is open) */
 .sidebar-backdrop{
   position: fixed;
@@ -720,16 +749,15 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
   bottom: auto !important;
   align-items: center;
 }
-.sidebar { transform: none !important; }
 
-body.sidebar-collapsed .sidebar {
-  transform: translateX(calc(-100% - 14px)) !important;
-}
-
-.main-content { padding-left: var(--aside-w) !important; }
-body.sidebar-collapsed .main-content { padding-left: 0 !important; }
-
+/* Desktop-only layout locks (do NOT apply on mobile) */
 @media (min-width: 769px){
+  .sidebar { transform: none !important; }
+  body.sidebar-collapsed .sidebar { transform: translateX(calc(-100% - 14px)) !important; }
+
+  .main-content { padding-left: var(--aside-w) !important; }
+  body.sidebar-collapsed .main-content { padding-left: 0 !important; }
+
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed) !important; }
 }
 /* ===== Stocktaking Cards Layout ===== */
