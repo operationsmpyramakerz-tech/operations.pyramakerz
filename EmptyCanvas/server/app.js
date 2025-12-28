@@ -390,7 +390,7 @@ app.get("/dashboard", requireAuth, (req, res) => {
 });
 
 app.get("/orders", requireAuth, requirePage("Current Orders"), (req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "index.html"));
+  res.sendFile(path.join(__dirname, "..", "public", "current-orders.html"));
 });
 
 app.get(
