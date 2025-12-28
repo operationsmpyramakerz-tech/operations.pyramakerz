@@ -413,6 +413,85 @@
     }
 
   </style>
+<style>
+/* expense-card-unified: consistent cards across Expenses + modals + Expenses by User */
+.expense-item{
+  background:#ffffff;
+  border:1px solid #E5E7EB;
+  border-radius:22px;
+  padding:1.1rem 1.05rem;
+  margin-bottom:.9rem;
+  display:flex;
+  align-items:flex-start;
+  gap:1rem;
+  box-shadow:0 8px 25px rgba(0,0,0,0.07);
+  transition:transform .2s ease, box-shadow .2s ease;
+  opacity:1;
+  transform:none;
+  animation:none;
+}
+.expense-item:hover{
+  transform:translateY(-2px);
+  box-shadow:0 14px 32px rgba(0,0,0,0.10);
+}
+
+.expense-icon{
+  width:56px;
+  height:56px;
+  border-radius:18px;
+  display:grid;
+  place-items:center;
+  background:linear-gradient(135deg, #e8ecf2, #ffffff);
+  border:1px solid #e5e7eb;
+  color:#475569;
+  flex:0 0 auto;
+  box-shadow:
+    inset 0 1px 2px rgba(255,255,255,0.7),
+    inset 0 -2px 4px rgba(0,0,0,0.05);
+}
+
+.arrow-icon{font-size:1.85rem;font-weight:900;line-height:1;display:flex;align-items:center;justify-content:center;}
+.arrow-in{color:#16a34a;text-shadow:0 2px 4px rgba(22,163,74,0.25);}
+.arrow-out{color:#dc2626;text-shadow:0 2px 4px rgba(220,38,38,0.25);}
+
+.expense-details{flex:1 1 auto;min-width:0;padding-top:2px;}
+.expense-title{font-size:1.05rem;font-weight:800;color:#0f172a;margin-bottom:.25rem;}
+.expense-person{font-size:.9rem;color:#64748b;line-height:1.35;}
+.expense-person strong{color:#0f172a;font-weight:700;}
+
+.expense-amount{
+  flex:0 0 auto;
+  min-width:88px;
+  text-align:right;
+  font-size:1.15rem;
+  font-weight:800;
+  color:#0f172a;
+  padding-top:4px;
+  white-space:nowrap;
+}
+.expense-amount span{display:block;}
+.expense-amount .amount-in{color:#16a34a;}
+.expense-amount .amount-out{color:#dc2626;}
+
+.expense-screenshot-link{display:inline-flex;margin-top:.55rem;}
+.expense-screenshot-thumb{
+  width:76px;
+  height:76px;
+  border-radius:14px;
+  object-fit:cover;
+  border:1px solid #e5e7eb;
+  box-shadow:0 2px 8px rgba(0,0,0,0.08);
+}
+
+@media (max-width: 520px){
+  .expense-item{padding:1rem .95rem;gap:.85rem;border-radius:20px;}
+  .expense-icon{width:52px;height:52px;border-radius:16px;}
+  .expense-amount{min-width:78px;font-size:1.05rem;}
+  .expense-screenshot-thumb{width:72px;height:72px;}
+  .expense-title{font-size:1rem;}
+  .expense-person{font-size:.86rem;}
+}
+</style>
 </head>
 
 <body class="permissions-loading">
