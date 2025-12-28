@@ -3866,7 +3866,10 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       { header: "To", width: 18 },
       { header: "Cash In", width: 14 },
       { header: "Cash Out", width: 14 },
+      { header: "Screenshot", width: 18 },
     ];
+
+    const lastCol = columns.length;
 
     columns.forEach((c, idx) => {
       sheet.getColumn(idx + 1).width = c.width;
@@ -3875,7 +3878,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     // -------------------------
     // Title
     // -------------------------
-    sheet.mergeCells("A1:G1");
+    sheet.mergeCells(1, 1, 1, lastCol);
     const titleCell = sheet.getCell("A1");
     titleCell.value = `Expenses Report — ${displayName}`;
     titleCell.font = { bold: true, size: 16, color: { argb: "FFFFFFFF" } };
@@ -3887,7 +3890,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     };
     sheet.getRow(1).height = 26;
 
-    sheet.mergeCells("A2:G2");
+    sheet.mergeCells(2, 1, 2, lastCol);
     const metaCell = sheet.getCell("A2");
     metaCell.value = `Generated: ${new Date().toISOString().slice(0, 10)}`;
     metaCell.font = { italic: true, color: { argb: "FF6B7280" } };
@@ -3969,8 +3972,8 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       to: { row: startRow, column: columns.length },
     };
 
-    // Freeze everything above the table body (keeps title + summary + header visible)
-    sheet.views = [{ state: "frozen", ySplit: startRow }];
+    // Note: We intentionally DO NOT freeze panes here.
+    // Freezing draws a line across the sheet, and the user requested to remove it.
 
     // -------------------------
     // Table rows
@@ -3979,7 +3982,10 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       const d = it?.date ? new Date(it.date) : null;
       const dateVal = d && !Number.isNaN(d.getTime()) ? d : (it?.date || "");
 
-      sheet.addRow([
+      const screenshotUrl = String(it?.screenshotUrl || "").trim();
+      const screenshotText = String(it?.screenshotName || "Open").trim() || "Open";
+
+      const row = sheet.addRow([
         dateVal,
         it?.fundsType || "",
         it?.reason || "",
@@ -3987,7 +3993,16 @@ app.post("/api/expenses/export/excel", async (req, res) => {
         it?.to || "",
         Number(it?.cashIn || 0),
         Number(it?.cashOut || 0),
+        "", // hyperlink placeholder
       ]);
+
+      // Screenshot hyperlink (if exists)
+      if (screenshotUrl) {
+        const linkCell = row.getCell(8);
+        linkCell.value = { text: screenshotText, hyperlink: screenshotUrl };
+        linkCell.font = { color: { argb: "FF2563EB" }, underline: true };
+        linkCell.alignment = { vertical: "middle", horizontal: "center" };
+      }
     });
 
     // Body styling (borders, wrapping, number formats, zebra rows)
@@ -4030,6 +4045,11 @@ app.post("/api/expenses/export/excel", async (req, res) => {
           cell.alignment = { vertical: "middle", horizontal: "right" };
           cell.font = { color: { argb: "FFDC2626" } };
         }
+
+        // Screenshot column (hyperlink)
+        if (colNumber === 8) {
+          cell.alignment = { vertical: "middle", horizontal: "center", wrapText: false };
+        }
       });
     }
 
@@ -4037,6 +4057,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     sheet.getColumn(2).alignment = { vertical: "middle", horizontal: "left" };
     sheet.getColumn(4).alignment = { vertical: "middle", horizontal: "left" };
     sheet.getColumn(5).alignment = { vertical: "middle", horizontal: "left" };
+    sheet.getColumn(8).alignment = { vertical: "middle", horizontal: "center" };
 
     const buffer = await workbook.xlsx.writeBuffer();
 
