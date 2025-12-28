@@ -3746,38 +3746,255 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     const ExcelJS = require("exceljs");
     const { userName, items } = req.body;
 
+    const safeItems = Array.isArray(items) ? items : [];
+
+    // userName is coming from the UI as "Expenses — <Name>"
+    const rawName = String(userName || "Expenses").trim();
+    const displayName = (rawName.replace(/^Expenses\s*[—\-]\s*/i, "").trim() || rawName);
+
+    const totalCashIn = safeItems.reduce(
+      (sum, it) => sum + Number(it?.cashIn || 0),
+      0
+    );
+    const totalCashOut = safeItems.reduce(
+      (sum, it) => sum + Number(it?.cashOut || 0),
+      0
+    );
+    const totalBalance = totalCashIn - totalCashOut;
+
     const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Operations Dashboard";
+    workbook.created = new Date();
+
     const sheet = workbook.addWorksheet("Expenses");
 
-    sheet.columns = [
-      { header: "Date", key: "date", width: 15 },
-      { header: "Funds Type", key: "fundsType", width: 20 },
-      { header: "Reason", key: "reason", width: 30 },
-      { header: "From", key: "from", width: 20 },
-      { header: "To", key: "to", width: 20 },
-      { header: "Cash In", key: "cashIn", width: 12 },
-      { header: "Cash Out", key: "cashOut", width: 12 },
+    // -------------------------
+    // Styles / helpers
+    // -------------------------
+    const BORDER_COLOR = { argb: "FF9CA3AF" }; // gray-400
+    const borderThin = {
+      top: { style: "thin", color: BORDER_COLOR },
+      left: { style: "thin", color: BORDER_COLOR },
+      bottom: { style: "thin", color: BORDER_COLOR },
+      right: { style: "thin", color: BORDER_COLOR },
+    };
+    const currencyFmt = '"£"#,##0;[Red]-"£"#,##0;"£"0';
+
+    function safeExcelFileName(name) {
+      // Windows safe-ish + avoid empty filename
+      const cleaned = String(name || "expenses")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/[^a-z0-9\- _]/gi, "_")
+        .slice(0, 120);
+      return cleaned || "expenses";
+    }
+
+    function setRangeBorder(fromRow, toRow, fromCol, toCol) {
+      for (let r = fromRow; r <= toRow; r++) {
+        const row = sheet.getRow(r);
+        for (let c = fromCol; c <= toCol; c++) {
+          const cell = row.getCell(c);
+          cell.border = borderThin;
+        }
+      }
+    }
+
+    // -------------------------
+    // Column layout
+    // -------------------------
+    const columns = [
+      { header: "Date", width: 14 },
+      { header: "Funds Type", width: 18 },
+      { header: "Reason", width: 36 },
+      { header: "From", width: 18 },
+      { header: "To", width: 18 },
+      { header: "Cash In", width: 14 },
+      { header: "Cash Out", width: 14 },
     ];
 
-    items.forEach(it => {
-      sheet.addRow({
-        date: it.date,
-        fundsType: it.fundsType,
-        reason: it.reason,
-        from: it.from,
-        to: it.to,
-        cashIn: it.cashIn || 0,
-        cashOut: it.cashOut || 0
-      });
+    columns.forEach((c, idx) => {
+      sheet.getColumn(idx + 1).width = c.width;
     });
+
+    // -------------------------
+    // Title
+    // -------------------------
+    sheet.mergeCells("A1:G1");
+    const titleCell = sheet.getCell("A1");
+    titleCell.value = `Expenses Report — ${displayName}`;
+    titleCell.font = { bold: true, size: 16, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF111827" }, // gray-900
+    };
+    sheet.getRow(1).height = 26;
+
+    sheet.mergeCells("A2:G2");
+    const metaCell = sheet.getCell("A2");
+    metaCell.value = `Generated: ${new Date().toISOString().slice(0, 10)}`;
+    metaCell.font = { italic: true, color: { argb: "FF6B7280" } };
+    metaCell.alignment = { horizontal: "center", vertical: "middle" };
+    sheet.getRow(2).height = 18;
+
+    // -------------------------
+    // Summary box
+    // -------------------------
+    sheet.mergeCells("A3:B3");
+    const summaryHead = sheet.getCell("A3");
+    summaryHead.value = "Summary";
+    summaryHead.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    summaryHead.alignment = { horizontal: "center", vertical: "middle" };
+    summaryHead.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1F4E79" },
+    };
+    sheet.getRow(3).height = 18;
+
+    const summaryRows = [
+      { label: "Total Cash In", value: totalCashIn, valueColor: "FF16A34A" },
+      { label: "Total Cash Out", value: totalCashOut, valueColor: "FFDC2626" },
+      {
+        label: "Total Balance",
+        value: totalBalance,
+        valueColor: totalBalance >= 0 ? "FF16A34A" : "FFDC2626",
+      },
+    ];
+
+    summaryRows.forEach((r, i) => {
+      const rowIndex = 4 + i;
+      const labelCell = sheet.getCell(`A${rowIndex}`);
+      const valueCell = sheet.getCell(`B${rowIndex}`);
+
+      labelCell.value = r.label;
+      labelCell.font = { bold: true, color: { argb: "FF111827" } };
+      labelCell.alignment = { horizontal: "left", vertical: "middle" };
+      labelCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF3F4F6" }, // gray-100
+      };
+
+      valueCell.value = Number(r.value || 0);
+      valueCell.numFmt = currencyFmt;
+      valueCell.font = { bold: true, color: { argb: r.valueColor } };
+      valueCell.alignment = { horizontal: "right", vertical: "middle" };
+
+      sheet.getRow(rowIndex).height = 18;
+    });
+
+    // Border around summary box (A3:B6)
+    setRangeBorder(3, 6, 1, 2);
+
+    // Leave a blank row then start the table
+    const startRow = 8;
+
+    // -------------------------
+    // Table header
+    // -------------------------
+    const headerRow = sheet.getRow(startRow);
+    headerRow.values = columns.map((c) => c.header);
+    headerRow.height = 20;
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.alignment = { horizontal: "center", vertical: "middle" };
+    headerRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF374151" }, // gray-700
+    };
+    headerRow.eachCell((cell) => {
+      cell.border = borderThin;
+    });
+
+    // Auto-filter on header row
+    sheet.autoFilter = {
+      from: { row: startRow, column: 1 },
+      to: { row: startRow, column: columns.length },
+    };
+
+    // Freeze everything above the table body (keeps title + summary + header visible)
+    sheet.views = [{ state: "frozen", ySplit: startRow }];
+
+    // -------------------------
+    // Table rows
+    // -------------------------
+    safeItems.forEach((it) => {
+      const d = it?.date ? new Date(it.date) : null;
+      const dateVal = d && !Number.isNaN(d.getTime()) ? d : (it?.date || "");
+
+      sheet.addRow([
+        dateVal,
+        it?.fundsType || "",
+        it?.reason || "",
+        it?.from || "",
+        it?.to || "",
+        Number(it?.cashIn || 0),
+        Number(it?.cashOut || 0),
+      ]);
+    });
+
+    // Body styling (borders, wrapping, number formats, zebra rows)
+    const bodyStart = startRow + 1;
+    const bodyEnd = sheet.rowCount;
+
+    for (let r = bodyStart; r <= bodyEnd; r++) {
+      const row = sheet.getRow(r);
+      row.height = 18;
+
+      const isZebra = (r - bodyStart) % 2 === 1;
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        cell.border = borderThin;
+        cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+
+        // Zebra fill for readability
+        if (isZebra) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF9FAFB" }, // gray-50
+          };
+        }
+
+        // Date column
+        if (colNumber === 1) {
+          cell.alignment = { vertical: "middle", horizontal: "center" };
+          // If it's a Date object, apply date format
+          if (cell.value instanceof Date) cell.numFmt = "yyyy-mm-dd";
+        }
+
+        // Cash columns
+        if (colNumber === 6) {
+          cell.numFmt = currencyFmt;
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+          cell.font = { color: { argb: "FF16A34A" } };
+        }
+        if (colNumber === 7) {
+          cell.numFmt = currencyFmt;
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+          cell.font = { color: { argb: "FFDC2626" } };
+        }
+      });
+    }
+
+    // Slightly different alignment for some columns
+    sheet.getColumn(2).alignment = { vertical: "middle", horizontal: "left" };
+    sheet.getColumn(4).alignment = { vertical: "middle", horizontal: "left" };
+    sheet.getColumn(5).alignment = { vertical: "middle", horizontal: "left" };
 
     const buffer = await workbook.xlsx.writeBuffer();
 
-    res.setHeader("Content-Type",
+    res.setHeader(
+      "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
-    res.setHeader("Content-Disposition",
-      `attachment; filename="${userName.replace(/[^a-z0-9]/gi, "_")}.xlsx"`
+
+    const filename = safeExcelFileName(`${displayName}_expenses_${new Date().toISOString().slice(0, 10)}`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}.xlsx"`
     );
     res.setHeader("Content-Length", buffer.length);
 
