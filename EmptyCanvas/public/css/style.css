@@ -93,7 +93,7 @@ body.sidebar-collapsed .sidebar{ transform:translateX(calc(-100% - 14px)); }
 }
 .sidebar-footer{ padding:1.5rem; border-top:1px solid #1F2937; }
 
-.main-content{ flex-grow:1; padding-left:0; transition:padding-left .3s ease; }
+.main-content{ flex-grow:1; padding-left:var(--aside-w); transition:padding-left .3s ease; }
 body.sidebar-collapsed .main-content{ padding-left:0; }
 
 /* =================================
@@ -243,7 +243,6 @@ hr{ border:none; border-top:1px solid #eee; margin:1.5rem 0; }
 @media (max-width:900px){ .container{ grid-template-columns:1fr; gap:1.5rem; } }
 @media (max-width:768px){
   .sidebar{ transform:translateX(calc(-100% - 14px)); width:var(--aside-w); }
-  body:not(.sidebar-collapsed) .sidebar{ transform:none; }
   .main-content{ padding-left:0; }
   .header-row1{ flex-wrap:wrap; gap:8px; }
   .searchbar{ max-width:none; width:100%; order:2; }
@@ -254,10 +253,11 @@ hr{ border:none; border-top:1px solid #eee; margin:1.5rem 0; }
 
 @media (min-width:769px){
   .sidebar{ transform:none !important; width:var(--aside-w); }
-  /* ✅ Overlay layout: keep the page content full-width (no reserved space for sidebar) */
+  body.sidebar-collapsed .sidebar{ transform:none !important; width:var(--aside-w); }
+  /* Desktop: content shouldn't reserve the FULL sidebar width */
   .main-content{ padding-left:0 !important; }
+  body.sidebar-collapsed .main-content{ padding-left:0 !important; }
 }
-
 
 .sidebar-nav .nav-group-title{
   cursor:pointer; display:flex; justify-content:space-between; align-items:center;
@@ -308,7 +308,7 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
 }
 @media (min-width: 769px){
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed); }
-  body.sidebar-mini .main-content { padding-left: 0; }
+  body.sidebar-mini .main-content { padding-left: var(--aside-w-collapsed); }
 
   body.sidebar-mini .sidebar-header h2 { display: none; }
   body.sidebar-mini .nav-label { display: none; }
@@ -659,12 +659,28 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
   bottom: auto !important;
   align-items: center;
 }
+.sidebar { transform: none !important; }
+
 body.sidebar-collapsed .sidebar {
   transform: translateX(calc(-100% - 14px)) !important;
 }
 
+/* ==============================
+   LAYOUT OVERRIDE (FIX)
+   - Don't push the page when the dashboard opens.
+   - Keep content full-width on mobile.
+   - On desktop, reserve only the MINI sidebar width so the UI doesn't go تحت السايدبار.
+   ============================== */
+
+/* Default: full width (mobile & when sidebar is hidden) */
 .main-content { padding-left: 0 !important; }
 body.sidebar-collapsed .main-content { padding-left: 0 !important; }
+
+/* Desktop: reserve only the mini-rail width (+ the 14px inset on each side = 28px)
+   so the sidebar can expand as an overlay without pushing the content. */
+@media (min-width: 769px){
+  .main-content { padding-left: calc(var(--aside-w-collapsed) + 28px) !important; }
+}
 
 @media (min-width: 769px){
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed) !important; }
@@ -1254,7 +1270,7 @@ body.sidebar-collapsed .main-content { padding-left: 0 !important; }
 /* وضع mini على الديسكتوب */
 @media (min-width: 769px) {
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed) !important; }
-  body.sidebar-mini .main-content { padding-left: 0 !important; }
+  body.sidebar-mini .main-content { padding-left: var(--aside-w-collapsed) !important; }
 
   body.sidebar-mini .sidebar-header h2 { display: none; }
   body.sidebar-mini .nav-label { display: none !important; }
@@ -2641,12 +2657,12 @@ main:has(#sv-list) {
 .sv-qty-btn:hover { background: #F3F4F6; }
 .sv-qty-actions { display: flex; gap: 8px; justify-content: flex-end; }
 /* ==== Sidebar: keep header/footer fixed, make links scroll ==== */
+/* NOTE: The sidebar is already positioned as FIXED earlier in the file.
+   We only want to make its *inside* scrollable here (nav), without
+   overriding the fixed overlay layout. */
 .sidebar {
   display: flex;
   flex-direction: column;
-  height: 100dvh;                 /* full viewport height (mobile-safe) */
-  position: sticky;
-  top: 0;
   overflow: hidden;                /* the nav will scroll inside */
 }
 
@@ -2665,9 +2681,7 @@ main:has(#sv-list) {
   margin-top: auto;                /* pins it to the bottom of the flex column */
   background: var(--sidebar-bg, #0f172a);
   border-top: 1px solid rgba(255,255,255,0.06);
-  /* optional "sticky within the sidebar" look */
-  position: sticky;
-  bottom: 0;
+  /* Keep it at the bottom via flex (more reliable than sticky inside fixed). */
 }
 
 /* Optional: subtle scrollbar styling (WebKit/Blink) */
@@ -2688,23 +2702,23 @@ aside.sidebar {
   margin-right: 0 !important; 
 }
 
-/* >>> This is the actual "gap" between sidebar and page content <<< */
-/* When sidebar is OPEN */
-body:not(.sidebar-mini) aside.sidebar + .main-content {
-  padding-left: 0 !important;   /* <-- adjust this value to taste */
+/* >>> Actual left offset for the page content <<<
+   Mobile: full width.
+   Desktop: reserve ONLY the mini rail width so the sidebar can expand as an overlay.
+*/
+@media (max-width: 768px){
+  body:not(.sidebar-mini) aside.sidebar + .main-content,
+  body.sidebar-mini aside.sidebar + .main-content {
+    padding-left: 0 !important;
+  }
 }
 
-/* When sidebar is COLLAPSED (mini) */
-body.sidebar-mini aside.sidebar + .main-content {
-  padding-left: 0 !important;   /* slightly larger looks better when mini */
+@media (min-width: 769px){
+  body:not(.sidebar-mini) aside.sidebar + .main-content,
+  body.sidebar-mini aside.sidebar + .main-content {
+    padding-left: calc(var(--aside-w-collapsed) + 28px) !important;
+  }
 }
-
-/* Keep inner sections aligned with the same left gap */
-body:not(.sidebar-mini) .main-header,
-body:not(.sidebar-mini) .container-full-width { padding-left: 0 !important; }
-
-body.sidebar-mini .main-header,
-body.sidebar-mini .container-full-width { padding-left: 0 !important; }
 
 .container-full-width {
     max-width: 100% !important;
