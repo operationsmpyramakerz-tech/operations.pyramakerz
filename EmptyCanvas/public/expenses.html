@@ -275,6 +275,7 @@
       width: 200%; height: 200%;
       background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
       animation: shine 8s infinite;
+      pointer-events: none;
     }
     @keyframes shine {
       0% { transform: translateX(-100%) translateY(-100%) rotate(30deg); }
@@ -301,6 +302,77 @@
       cursor: pointer;
       backdrop-filter: blur(10px);
     }
+
+    /* Settled my account button (inside Total Card) */
+    .settle-btn{
+      margin-top: 1rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.55rem;
+      padding: 0.75rem 1.1rem;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      font-weight: 800;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+      position: relative;
+      z-index: 1;
+    }
+    .settle-btn:hover{
+      transform: translateY(-1px);
+      background: rgba(255,255,255,0.18);
+      border-color: rgba(255,255,255,0.35);
+    }
+    .settle-btn:active{
+      transform: translateY(0px) scale(0.98);
+    }
+
+    /* Modern screenshot upload control */
+    .upload-control{ width:100%; }
+    .upload-input{
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .upload-row{
+      display:flex;
+      align-items:center;
+      gap:0.75rem;
+      flex-wrap:wrap;
+    }
+    .upload-btn{
+      display:inline-flex;
+      align-items:center;
+      gap:0.55rem;
+      padding:0.75rem 1rem;
+      border-radius:14px;
+      border:1px solid #e5e7eb;
+      background: linear-gradient(135deg, #ffffff, #f8fafc);
+      color:#0f172a;
+      font-weight:800;
+      cursor:pointer;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.08);
+      transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .upload-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 32px rgba(0,0,0,0.12); }
+    .upload-btn:active{ transform: translateY(0) scale(0.98); }
+    .upload-btn svg{ width:18px; height:18px; }
+    .upload-filename{
+      color:#64748b;
+      font-weight:700;
+      font-size:0.92rem;
+      max-width: 240px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .help{ display:block; margin-top:0.35rem; color:#6b7280; font-size:0.85rem; }
 
     .expense-buttons {
       display: flex;
@@ -563,6 +635,9 @@
   <div class="total-label">All Expenses</div>
   <div class="total-amount" id="totalAmount">£0</div>
   <div>EGP</div>
+
+  <!-- Settled my account CTA -->
+  <button id="settleAccountBtn" class="settle-btn" type="button">Settled my account</button>
 </div>
 
 <!-- Title + View All button -->
@@ -597,6 +672,7 @@
     <input id="ci_cash" type="number" class="ex-input"/>
 
     <label class="field-label"><i data-feather="user"></i> Cash in from</label>
+    <input id="ci_from_search" type="text" class="ex-input" placeholder="Search user..."/>
     <select id="ci_from" class="ex-input"></select>
 
     <div class="ex-modal-actions">
@@ -637,7 +713,16 @@
       <!-- Screenshot (receipt) -->
 <div class="form-group">
   <label for="co_screenshot" class="field-label"><i data-feather="image"></i> Screenshot</label>
-  <input id="co_screenshot" type="file" accept="image/*" />
+  <div class="upload-control">
+    <input id="co_screenshot" class="upload-input" type="file" accept="image/*" />
+    <div class="upload-row">
+      <button id="co_screenshot_btn" type="button" class="upload-btn">
+        <i data-feather="upload"></i>
+        <span>Upload screenshot</span>
+      </button>
+      <span id="co_screenshot_name" class="upload-filename">No file chosen</span>
+    </div>
+  </div>
   <small class="help">Upload a receipt screenshot (JPG/PNG).</small>
 </div>
       
@@ -648,6 +733,23 @@
     <div class="ex-modal-actions">
       <button id="co_submit" class="ex-btn ex-primary">Submit</button>
       <button class="ex-btn ex-danger" onclick="closeCashOutModal()">Close</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- SETTLE ACCOUNT MODAL -->
+<div id="settleModal" class="ex-modal">
+  <div class="ex-modal-box">
+
+    <h3 class="ex-modal-title">Settled my account</h3>
+
+    <label class="field-label"><i data-feather="hash"></i> Receipt number</label>
+    <input id="settle_receipt" type="text" class="ex-input" placeholder="Enter receipt number"/>
+
+    <div class="ex-modal-actions">
+      <button id="settle_submit" class="ex-btn ex-primary">Submit</button>
+      <button class="ex-btn ex-danger" onclick="closeSettleModal()">Close</button>
     </div>
 
   </div>
