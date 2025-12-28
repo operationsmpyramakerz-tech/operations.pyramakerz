@@ -2679,6 +2679,123 @@ app.post("/api/expenses/cash-in", async (req, res) => {
 }
 });
 
+// Settled my account
+// Creates a balancing transaction for the current logged-in user so their
+// total (Cash in - Cash out) becomes 0, and stores the receipt number in Reason.
+app.post(
+  "/api/expenses/settle",
+  requireAuth,
+  requirePage("Expenses"),
+  async (req, res) => {
+    try {
+      const receiptNumber = String(req.body?.receiptNumber || "").trim();
+      if (!receiptNumber) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing receipt number",
+        });
+      }
+
+      const dbId = expensesDatabaseId || process.env.Expenses_Database;
+      if (!dbId) {
+        return res.status(500).json({
+          success: false,
+          error: "Expenses database not configured",
+        });
+      }
+
+      const teamMemberPageId = await getCurrentUserRelationPage(req);
+      if (!teamMemberPageId) {
+        return res.status(400).json({
+          success: false,
+          error: "User not found",
+        });
+      }
+
+      // 1) Compute current balance
+      let totalCashIn = 0;
+      let totalCashOut = 0;
+      let hasMore = true;
+      let cursor = undefined;
+
+      while (hasMore) {
+        const resp = await notion.databases.query({
+          database_id: dbId,
+          start_cursor: cursor,
+          page_size: 100,
+          filter: {
+            property: "Team Member",
+            relation: { contains: teamMemberPageId },
+          },
+        });
+
+        for (const page of resp.results || []) {
+          const props = page.properties || {};
+          totalCashIn += Number(props["Cash in"]?.number || 0);
+          totalCashOut += Number(props["Cash out"]?.number || 0);
+        }
+
+        hasMore = resp.has_more;
+        cursor = resp.next_cursor;
+      }
+
+      const balance = Number(totalCashIn) - Number(totalCashOut);
+      const settleAmount = Math.abs(balance);
+
+      // 2) Create a balancing transaction
+      const today = new Date().toISOString().slice(0, 10);
+      const isPositive = balance > 0;
+
+      const props = {
+        "Team Member": {
+          relation: [{ id: teamMemberPageId }],
+        },
+        "Funds Type": {
+          select: { name: "Settled my account" },
+        },
+        "Reason": {
+          title: [{ text: { content: receiptNumber } }],
+        },
+        "Date": {
+          date: { start: today },
+        },
+        "From": {
+          rich_text: [{ type: "text", text: { content: "" } }],
+        },
+        "To": {
+          rich_text: [{ type: "text", text: { content: "" } }],
+        },
+        "Cash in": {
+          number: isPositive ? 0 : settleAmount,
+        },
+        "Cash out": {
+          number: isPositive ? settleAmount : 0,
+        },
+      };
+
+      await notion.pages.create({
+        parent: { database_id: dbId },
+        properties: props,
+      });
+
+      return res.json({
+        success: true,
+        totalCashIn,
+        totalCashOut,
+        balance,
+        settleAmount,
+        direction: isPositive ? "cash_out" : "cash_in",
+      });
+    } catch (err) {
+      console.error("/api/expenses/settle error:", err?.body || err);
+      const raw = err?.body || err;
+      const errorMessage =
+        typeof raw === "string" ? raw : JSON.stringify(raw, null, 2);
+      return res.status(500).json({ success: false, error: errorMessage });
+    }
+  }
+);
+
 // Fetch All Expenses — FILTER BY CURRENT USER ONLY
 app.get("/api/expenses", async (req, res) => {
   try {
