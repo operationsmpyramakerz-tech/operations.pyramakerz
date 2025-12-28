@@ -2894,23 +2894,77 @@ app.get(
         sorts: [{ property: "Date", direction: "descending" }],
       });
 
-      const items = list.results.map((page) => ({
-        id: page.id,
-        date: page.properties["Date"]?.date?.start || null,
-        reason:
-          page.properties["Reason"]?.rich_text?.[0]?.plain_text || "",
-        fundsType:
-          page.properties["Funds Type"]?.select?.name || "",
-        from:
-          page.properties["From"]?.rich_text?.[0]?.plain_text || "",
-        to: page.properties["To"]?.rich_text?.[0]?.plain_text || "",
-        kilometer: page.properties["Kilometer"]?.number || 0,
-        cashIn: page.properties["Cash in"]?.number || 0,
-        cashOut: page.properties["Cash out"]?.number || 0,
-        cashInFrom:
-          page.properties["Cash in from"]?.rich_text?.[0]?.plain_text ||
-          "",
-      }));
+            // Resolve Cash in from (rich_text OR relation) + support Reason as title/rich_text
+      const expProps = await getExpensesDBProps();
+      const cashInFromKey =
+        pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
+        "Cash in from";
+
+      // If Cash in from is a relation in Notion, resolve related page titles once.
+      const cashInFromTitleMap = new Map();
+      const cashInFromIds = new Set();
+
+      for (const page of list.results) {
+        const p = page.properties?.[cashInFromKey];
+        if (p?.type === "relation") {
+          (p.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
+        }
+      }
+
+      for (const id of cashInFromIds) {
+        const t = await pageTitleById(id);
+        cashInFromTitleMap.set(id, t);
+      }
+
+      const items = list.results.map((page) => {
+        const props = page.properties || {};
+
+        const reasonProp = props["Reason"]; // property name in Notion DB
+        const reason =
+          reasonProp?.title?.[0]?.plain_text ||
+          reasonProp?.rich_text?.[0]?.plain_text ||
+          "";
+
+        // Cash in from can be rich_text OR relation
+        const cashInFromProp = props?.[cashInFromKey];
+        let cashInFrom = "";
+        if (cashInFromProp?.type === "rich_text") {
+          cashInFrom = cashInFromProp?.rich_text?.[0]?.plain_text || "";
+        } else if (cashInFromProp?.type === "relation") {
+          const names = (cashInFromProp?.relation || [])
+            .map((r) => cashInFromTitleMap.get(r.id) || "")
+            .filter(Boolean);
+          cashInFrom = names.join(", ");
+        }
+
+        // Optional screenshot (Notion property: "Screenshot" - files)
+        let screenshotUrl = "";
+        let screenshotName = "";
+        const screenshotProp = props?.["Screenshot"];
+        if (screenshotProp?.type === "files") {
+          const f = (screenshotProp.files || [])[0];
+          if (f) {
+            screenshotName = f.name || "";
+            if (f.type === "external") screenshotUrl = f.external?.url || "";
+            if (f.type === "file") screenshotUrl = f.file?.url || "";
+          }
+        }
+
+        return {
+          id: page.id,
+          date: props["Date"]?.date?.start || null,
+          reason,
+          fundsType: props["Funds Type"]?.select?.name || "",
+          from: props["From"]?.rich_text?.[0]?.plain_text || "",
+          to: props["To"]?.rich_text?.[0]?.plain_text || "",
+          kilometer: props["Kilometer"]?.number || 0,
+          cashIn: props["Cash in"]?.number || 0,
+          cashOut: props["Cash out"]?.number || 0,
+          cashInFrom,
+          screenshotUrl,
+          screenshotName,
+        };
+      });
 
       res.json({ success: true, items });
     } catch (err) {
@@ -3779,6 +3833,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       right: { style: "thin", color: BORDER_COLOR },
     };
     const currencyFmt = '"£"#,##0;[Red]-"£"#,##0;"£"0';
+    const balanceCurrencyFmt = '"£"#,##0;-"£"#,##0;"£"0';
 
     function safeExcelFileName(name) {
       // Windows safe-ish + avoid empty filename
@@ -3857,11 +3912,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     const summaryRows = [
       { label: "Total Cash In", value: totalCashIn, valueColor: "FF16A34A" },
       { label: "Total Cash Out", value: totalCashOut, valueColor: "FFDC2626" },
-      {
-        label: "Total Balance",
-        value: totalBalance,
-        valueColor: totalBalance >= 0 ? "FF16A34A" : "FFDC2626",
-      },
+      { label: "Total Balance", value: totalBalance, valueColor: "FF2563EB" },
     ];
 
     summaryRows.forEach((r, i) => {
@@ -3879,7 +3930,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       };
 
       valueCell.value = Number(r.value || 0);
-      valueCell.numFmt = currencyFmt;
+      valueCell.numFmt = (r.label === "Total Balance") ? balanceCurrencyFmt : currencyFmt;
       valueCell.font = { bold: true, color: { argb: r.valueColor } };
       valueCell.alignment = { horizontal: "right", vertical: "middle" };
 
@@ -3896,16 +3947,19 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     // Table header
     // -------------------------
     const headerRow = sheet.getRow(startRow);
-    headerRow.values = columns.map((c) => c.header);
     headerRow.height = 20;
-    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    headerRow.alignment = { horizontal: "center", vertical: "middle" };
-    headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF374151" }, // gray-700
-    };
-    headerRow.eachCell((cell) => {
+
+    // Style only the used header columns (avoid coloring to end of sheet)
+    columns.forEach((c, idx) => {
+      const cell = headerRow.getCell(idx + 1);
+      cell.value = c.header;
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF374151" }, // gray-700
+      };
       cell.border = borderThin;
     });
 
