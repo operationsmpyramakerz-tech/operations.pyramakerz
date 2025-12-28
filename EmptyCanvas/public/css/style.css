@@ -16,10 +16,6 @@
 
 *{ box-sizing:border-box; margin:0; padding:0; }
 
-/* Mobile-friendly defaults */
-html{ -webkit-text-size-adjust: 100%; }
-img, video{ max-width:100%; height:auto; }
-
 body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   color:var(--text-primary);
@@ -78,53 +74,12 @@ body.sidebar-collapsed{ padding-left:0; }
 }
 body.sidebar-collapsed .sidebar{ transform:translateX(calc(-100% - 14px)); }
 
-/* ================================
-   Mobile sidebar behavior
-   - Sidebar should OVERLAY content
-   - Content should always use full width
-   ================================ */
-@media (max-width:768px){
-  /* Never reserve space for sidebar on mobile */
-  .main-content{ padding-left:0 !important; }
-
-  /* Sidebar becomes a full-height drawer */
-  .sidebar{
-    top:0; left:0; bottom:0;
-    border-radius:0;
-    width: min(86vw, var(--aside-w));
-    transform: translateX(-110%);
-    box-shadow: 0 24px 48px rgba(0,0,0,.28);
-  }
-
-  /* Open state */
-  body:not(.sidebar-collapsed) .sidebar{ transform: translateX(0); }
-  body.sidebar-collapsed .sidebar{ transform: translateX(-110%); }
-
-  /* Backdrop only on mobile when sidebar is open */
-  body:not(.sidebar-collapsed) .sidebar-backdrop{
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
-
-/* Backdrop (used on mobile when sidebar is open) */
-.sidebar-backdrop{
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.35);
-  backdrop-filter: blur(2px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .2s ease;
-  z-index: 90;
-}
-
 .sidebar-header{ padding:1.5rem; display:flex; align-items:center; gap:12px; border-bottom:1px solid #1F2937; }
 .sidebar-header .logo{ height:32px; margin-right:.75rem; }
 .sidebar-header h2{ margin:0; font-size:1.25rem; color:#F9FAFB; }
 
 .nav-label{ white-space:nowrap; }
-.sidebar-nav{ padding:1rem; flex-grow:1; overflow-y:auto; overscroll-behavior: contain; }
+.sidebar-nav{ padding:1rem; flex-grow:1; }
 .nav-link{
   display:flex; align-items:center; gap:.75rem; padding:.75rem 1rem; border-radius:6px; text-decoration:none;
   color:#9CA3AF; font-weight:500; margin-bottom:.5rem; transition:background-color .2s, color .2s;
@@ -267,18 +222,7 @@ hr{ border:none; border-top:1px solid #eee; margin:1.5rem 0; }
 .order-card li span{ font-weight:600; color:#4B5563; }
 
 .modal{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); justify-content:center; align-items:center; z-index:1000; }
-.modal-content{
-  background:#fff; color:#111827;
-  padding:1.25rem 1.25rem 1rem;
-  border-radius:12px;
-  width:560px;
-  max-width:92%;
-  max-height: calc(100vh - 40px);
-  overflow:auto;
-  -webkit-overflow-scrolling: touch;
-  box-shadow:0 10px 30px rgba(0,0,0,.2);
-  position:relative;
-}
+.modal-content{ background:#fff; color:#111827; padding:1.25rem 1.25rem 1rem; border-radius:12px; width:560px; max-width:92%; box-shadow:0 10px 30px rgba(0,0,0,.2); position:relative; }
 .close-btn{ position:absolute; top:8px; right:12px; background:transparent; border:none; font-size:24px; line-height:1; cursor:pointer; }
 .modal h3{ color:#D97706; margin-bottom:.75rem; }
 .modal ul{ list-style:none; padding-left:0; }
@@ -298,48 +242,13 @@ hr{ border:none; border-top:1px solid #eee; margin:1.5rem 0; }
 
 @media (max-width:900px){ .container{ grid-template-columns:1fr; gap:1.5rem; } }
 @media (max-width:768px){
-  body{ overflow-x:hidden; }
-
-  /* Sidebar overlays content on mobile */
-  .sidebar{ width:min(var(--aside-w), 86vw); transform:translateX(calc(-100% - 14px)); }
-  body:not(.sidebar-collapsed) .sidebar{ transform:translateX(0); }
-  body:not(.sidebar-collapsed) .sidebar-backdrop{ opacity:1; pointer-events:auto; }
-  body:not(.sidebar-collapsed){ overflow:hidden; }
-
+  .sidebar{ transform:translateX(calc(-100% - 14px)); width:var(--aside-w); }
   .main-content{ padding-left:0; }
-
-  /* Make the main layout breathe on small screens */
-  .main-header{ padding:.85rem 1rem; }
-  .container, .container-full-width{ padding:1rem; }
-  .card{ padding:1rem; border-radius:14px; }
-
   .header-row1{ flex-wrap:wrap; gap:8px; }
-  .searchbar{ max-width:none; width:100%; order:3; }
-  .greeting-pill{ order:2; }
-  .topbar-right{ order:4; margin-left:0; width:100%; justify-content:flex-end; }
+  .searchbar{ max-width:none; width:100%; order:2; }
+  .greeting-pill{ order:1; }
+  .topbar-right{ order:3; margin-left:0; width:100%; justify-content:flex-end; }
   .account-mini .label{ display:none; }
-
-  /* Modern mobile menu button (injected by common-ui.js if missing) */
-  .menu-toggle{
-    width:40px; height:40px; padding:0;
-    border-radius:999px;
-    background:#fff;
-    border:1px solid var(--border-color);
-    box-shadow:0 10px 24px rgba(0,0,0,.06);
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    color:var(--text-primary);
-  }
-  .menu-toggle svg{ width:20px; height:20px; }
-}
-
-/* Stack actions & prevent iOS input zoom */
-@media (max-width:560px){
-  input[type="text"], input[type="password"], input[type="number"], select, textarea{ font-size:16px; }
-  .form-actions{ flex-direction:column; align-items:stretch; gap:10px; }
-  .form-actions > *{ width:100%; }
-  button{ width:100%; }
 }
 
 @media (min-width:769px){
@@ -749,15 +658,16 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
   bottom: auto !important;
   align-items: center;
 }
+.sidebar { transform: none !important; }
 
-/* Desktop-only layout locks (do NOT apply on mobile) */
+body.sidebar-collapsed .sidebar {
+  transform: translateX(calc(-100% - 14px)) !important;
+}
+
+.main-content { padding-left: var(--aside-w) !important; }
+body.sidebar-collapsed .main-content { padding-left: 0 !important; }
+
 @media (min-width: 769px){
-  .sidebar { transform: none !important; }
-  body.sidebar-collapsed .sidebar { transform: translateX(calc(-100% - 14px)) !important; }
-
-  .main-content { padding-left: var(--aside-w) !important; }
-  body.sidebar-collapsed .main-content { padding-left: 0 !important; }
-
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed) !important; }
 }
 /* ===== Stocktaking Cards Layout ===== */
@@ -3188,3 +3098,41 @@ body.permissions-loading .sidebar li {
   display: none !important;
 }
 
+
+/* =================================
+   Mobile Full-Width Fix (Override)
+   Ensures content uses full screen width when sidebar is closed on mobile.
+   ================================= */
+
+/* Backdrop for mobile sidebar (injected by common-ui.js) */
+.sidebar-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+  z-index: 90;
+}
+
+@media (max-width: 768px){
+  /* Always let content take full width on mobile */
+  .main-content{ padding-left: 0 !important; }
+  body.sidebar-collapsed .main-content{ padding-left: 0 !important; }
+
+  /* When sidebar is OPEN (i.e., NOT collapsed), show backdrop */
+  body:not(.sidebar-collapsed) .sidebar-backdrop{
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Reduce heavy desktop paddings */
+  .container, .container-full-width{
+    max-width: 100% !important;
+    padding: 1rem !important;
+  }
+  .main-header{ padding: .9rem 1rem !important; }
+
+  /* Searchbar should not force layout */
+  .searchbar{ width: 100% !important; max-width: 100% !important; }
+}
