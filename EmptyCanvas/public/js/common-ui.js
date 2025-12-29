@@ -27,27 +27,36 @@ document.addEventListener('DOMContentLoaded', () => {
       h2.textContent = '';
       h2.style.display = 'none';
     }
-    // Insert logo image once (also acts as the sidebar toggle)
-    let logo = header.querySelector('img.sidebar-brand-logo');
-    if (!logo) {
-      logo = document.createElement('img');
-      logo.className = 'logo sidebar-brand-logo';
-      logo.id = 'sidebar-logo-toggle';
-      logo.src = '/images/logo.png';
-      logo.alt = 'Company logo';
-      // Put logo at the start of the header
-      header.insertBefore(logo, header.firstChild);
+    // Remove legacy single-logo implementation (older builds)
+    const legacyLogo = header.querySelector('img.sidebar-brand-logo');
+    if (legacyLogo) {
+      try { legacyLogo.remove(); } catch {}
     }
 
-    // Make logo act as the sidebar toggle (replaces the arrow button)
-    logo.setAttribute('role', 'button');
-    logo.setAttribute('tabindex', '0');
-    logo.setAttribute('aria-label', 'Toggle dashboard');
+    // Insert a brand toggle that can animate between:
+    // - Full horizontal logo (sidebar open)
+    // - Icon logo (sidebar mini)
+    let brandToggle = header.querySelector('#sidebar-logo-toggle');
+    if (!brandToggle) {
+      brandToggle = document.createElement('div');
+      brandToggle.className = 'sidebar-brand-toggle';
+      brandToggle.id = 'sidebar-logo-toggle';
+      brandToggle.innerHTML = `
+        <img class="brand-logo-full" src="/images/Logo%20horizontal.png" alt="Company logo" />
+        <img class="brand-logo-icon" src="/images/logo.png" alt="" aria-hidden="true" />
+      `;
+      header.insertBefore(brandToggle, header.firstChild);
+    }
 
-    if (!logo.dataset.boundToggle) {
-      logo.dataset.boundToggle = '1';
-      logo.addEventListener('click', (e) => toggleSidebar(e));
-      logo.addEventListener('keydown', (e) => {
+    // Make brand toggle act as the sidebar toggle (replaces the arrow button)
+    brandToggle.setAttribute('role', 'button');
+    brandToggle.setAttribute('tabindex', '0');
+    brandToggle.setAttribute('aria-label', 'Toggle dashboard');
+
+    if (!brandToggle.dataset.boundToggle) {
+      brandToggle.dataset.boundToggle = '1';
+      brandToggle.addEventListener('click', (e) => toggleSidebar(e));
+      brandToggle.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           toggleSidebar(e);
@@ -471,15 +480,26 @@ if (document.querySelector('.sidebar')) {
 
   menuToggle    && menuToggle.addEventListener('click', toggleSidebar);
 
-  // إغلاق السايدبار بالضغط خارجها (موبايل)
+  // ✅ Requested: close the dashboard when clicking outside it
+  // - Mobile: closes the overlay sidebar
+  // - Desktop: collapses to mini sidebar
   document.addEventListener('click', (event) => {
-    if (!isMobile()) return;
-        const insideSidebar = event.target.closest('.sidebar');
-    const onToggles = event.target.closest('#menu-toggle');
+    const insideSidebar = event.target.closest('.sidebar');
+    const onToggles = event.target.closest('#menu-toggle') || event.target.closest('#sidebar-logo-toggle');
     if (insideSidebar || onToggles) return;
-    // اقفل السايدبار فقط لو هو مفتوح
-    if (document.body.classList.contains('sidebar-collapsed')) return;
-    document.body.classList.add('sidebar-collapsed');
+
+    if (isMobile()) {
+      // Close only if open
+      if (document.body.classList.contains('sidebar-collapsed')) return;
+      document.body.classList.add('sidebar-collapsed');
+      setAria();
+      return;
+    }
+
+    // Desktop: collapse only if currently expanded
+    if (document.body.classList.contains('sidebar-mini')) return;
+    document.body.classList.add('sidebar-mini');
+    try { localStorage.setItem(KEY_MINI, '1'); } catch {}
     setAria();
   });
 

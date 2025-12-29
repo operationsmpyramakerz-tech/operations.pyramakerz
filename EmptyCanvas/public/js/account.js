@@ -85,10 +85,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div class="account-grid">
           ${FIELD_META.map(accRow).join('')}
         </div>
-        <p class="account-hint">
-          <i data-feather="info"></i>
-          To save any change, you must enter your current password.
-        </p>
       </div>
     `;
 
