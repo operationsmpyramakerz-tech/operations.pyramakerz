@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const logoutBtn     = document.getElementById('logoutBtn');
   let menuToggle    = null;     // injected on mobile
-  const sidebarToggle = document.getElementById('sidebar-toggle');  // موجود
+  let sidebarToggle = document.getElementById('sidebar-toggle');  // removed (logo is the toggle now)
 
   const KEY_MINI       = 'ui.sidebarMini';   // 1 = mini على الديسكتوب
   const CACHE_ALLOWED  = 'allowedPages';     // sessionStorage key
@@ -27,15 +27,32 @@ document.addEventListener('DOMContentLoaded', () => {
       h2.textContent = '';
       h2.style.display = 'none';
     }
-
-    // Insert logo image once
-    if (!header.querySelector('img.sidebar-brand-logo')) {
-      const logo = document.createElement('img');
+    // Insert logo image once (also acts as the sidebar toggle)
+    let logo = header.querySelector('img.sidebar-brand-logo');
+    if (!logo) {
+      logo = document.createElement('img');
       logo.className = 'logo sidebar-brand-logo';
+      logo.id = 'sidebar-logo-toggle';
       logo.src = '/images/logo.png';
       logo.alt = 'Company logo';
-      // Put logo at the start of the header (before toggle)
+      // Put logo at the start of the header
       header.insertBefore(logo, header.firstChild);
+    }
+
+    // Make logo act as the sidebar toggle (replaces the arrow button)
+    logo.setAttribute('role', 'button');
+    logo.setAttribute('tabindex', '0');
+    logo.setAttribute('aria-label', 'Toggle dashboard');
+
+    if (!logo.dataset.boundToggle) {
+      logo.dataset.boundToggle = '1';
+      logo.addEventListener('click', (e) => toggleSidebar(e));
+      logo.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleSidebar(e);
+        }
+      });
     }
   }
 
@@ -122,9 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!settings) {
       settings = document.createElement('a');
       settings.id = 'sidebarSettings';
-      settings.className = 'nav-link sidebar-settings-link';
+      settings.className = 'logout-btn settings-btn';
       settings.href = '/account';
-      settings.innerHTML = `<i data-feather="settings"></i><span class="nav-label">Settings</span>`;
+      settings.innerHTML = `<i data-feather="settings"></i> Settings`;
       if (logout) footer.insertBefore(settings, logout);
       else footer.appendChild(settings);
     }
@@ -165,7 +182,14 @@ function ensureSidebarBackdrop(){
 
 function ensureMenuToggle(){
   let btn = document.getElementById('menu-toggle');
-  if (btn) return btn;
+  if (btn) {
+    // If it already exists from an older build, normalize it to the logo button
+    btn.setAttribute('aria-label', 'Toggle dashboard');
+    if (!btn.querySelector('img.menu-toggle-logo')) {
+      btn.innerHTML = '<img class="menu-toggle-logo" src="/images/logo.png" alt="" />';
+    }
+    return btn;
+  }
 
   // Put the button at the top-left inside the header (if header exists)
   const target =
@@ -179,8 +203,8 @@ function ensureMenuToggle(){
   btn.id = 'menu-toggle';
   btn.type = 'button';
   btn.className = 'menu-toggle';
-  btn.setAttribute('aria-label', 'Open dashboard');
-  btn.innerHTML = '<i data-feather="menu"></i>';
+  btn.setAttribute('aria-label', 'Toggle dashboard');
+  btn.innerHTML = '<img class="menu-toggle-logo" src="/images/logo.png" alt="" />';
 
   target.insertBefore(btn, target.firstChild);
   return btn;
@@ -209,8 +233,8 @@ function relocateAccountLink(){
     accountLink.href = '/account';
     accountLink.setAttribute('aria-label', 'Account settings');
     accountLink.classList.remove('account-mini', 'account-in-sidebar');
-    accountLink.classList.add('nav-link', 'sidebar-settings-link');
-    accountLink.innerHTML = `<i data-feather="settings"></i><span class="nav-label">Settings</span>`;
+    accountLink.classList.add('logout-btn', 'settings-btn');
+    accountLink.innerHTML = `<i data-feather="settings"></i> Settings`;
   };
 
   // If it's already in the footer, just ensure order (above Logout)
@@ -235,6 +259,12 @@ if (document.querySelector('.sidebar')) {
   ensureSidebarBackdrop();
   menuToggle = ensureMenuToggle();
   ensureSidebarBranding();
+
+  // Remove the old arrow toggle button (we toggle via the company logo instead)
+  if (sidebarToggle) {
+    try { sidebarToggle.remove(); } catch {}
+    sidebarToggle = null;
+  }
   ensureSidebarProfile();
   relocateAccountLink();
   ensureSettingsLink();
@@ -408,7 +438,8 @@ if (document.querySelector('.sidebar')) {
     const expanded = isMobile()
       ? !document.body.classList.contains('sidebar-collapsed')
       : !document.body.classList.contains('sidebar-mini');
-    [menuToggle, sidebarToggle].forEach(btn => btn && btn.setAttribute('aria-expanded', String(!!expanded)));
+    const sidebarLogoToggle = document.getElementById('sidebar-logo-toggle');
+    [menuToggle, sidebarLogoToggle].forEach(btn => btn && btn.setAttribute('aria-expanded', String(!!expanded)));
   }
 
   function applyInitial(){
@@ -438,14 +469,13 @@ if (document.querySelector('.sidebar')) {
     if (window.feather) feather.replace();
   }
 
-  sidebarToggle && sidebarToggle.addEventListener('click', toggleSidebar);
   menuToggle    && menuToggle.addEventListener('click', toggleSidebar);
 
   // إغلاق السايدبار بالضغط خارجها (موبايل)
   document.addEventListener('click', (event) => {
     if (!isMobile()) return;
         const insideSidebar = event.target.closest('.sidebar');
-    const onToggles = event.target.closest('#menu-toggle, #sidebar-toggle');
+    const onToggles = event.target.closest('#menu-toggle');
     if (insideSidebar || onToggles) return;
     // اقفل السايدبار فقط لو هو مفتوح
     if (document.body.classList.contains('sidebar-collapsed')) return;
@@ -481,9 +511,8 @@ if (document.querySelector('.sidebar')) {
   ensureGreetingAndPages();
 
   window.addEventListener('user:updated', () => {
-    renderGreeting(getCachedName());
-    const allowed = getCachedAllowedPages();
-    if (allowed) applyAllowedPages(allowed);
+    // Refresh name + sidebar profile + permissions from the server
+    ensureGreetingAndPages();
   });
 
   let resizeTimer;
