@@ -91,148 +91,115 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (window.feather) feather.replace();
   }
 
-  // ===== Modal =====
-  let modal = null;
+  // ===== Modal (markup lives in account.html) =====
+  // We intentionally reuse the same classes/styles as Expenses "Settled my account"
+  // so the Account edit window looks identical.
+
+  const modalEl = document.getElementById('accountEditModal');
+  const titleEl = document.getElementById('accountEditTitle');
+  const valueLabelEl = document.getElementById('accountEditValueLabel');
+  const passLabelEl = document.getElementById('accountEditPasswordLabel');
+  const valueInput = document.getElementById('accountEditValue');
+  const passInput = document.getElementById('accountEditPassword');
+  const confirmBtn = document.getElementById('accountEditSubmit');
+  const cancelBtn = document.getElementById('accountEditClose');
+
   let activeField = null;
 
-  function ensureModal() {
-    if (modal) return modal;
-
-    const backdrop = document.createElement('div');
-    backdrop.className = 'acc-edit-backdrop';
-    backdrop.id = 'acc-edit-backdrop';
-    backdrop.setAttribute('aria-hidden', 'true');
-
-    backdrop.innerHTML = `
-      <div class="acc-edit-modal" role="dialog" aria-modal="true" aria-labelledby="acc-edit-title">
-        <h3 class="acc-edit-title" id="acc-edit-title">Edit</h3>
-
-        <div class="acc-edit-field">
-          <label id="acc-edit-value-label" for="acc-edit-value"><i data-feather="edit-3"></i> Value</label>
-          <input id="acc-edit-value" type="text" />
-        </div>
-
-        <div class="acc-edit-field">
-          <label id="acc-edit-password-label" for="acc-edit-password"><i data-feather="lock"></i> Current password</label>
-          <input id="acc-edit-password" type="password" inputmode="numeric" autocomplete="current-password" />
-        </div>
-
-        <div class="acc-edit-actions">
-          <button class="acc-edit-btn confirm" id="acc-edit-confirm" type="button">Submit</button>
-          <button class="acc-edit-btn cancel" id="acc-edit-cancel" type="button">Close</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(backdrop);
-
-    const titleEl = backdrop.querySelector('#acc-edit-title');
-    const valueLabelEl = backdrop.querySelector('#acc-edit-value-label');
-    const passLabelEl = backdrop.querySelector('#acc-edit-password-label');
-    const valueInput = backdrop.querySelector('#acc-edit-value');
-    const passInput = backdrop.querySelector('#acc-edit-password');
-    const confirmBtn = backdrop.querySelector('#acc-edit-confirm');
-    const cancelBtn = backdrop.querySelector('#acc-edit-cancel');
-
-    // Close when clicking on the backdrop (outside the modal)
-    backdrop.addEventListener('click', (e) => {
-      if (e.target === backdrop) closeModal();
-    });
-
-    cancelBtn.addEventListener('click', closeModal);
-
-    confirmBtn.addEventListener('click', async () => {
-      if (!activeField) return;
-      await saveActiveField();
-    });
-
-    // Enter to confirm, Esc to cancel
-    backdrop.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeModal();
-        return;
-      }
-      if (e.key === 'Enter') {
-        // Avoid submitting while focused on a button
-        if (document.activeElement && document.activeElement.tagName === 'BUTTON') return;
-        e.preventDefault();
-        saveActiveField();
-      }
-    });
-
-    modal = { backdrop, titleEl, valueLabelEl, passLabelEl, valueInput, passInput, confirmBtn, cancelBtn };
-    return modal;
+  function isModalOpen() {
+    return !!modalEl && modalEl.style.display === 'flex';
   }
 
   function openModalForField(fieldKey) {
     const meta = FIELD_META.find((m) => m.key === fieldKey);
-    if (!meta) return;
+    if (!meta || !modalEl) return;
 
-    const m = ensureModal();
     activeField = meta;
 
-    m.titleEl.textContent = `Edit ${meta.label}`;
+    if (titleEl) titleEl.textContent = `Edit ${meta.label}`;
+    if (valueLabelEl) valueLabelEl.innerHTML = `<i data-feather="${escapeHTML(meta.icon)}"></i> ${escapeHTML(meta.label)}`;
+    if (passLabelEl) passLabelEl.innerHTML = `<i data-feather="lock"></i> Current password`;
 
-    // Make the mini-window match the "Settled my account" style (label + icon)
-    if (m.valueLabelEl) {
-      m.valueLabelEl.innerHTML = `<i data-feather="${escapeHTML(meta.icon)}"></i> ${escapeHTML(meta.label)}`;
-    }
-    if (m.passLabelEl) {
-      m.passLabelEl.innerHTML = `<i data-feather="lock"></i> Current password`;
-    }
+    // Configure input type per field
+    if (valueInput) {
+      valueInput.type = meta.inputType || 'text';
 
-    // Configure input types per field
-    m.valueInput.type = meta.inputType || 'text';
-    if (meta.inputMode) m.valueInput.setAttribute('inputmode', meta.inputMode);
-    else m.valueInput.removeAttribute('inputmode');
+      if (meta.inputMode) valueInput.setAttribute('inputmode', meta.inputMode);
+      else valueInput.removeAttribute('inputmode');
 
-    // Autocomplete hints (optional)
-    if (meta.autocomplete) m.valueInput.setAttribute('autocomplete', meta.autocomplete);
-    else m.valueInput.removeAttribute('autocomplete');
+      if (meta.autocomplete) valueInput.setAttribute('autocomplete', meta.autocomplete);
+      else valueInput.removeAttribute('autocomplete');
 
-    if (meta.placeholder) m.valueInput.setAttribute('placeholder', meta.placeholder);
-    else m.valueInput.removeAttribute('placeholder');
+      if (meta.placeholder) valueInput.setAttribute('placeholder', meta.placeholder);
+      else valueInput.removeAttribute('placeholder');
 
-    // Prefill current value (except password)
-    if (fieldKey === 'password') {
-      m.valueInput.value = '';
-    } else {
-      m.valueInput.value = (state && state[fieldKey] != null) ? String(state[fieldKey]) : '';
+      // Prefill current value (except password)
+      valueInput.value = (fieldKey === 'password')
+        ? ''
+        : ((state && state[fieldKey] != null) ? String(state[fieldKey]) : '');
     }
 
-    m.passInput.value = '';
-    m.backdrop.classList.add('is-open');
-    m.backdrop.setAttribute('aria-hidden', 'false');
+    if (passInput) passInput.value = '';
+
+    modalEl.style.display = 'flex';
+    modalEl.setAttribute('aria-hidden', 'false');
 
     // Focus
     setTimeout(() => {
-      m.valueInput.focus();
-      m.valueInput.select?.();
+      valueInput?.focus();
+      valueInput?.select?.();
     }, 0);
 
     if (window.feather) feather.replace();
   }
 
   function closeModal() {
-    if (!modal) return;
-    modal.backdrop.classList.remove('is-open');
-    modal.backdrop.setAttribute('aria-hidden', 'true');
+    if (!modalEl) return;
+    modalEl.style.display = 'none';
+    modalEl.setAttribute('aria-hidden', 'true');
     activeField = null;
     // Clear sensitive fields
-    modal.passInput.value = '';
+    if (passInput) passInput.value = '';
   }
 
+  // Close when clicking on the backdrop (outside the box)
+  modalEl?.addEventListener('click', (e) => {
+    if (e.target === modalEl) closeModal();
+  });
+
+  cancelBtn?.addEventListener('click', closeModal);
+
+  confirmBtn?.addEventListener('click', async () => {
+    if (!activeField) return;
+    await saveActiveField();
+  });
+
+  // Enter to confirm, Esc to cancel
+  document.addEventListener('keydown', (e) => {
+    if (!isModalOpen()) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
+    if (e.key === 'Enter') {
+      // Avoid submitting while focused on a button
+      if (document.activeElement && document.activeElement.tagName === 'BUTTON') return;
+      e.preventDefault();
+      saveActiveField();
+    }
+  });
+
   async function saveActiveField() {
-    if (!activeField || !modal) return;
+    if (!activeField || !modalEl) return;
 
     const field = activeField.key;
     const meta = activeField;
 
-    const newValRaw = modal.valueInput.value;
+    const newValRaw = String(valueInput?.value ?? '');
     const newVal = normalizeValueForApi(field, newValRaw);
 
-    const currentPassword = String(modal.passInput.value || '').trim();
+    const currentPassword = String(passInput?.value || '').trim();
 
     // Client-side validation
     if (meta.required && (!newVal || String(newVal).trim() === '')) {
@@ -249,8 +216,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     payload[field] = newVal;
 
     // UI lock
-    modal.confirmBtn.disabled = true;
-    modal.cancelBtn.disabled = true;
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (cancelBtn) cancelBtn.disabled = true;
 
     try {
       const res = await fetch('/api/account', {
@@ -289,8 +256,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) {
       toast('error', 'Save failed', e.message || 'Failed to update account.');
     } finally {
-      modal.confirmBtn.disabled = false;
-      modal.cancelBtn.disabled = false;
+      if (confirmBtn) confirmBtn.disabled = false;
+      if (cancelBtn) cancelBtn.disabled = false;
       if (window.feather) feather.replace();
     }
   }
