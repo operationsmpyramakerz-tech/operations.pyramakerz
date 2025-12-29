@@ -62,10 +62,44 @@ function ensureMenuToggle(){
   return btn;
 }
 
+
+function relocateAccountLink(){
+  // Move the "My account" button from the top header into the sidebar footer (above Logout)
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+
+  const footer = sidebar.querySelector('.sidebar-footer');
+  if (!footer) return;
+
+  const accountLink =
+    document.querySelector('.account-mini[href="/account"]') ||
+    document.querySelector('.account-mini[href="/account/"]') ||
+    document.querySelector('a.account-mini');
+
+  if (!accountLink) return;
+
+  // If it's already in the footer, just ensure order (above Logout)
+  const logout = footer.querySelector('#logoutBtn');
+  if (footer.contains(accountLink)) {
+    if (logout && logout.parentNode === footer) {
+      footer.insertBefore(accountLink, logout);
+    }
+    accountLink.classList.add('account-in-sidebar');
+    return;
+  }
+
+  // Detach from header and place in footer above logout
+  if (logout && logout.parentNode === footer) footer.insertBefore(accountLink, logout);
+  else footer.appendChild(accountLink);
+
+  accountLink.classList.add('account-in-sidebar');
+}
+
 // Inject only on pages that have the sidebar layout
 if (document.querySelector('.sidebar')) {
   ensureSidebarBackdrop();
   menuToggle = ensureMenuToggle();
+  relocateAccountLink();
   if (window.feather) feather.replace();
 }
 
