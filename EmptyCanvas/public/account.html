@@ -10,6 +10,86 @@
   /* 🔒 Critical: prevent sidebar links flash before permissions load */
   body.permissions-loading .sidebar li { display: none !important; }
 </style>
+
+<!-- Account page: match "Settled my account" mini-window styling + smaller edit button -->
+<style>
+  /* Smaller edit icon button (transparent background) */
+  .acc-action.acc-edit{
+    width: 26px !important;
+    height: 26px !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    border-radius: 10px !important;
+  }
+  .acc-action.acc-edit:hover{
+    background: transparent !important;
+    opacity: 0.85;
+  }
+  .acc-action.acc-edit svg{ width: 15px; height: 15px; }
+
+  /* ============================
+     Modal styling (same as Expenses "Settled my account")
+     ============================ */
+  .ex-modal{
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+  }
+  .ex-modal-box{
+    background: white;
+    padding: 1.8rem;
+    width: 90%;
+    max-width: 420px;
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  }
+  .ex-modal-title{
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+  .ex-input{
+    width: 100%;
+    padding: 0.8rem;
+    border-radius: 12px;
+    border: 1.5px solid #d1d5db;
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    background: #fff;
+  }
+  .ex-modal-actions{
+    display: flex;
+    justify-content: space-between;
+    margin-top: 1rem;
+  }
+  .ex-btn{
+    padding: 0.7rem 1.4rem;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .ex-primary{ background: #3b82f6; color: white; }
+  .ex-danger{ background: #ef4444; color: white; }
+
+  /* Label row with icon (like expenses modals) */
+  .field-label{
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 700;
+    color: #111;
+    margin-top: 0.6rem;
+    margin-bottom: 0.25rem;
+  }
+  .field-label svg{ width: 16px; height: 16px; }
+
+</style>
 <script src="https://unpkg.com/feather-icons"></script>
 </head>
 <body class="permissions-loading">
@@ -134,6 +214,24 @@
 </section>
 </main>
 </div>
+</div>
+
+<!-- ACCOUNT EDIT MODAL (same style as Expenses "Settled my account") -->
+<div id="accountEditModal" class="ex-modal" aria-hidden="true">
+  <div class="ex-modal-box" role="dialog" aria-modal="true" aria-labelledby="accountEditTitle">
+    <h3 class="ex-modal-title" id="accountEditTitle">Edit</h3>
+
+    <label class="field-label" id="accountEditValueLabel"><i data-feather="edit-3"></i> Value</label>
+    <input id="accountEditValue" type="text" class="ex-input" />
+
+    <label class="field-label" id="accountEditPasswordLabel"><i data-feather="lock"></i> Current password</label>
+    <input id="accountEditPassword" type="password" class="ex-input" inputmode="numeric" autocomplete="current-password" />
+
+    <div class="ex-modal-actions">
+      <button id="accountEditSubmit" class="ex-btn ex-primary" type="button">Submit</button>
+      <button id="accountEditClose" class="ex-btn ex-danger" type="button">Close</button>
+    </div>
+  </div>
 </div>
     <script>feather.replace();</script>
 <script src="/js/common-ui.js"></script>
