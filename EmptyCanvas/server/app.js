@@ -4055,10 +4055,22 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       right: { style: "thin", color: BORDER_COLOR },
     };
     // Numbers formatting (NO currency sign)
-    // - Keep up to 2 decimals when needed (6.5 stays 6.5)
-    // - No trailing dot for integers (150 stays 150)
-    // - Negative values keep '-' sign
-    const numberFmt = '#,##0.##;-#,##0.##;0';
+    // IMPORTANT:
+    // Some Excel viewers (especially mobile) render a trailing "." when the format contains
+    // optional decimals like "0.##" even if the value is an integer. To guarantee "150" (not "150.")
+    // we use two formats and choose per-cell based on whether the value is integer-like.
+    const numberFmtInt = '#,##0;-#,##0;0';
+    const numberFmtDec = '#,##0.##;-#,##0.##;0';
+
+    function isIntLike(n) {
+      const num = Number(n);
+      if (!Number.isFinite(num)) return true;
+      return Math.abs(num - Math.round(num)) < 1e-9;
+    }
+
+    function numFmtFor(n) {
+      return isIntLike(n) ? numberFmtInt : numberFmtDec;
+    }
 
     // Funds Type cell colors (only the cell itself, NOT the whole row)
     // Prefer using the same colors configured in Notion for the "Funds Type" select options.
@@ -4255,7 +4267,8 @@ app.post("/api/expenses/export/excel", async (req, res) => {
 
       valueCell.value = Number(r.value || 0);
       // No currency sign + keep decimals only when needed
-      valueCell.numFmt = numberFmt;
+      // (and never show a trailing dot for integers)
+      valueCell.numFmt = numFmtFor(valueCell.value);
       valueCell.font = { bold: true, color: { argb: r.valueColor } };
       valueCell.alignment = { horizontal: "center", vertical: "middle" };
 
@@ -4373,12 +4386,12 @@ app.post("/api/expenses/export/excel", async (req, res) => {
 
         // Cash columns
         if (colNumber === 6) {
-          cell.numFmt = numberFmt;
+          cell.numFmt = numFmtFor(cell.value);
           cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FF16A34A" } };
         }
         if (colNumber === 7) {
-          cell.numFmt = numberFmt;
+          cell.numFmt = numFmtFor(cell.value);
           cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FFDC2626" } };
         }
