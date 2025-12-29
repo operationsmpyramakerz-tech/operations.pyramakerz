@@ -424,13 +424,36 @@ hr{ border:none; border-top:1px solid #eee; margin:1.5rem 0; }
 
 .sidebar-nav .nav-link, .sidebar-nav .nav-group-title, .sidebar-footer .logout-btn{ gap:12px; }
 .sidebar-nav svg, .sidebar-footer svg{ width:18px; height:18px; stroke-width:2; flex-shrink:0; }
-.logout-btn{ width:100%; display:flex; align-items:center; justify-content:center; gap:12px; background:#1F2937; color:#9CA3AF; border:1px solid #374151;   padding:.75rem 1.5rem;
-  border-radius:6px;
+/* Sidebar footer buttons (Settings + Logout)
+   Requested: no gray background, icon + text only */
+.logout-btn{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:12px;
+  background:transparent;
+  border:none;
+  box-shadow:none;
+  padding:.75rem .75rem;
+  border-radius:8px; /* keeps a nice focus outline shape */
   cursor:pointer;
   text-decoration:none;
-  font-weight:700;
+  font-weight:600;
+  color:#9CA3AF;
+  -webkit-tap-highlight-color: transparent;
 }
-.logout-btn:hover{ background:#374151; color:#FFFFFF; }
+.logout-btn:hover{
+  background:transparent;
+  color:#FFFFFF;
+}
+.logout-btn:active{
+  background:transparent;
+}
+.logout-btn:focus-visible{
+  outline:2px solid rgba(255,255,255,0.22);
+  outline-offset:2px;
+}
 
 .sidebar-toggle{
   background:#1F2937; color:#FFFFFF; border:1px solid #374151;
@@ -3443,40 +3466,21 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
    ✅ Requested: Sidebar footer buttons (Settings + Logout)
    Without background (transparent)
    ========================================= */
-.sidebar-footer{
-  /* Keep footer visually consistent with the sidebar (no panel look) */
+.sidebar-footer .logout-btn{
   background: transparent !important;
-}
-.sidebar-footer .logout-btn,
-.sidebar-footer #sidebarSettings{
-  /* Remove button-like background/border across browsers */
-  background: none !important;
-  background-color: transparent !important;
-  border: 0 !important;
+  border: none !important;
   box-shadow: none !important;
-  -webkit-appearance: none;
-  appearance: none;
-
-  display: flex;
-  align-items: center;
-  gap: 12px;
-
-  width: 100%;
-  padding: .55rem .25rem;
-  border-radius: 0 !important;
+  padding: .75rem 1rem;
   justify-content: flex-start;
   color: #9CA3AF;
   font-weight: 600;
-  transition: color .15s ease;
 }
-.sidebar-footer .logout-btn:hover,
-.sidebar-footer #sidebarSettings:hover{
-  background: none !important;
+.sidebar-footer .logout-btn:hover{
+  background: transparent !important;
   border-color: transparent !important;
   color: #FFFFFF;
 }
-.sidebar-footer .logout-btn:focus-visible,
-.sidebar-footer #sidebarSettings:focus-visible{
+.sidebar-footer .logout-btn:focus-visible{
   outline: 2px solid rgba(255,255,255,0.25);
   outline-offset: 2px;
 }
@@ -3569,4 +3573,3 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
   .acc-edit-actions{ flex-direction: column; }
   .acc-edit-btn{ width: 100%; }
 }
-
