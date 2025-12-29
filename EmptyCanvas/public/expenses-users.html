@@ -307,17 +307,17 @@
       margin-top: 0.3rem;
     }
 
-    #userExpensesList {
+    .sheet-scroll {
       flex: 1;
       overflow-y: auto;
       margin-top: 1rem;
       padding-right: 4px;
     }
 
-    #userExpensesList::-webkit-scrollbar {
+    .sheet-scroll::-webkit-scrollbar {
       width: 6px;
     }
-    #userExpensesList::-webkit-scrollbar-thumb {
+    .sheet-scroll::-webkit-scrollbar-thumb {
       background: #d4d4d4;
       border-radius: 10px;
     }
@@ -861,13 +861,12 @@
           <div class="user-expenses-title" id="userExpensesTitle">User Expenses</div>
           <div class="user-expenses-sub">All expenses for this team member</div>
         </div>
-
-        <button class="sheet-close-icon" type="button" aria-label="Close" onclick="closeUserExpensesModal()">
-          <i data-feather="x"></i>
-        </button>
       </div>
 
-      <div class="total-balance-card" id="totalBalanceCard">
+    </div>
+
+    <div id="userExpensesScroll" class="sheet-scroll">
+<div class="total-balance-card" id="totalBalanceCard">
         <div class="total-balance-meta">
           <div class="total-balance-label">
             <i data-feather="credit-card"></i>
@@ -932,10 +931,11 @@
           </div>
         </div>
       </div>
+
+      <div id="userExpensesList">
+      <!-- list items -->
     </div>
 
-    <div id="userExpensesList">
-      <!-- list items -->
     </div>
 
     <button class="modal-close-btn" onclick="closeUserExpensesModal()">
