@@ -6,12 +6,69 @@ document.addEventListener('DOMContentLoaded', () => {
   document.body.classList.add('permissions-loading');
 
   const logoutBtn     = document.getElementById('logoutBtn');
-  const menuToggle    = document.getElementById('menu-toggle');     // قد لا يوجد
+  let menuToggle    = null;     // injected on mobile
   const sidebarToggle = document.getElementById('sidebar-toggle');  // موجود
 
   const KEY_MINI       = 'ui.sidebarMini';   // 1 = mini على الديسكتوب
   const CACHE_ALLOWED  = 'allowedPages';     // sessionStorage key
   const isMobile = () => window.innerWidth <= 768;
+// ====== Mobile Sidebar UX (hamburger button + backdrop) ======
+// Goal:
+// - On mobile: sidebar is collapsed by default.
+// - Provide a top-left button to open it.
+// - Clicking anywhere outside (backdrop) closes it.
+function ensureSidebarBackdrop(){
+  let backdrop = document.querySelector('.sidebar-backdrop');
+  if (!backdrop){
+    backdrop = document.createElement('div');
+    backdrop.className = 'sidebar-backdrop';
+    backdrop.id = 'sidebar-backdrop';
+    backdrop.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(backdrop);
+  }
+
+  // Close when tapping outside the sidebar (mobile only)
+  // Note: CSS already shows/hides backdrop via body.sidebar-collapsed
+  backdrop.addEventListener('click', () => {
+    if (!isMobile()) return;
+    if (document.body.classList.contains('sidebar-collapsed')) return;
+    document.body.classList.add('sidebar-collapsed');
+    setAria();
+  });
+
+  return backdrop;
+}
+
+function ensureMenuToggle(){
+  let btn = document.getElementById('menu-toggle');
+  if (btn) return btn;
+
+  // Put the button at the top-left inside the header (if header exists)
+  const target =
+    document.querySelector('.main-header .header-row1 .left') ||
+    document.querySelector('.main-header .header-row1') ||
+    document.querySelector('.main-header');
+
+  if (!target) return null;
+
+  btn = document.createElement('button');
+  btn.id = 'menu-toggle';
+  btn.type = 'button';
+  btn.className = 'menu-toggle';
+  btn.setAttribute('aria-label', 'Open dashboard');
+  btn.innerHTML = '<i data-feather="menu"></i>';
+
+  target.insertBefore(btn, target.firstChild);
+  return btn;
+}
+
+// Inject only on pages that have the sidebar layout
+if (document.querySelector('.sidebar')) {
+  ensureSidebarBackdrop();
+  menuToggle = ensureMenuToggle();
+  if (window.feather) feather.replace();
+}
+
 
   // ====== Access control (show/hide links) ======
   // مفاتيح lowercase للمقارنة الثابتة
@@ -203,9 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // إغلاق السايدبار بالضغط خارجها (موبايل)
   document.addEventListener('click', (event) => {
     if (!isMobile()) return;
-    const clickedInteractive = event.target.closest('button,[type="button"],[type="submit"],a,input,select,textarea,.choices,.form-actions');
-    if (clickedInteractive) return;
-    const insideSidebar = event.target.closest('.sidebar');
+        const insideSidebar = event.target.closest('.sidebar');
     const onToggles = event.target.closest('#menu-toggle, #sidebar-toggle');
     if (insideSidebar || onToggles) return;
     // اقفل السايدبار فقط لو هو مفتوح
