@@ -81,7 +81,9 @@ body.sidebar-collapsed .sidebar{ transform:translateX(calc(-100% - 14px)); }
 /* =================================
    Sidebar: Brand logo instead of "Dashboard"
    ================================= */
-.sidebar-brand-logo{ height:32px; width:auto; object-fit:contain; margin-right:0; }
+.sidebar-brand-logo{ height:32px; width:auto; object-fit:contain; margin-right:0;   cursor:pointer;
+}
+
 
 /* =================================
    Sidebar: Profile header (avatar + name + position)
@@ -199,6 +201,12 @@ body.sidebar-collapsed .main-content{ padding-left:0; }
 #menu-toggle.menu-toggle svg{
   width: 22px;
   height: 22px;
+}
+#menu-toggle.menu-toggle img.menu-toggle-logo{
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  display: block;
 }
 
 /* On desktop the sidebar is already visible → hide the mobile toggle button */
@@ -363,13 +371,19 @@ hr{ border:none; border-top:1px solid #eee; margin:1.5rem 0; }
 
 .sidebar-nav .nav-link, .sidebar-nav .nav-group-title, .sidebar-footer .logout-btn{ gap:12px; }
 .sidebar-nav svg, .sidebar-footer svg{ width:18px; height:18px; stroke-width:2; flex-shrink:0; }
-.logout-btn{ width:100%; display:flex; align-items:center; justify-content:center; gap:12px; background:#1F2937; color:#9CA3AF; border:1px solid #374151; }
+.logout-btn{ width:100%; display:flex; align-items:center; justify-content:center; gap:12px; background:#1F2937; color:#9CA3AF; border:1px solid #374151;   padding:.75rem 1.5rem;
+  border-radius:6px;
+  cursor:pointer;
+  text-decoration:none;
+  font-weight:700;
+}
 .logout-btn:hover{ background:#374151; color:#FFFFFF; }
 
 .sidebar-toggle{
   background:#1F2937; color:#FFFFFF; border:1px solid #374151;
   width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-left:auto; padding:0; cursor:pointer;
   transition:background-color .2s ease, color .2s ease;
+  display:none !important;
 }
 .sidebar-toggle:hover{ background:#374151; }
 .sidebar-toggle svg{ width:20px; height:20px; transition:transform .3s ease; }
@@ -3350,4 +3364,99 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
   .acc-right{ width: 100%; justify-content: flex-end; }
   .acc-input{ width: 100%; max-width: 100%; }
   .acc-value{ max-width: 100%; }
+}
+
+
+/* Hide legacy sidebar arrow toggle (replaced by logo) */
+#sidebar-toggle{ display:none !important; }
+
+.sidebar-footer .logout-btn + .logout-btn{ margin-top:12px; }
+
+/* =========================================
+   Account edit modal (Account page)
+   ========================================= */
+.acc-edit-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, .55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 2500;
+  padding: 18px;
+}
+.acc-edit-backdrop.is-open{ display: flex; }
+
+.acc-edit-modal{
+  width: 420px;
+  max-width: 100%;
+  background: #ffffff;
+  color: #111827;
+  border-radius: 16px;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+  padding: 16px;
+}
+
+.acc-edit-title{
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.acc-edit-field{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.acc-edit-field label{
+  font-size: 13px;
+  font-weight: 800;
+  color: #374151;
+}
+
+.acc-edit-field input{
+  width: 100%;
+  padding: .75rem .85rem;
+  border-radius: 12px;
+  border: 1px solid #D1D5DB;
+  font-size: .95rem;
+  font-weight: 700;
+  background: #fff;
+}
+
+.acc-edit-actions{
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.acc-edit-btn{
+  padding: .7rem 1rem;
+  border-radius: 12px;
+  border: 1px solid #E5E7EB;
+  background: #F9FAFB;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.acc-edit-btn:hover{ background: #F3F4F6; }
+
+.acc-edit-btn.confirm{
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #fff;
+}
+.acc-edit-btn.confirm:hover{
+  background: var(--primary-color-dark);
+  border-color: var(--primary-color-dark);
+}
+
+@media (max-width: 420px){
+  .acc-edit-actions{ flex-direction: column; }
+  .acc-edit-btn{ width: 100%; }
 }
