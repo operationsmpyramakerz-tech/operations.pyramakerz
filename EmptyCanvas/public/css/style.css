@@ -3440,6 +3440,29 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
 .sidebar-footer .logout-btn + .logout-btn{ margin-top:12px; }
 
 /* =========================================
+   ✅ Requested: Sidebar footer buttons (Settings + Logout)
+   Without background (transparent)
+   ========================================= */
+.sidebar-footer .logout-btn{
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: .75rem 1rem;
+  justify-content: flex-start;
+  color: #9CA3AF;
+  font-weight: 600;
+}
+.sidebar-footer .logout-btn:hover{
+  background: transparent !important;
+  border-color: transparent !important;
+  color: #FFFFFF;
+}
+.sidebar-footer .logout-btn:focus-visible{
+  outline: 2px solid rgba(255,255,255,0.25);
+  outline-offset: 2px;
+}
+
+/* =========================================
    Account edit modal (Account page)
    ========================================= */
 .acc-edit-backdrop{
