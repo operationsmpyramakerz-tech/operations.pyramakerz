@@ -4054,8 +4054,12 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       bottom: { style: "thin", color: BORDER_COLOR },
       right: { style: "thin", color: BORDER_COLOR },
     };
-    const currencyFmt = '"£"#,##0;[Red]-"£"#,##0;"£"0';
-    const balanceCurrencyFmt = '"£"#,##0;-"£"#,##0;"£"0';
+    // IMPORTANT:
+    // Using 0 decimals in Excel formats will *display* values rounded to the nearest integer
+    // (e.g. 6.5 will show as 7). We use optional decimals (##) so the exported sheet
+    // keeps the original precision visible without forcing trailing zeros.
+    const currencyFmt = '"£"#,##0.##;[Red]-"£"#,##0.##;"£"0.##';
+    const balanceCurrencyFmt = '"£"#,##0.##;-"£"#,##0.##;"£"0.##';
 
     function safeExcelFileName(name) {
       // Windows safe-ish + avoid empty filename
@@ -4147,7 +4151,8 @@ app.post("/api/expenses/export/excel", async (req, res) => {
 
       labelCell.value = r.label;
       labelCell.font = { bold: true, color: { argb: "FF111827" } };
-      labelCell.alignment = { horizontal: "left", vertical: "middle" };
+      // User request: center alignment for all exported sheet content
+      labelCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       labelCell.fill = {
         type: "pattern",
         pattern: "solid",
@@ -4157,7 +4162,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       valueCell.value = Number(r.value || 0);
       valueCell.numFmt = (r.label === "Total Balance") ? balanceCurrencyFmt : currencyFmt;
       valueCell.font = { bold: true, color: { argb: r.valueColor } };
-      valueCell.alignment = { horizontal: "right", vertical: "middle" };
+      valueCell.alignment = { horizontal: "center", vertical: "middle" };
 
       sheet.getRow(rowIndex).height = 18;
     });
@@ -4238,7 +4243,8 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       const isZebra = (r - bodyStart) % 2 === 1;
       row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
         cell.border = borderThin;
-        cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+        // User request: center alignment across the full Excel file
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
 
         // Zebra fill for readability
         if (isZebra) {
@@ -4259,12 +4265,12 @@ app.post("/api/expenses/export/excel", async (req, res) => {
         // Cash columns
         if (colNumber === 6) {
           cell.numFmt = currencyFmt;
-          cell.alignment = { vertical: "middle", horizontal: "right" };
+          cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FF16A34A" } };
         }
         if (colNumber === 7) {
           cell.numFmt = currencyFmt;
-          cell.alignment = { vertical: "middle", horizontal: "right" };
+          cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FFDC2626" } };
         }
 
@@ -4276,10 +4282,10 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     }
 
     // Slightly different alignment for some columns
-    sheet.getColumn(2).alignment = { vertical: "middle", horizontal: "left" };
-    sheet.getColumn(4).alignment = { vertical: "middle", horizontal: "left" };
-    sheet.getColumn(5).alignment = { vertical: "middle", horizontal: "left" };
-    sheet.getColumn(8).alignment = { vertical: "middle", horizontal: "center" };
+    // Keep everything centered per request
+    for (let c = 1; c <= lastCol; c++) {
+      sheet.getColumn(c).alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
 
