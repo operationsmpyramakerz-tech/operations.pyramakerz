@@ -12,6 +12,130 @@ document.addEventListener('DOMContentLoaded', () => {
   const KEY_MINI       = 'ui.sidebarMini';   // 1 = mini على الديسكتوب
   const CACHE_ALLOWED  = 'allowedPages';     // sessionStorage key
   const isMobile = () => window.innerWidth <= 768;
+
+  // ====== Sidebar Branding + Profile + Settings ======
+  function ensureSidebarBranding(){
+    const header = document.querySelector('.sidebar .sidebar-header');
+    if (!header) return;
+
+    // Replace the "Dashboard" title with the company orange logo.
+    // (Do not rely on editing every HTML page.)
+    const h2 = header.querySelector('h2');
+    if (h2) {
+      // Keep for accessibility, but do not show the text.
+      h2.setAttribute('aria-label', (h2.textContent || 'Dashboard').trim());
+      h2.textContent = '';
+      h2.style.display = 'none';
+    }
+
+    // Insert logo image once
+    if (!header.querySelector('img.sidebar-brand-logo')) {
+      const logo = document.createElement('img');
+      logo.className = 'logo sidebar-brand-logo';
+      logo.src = '/images/logo.png';
+      logo.alt = 'Company logo';
+      // Put logo at the start of the header (before toggle)
+      header.insertBefore(logo, header.firstChild);
+    }
+  }
+
+  function ensureSidebarProfile(){
+    const sidebar = document.querySelector('.sidebar');
+    if (!sidebar) return null;
+
+    let profile = sidebar.querySelector('.sidebar-profile');
+    if (profile) return profile;
+
+    const nav = sidebar.querySelector('.sidebar-nav');
+    if (!nav) return null;
+
+    profile = document.createElement('div');
+    profile.className = 'sidebar-profile';
+    profile.innerHTML = `
+      <div class="sidebar-profile__avatar">
+        <img class="sidebar-profile__img" alt="Profile photo" loading="lazy" />
+        <div class="sidebar-profile__fallback" aria-hidden="true"></div>
+      </div>
+      <div class="sidebar-profile__meta">
+        <div class="sidebar-profile__name" data-sidebar-name>...</div>
+        <div class="sidebar-profile__role" data-sidebar-role></div>
+      </div>
+    `;
+
+    sidebar.insertBefore(profile, nav);
+    return profile;
+  }
+
+  function initialsFromName(name){
+    const n = String(name || '').trim();
+    if (!n) return '';
+    const parts = n.split(/\s+/).filter(Boolean);
+    const first = parts[0]?.[0] || '';
+    const last  = parts.length > 1 ? parts[parts.length - 1]?.[0] : '';
+    return (first + last).toUpperCase();
+  }
+
+  function renderSidebarProfile({ name = '', position = '', department = '', photoUrl = '' } = {}){
+    const profile = ensureSidebarProfile();
+    if (!profile) return;
+
+    const elName = profile.querySelector('[data-sidebar-name]');
+    const elRole = profile.querySelector('[data-sidebar-role]');
+    const img    = profile.querySelector('.sidebar-profile__img');
+    const fb     = profile.querySelector('.sidebar-profile__fallback');
+
+    const safeName = String(name || '').trim() || getCachedName() || 'User';
+    const safeRole = String(position || '').trim() || String(department || '').trim();
+
+    if (elName) elName.textContent = safeName;
+    if (elRole) elRole.textContent = safeRole;
+
+    const initials = initialsFromName(safeName);
+
+    // Show image if we have a URL, otherwise show initials fallback.
+    if (img) {
+      if (photoUrl) {
+        img.src = photoUrl;
+        img.style.display = 'block';
+        img.setAttribute('alt', safeName + ' photo');
+        if (fb) fb.style.display = 'none';
+      } else {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+        if (fb) {
+          fb.textContent = initials || '';
+          fb.style.display = 'grid';
+        }
+      }
+    }
+  }
+
+  function ensureSettingsLink(){
+    // Add a settings action above logout → opens account info
+    const sidebar = document.querySelector('.sidebar');
+    if (!sidebar) return;
+    const footer = sidebar.querySelector('.sidebar-footer');
+    if (!footer) return;
+
+    const logout = footer.querySelector('#logoutBtn');
+    let settings = footer.querySelector('#sidebarSettings');
+    if (!settings) {
+      settings = document.createElement('a');
+      settings.id = 'sidebarSettings';
+      settings.className = 'nav-link sidebar-settings-link';
+      settings.href = '/account';
+      settings.innerHTML = `<i data-feather="settings"></i><span class="nav-label">Settings</span>`;
+      if (logout) footer.insertBefore(settings, logout);
+      else footer.appendChild(settings);
+    }
+
+    // On mobile, close sidebar when navigating
+    settings.addEventListener('click', () => {
+      if (!isMobile()) return;
+      document.body.classList.add('sidebar-collapsed');
+      setAria();
+    });
+  }
 // ====== Mobile Sidebar UX (hamburger button + backdrop) ======
 // Goal:
 // - On mobile: sidebar is collapsed by default.
@@ -64,7 +188,8 @@ function ensureMenuToggle(){
 
 
 function relocateAccountLink(){
-  // Move the "My account" button from the top header into the sidebar footer (above Logout)
+  // Move the "My account" button from the top header into the sidebar footer,
+  // and render it as a Settings action (above Logout).
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
 
@@ -78,13 +203,23 @@ function relocateAccountLink(){
 
   if (!accountLink) return;
 
+  // Convert to a settings-style link (icon + label)
+  const styleAsSettings = () => {
+    accountLink.id = 'sidebarSettings';
+    accountLink.href = '/account';
+    accountLink.setAttribute('aria-label', 'Account settings');
+    accountLink.classList.remove('account-mini', 'account-in-sidebar');
+    accountLink.classList.add('nav-link', 'sidebar-settings-link');
+    accountLink.innerHTML = `<i data-feather="settings"></i><span class="nav-label">Settings</span>`;
+  };
+
   // If it's already in the footer, just ensure order (above Logout)
   const logout = footer.querySelector('#logoutBtn');
   if (footer.contains(accountLink)) {
     if (logout && logout.parentNode === footer) {
       footer.insertBefore(accountLink, logout);
     }
-    accountLink.classList.add('account-in-sidebar');
+    styleAsSettings();
     return;
   }
 
@@ -92,14 +227,17 @@ function relocateAccountLink(){
   if (logout && logout.parentNode === footer) footer.insertBefore(accountLink, logout);
   else footer.appendChild(accountLink);
 
-  accountLink.classList.add('account-in-sidebar');
+  styleAsSettings();
 }
 
 // Inject only on pages that have the sidebar layout
 if (document.querySelector('.sidebar')) {
   ensureSidebarBackdrop();
   menuToggle = ensureMenuToggle();
+  ensureSidebarBranding();
+  ensureSidebarProfile();
   relocateAccountLink();
+  ensureSettingsLink();
   if (window.feather) feather.replace();
 }
 
@@ -224,7 +362,11 @@ if (document.querySelector('.sidebar')) {
 
   async function ensureGreetingAndPages(){
     const cached = getCachedName();
-    if (cached) renderGreeting(cached);
+    if (cached) {
+      renderGreeting(cached);
+      // also prefill sidebar profile quickly from cache (then refresh from API)
+      renderSidebarProfile({ name: cached });
+    }
 
     try {
       const res = await fetch('/api/account', { credentials: 'same-origin', cache: 'no-store' });
@@ -238,6 +380,14 @@ if (document.querySelector('.sidebar')) {
       } else if (!cached) {
         renderGreeting('User');
       }
+
+      // Sidebar profile (photo + name + position)
+      renderSidebarProfile({
+        name: name || cached || '',
+        position: data.position || '',
+        department: data.department || '',
+        photoUrl: data.photoUrl || ''
+      });
 
       if (Array.isArray(data.allowedPages)) {
         cacheAllowedPages(data.allowedPages);
