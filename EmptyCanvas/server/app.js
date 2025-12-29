@@ -4054,12 +4054,62 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       bottom: { style: "thin", color: BORDER_COLOR },
       right: { style: "thin", color: BORDER_COLOR },
     };
-    // IMPORTANT:
-    // Using 0 decimals in Excel formats will *display* values rounded to the nearest integer
-    // (e.g. 6.5 will show as 7). We use optional decimals (##) so the exported sheet
-    // keeps the original precision visible without forcing trailing zeros.
-    const currencyFmt = '"£"#,##0.##;[Red]-"£"#,##0.##;"£"0.##';
-    const balanceCurrencyFmt = '"£"#,##0.##;-"£"#,##0.##;"£"0.##';
+    // Numbers formatting (NO currency sign)
+    // - Keep up to 2 decimals when needed (6.5 stays 6.5)
+    // - No trailing dot for integers (150 stays 150)
+    // - Negative values keep '-' sign
+    const numberFmt = '#,##0.##;-#,##0.##;0';
+
+    // Funds Type cell colors (only the cell itself, NOT the whole row)
+    // Use a deterministic mapping (hash) so the same type gets the same color.
+    const fundsTypePalette = [
+      "FFFDE68A", // amber-200
+      "FFBFDBFE", // blue-200
+      "FFBBF7D0", // green-200
+      "FFFECACA", // red-200
+      "FFE9D5FF", // purple-200
+      "FFCCFBF1", // teal-100
+      "FFE0E7FF", // indigo-100
+      "FFD9F99D", // lime-200
+      "FFFFE4E6", // rose-100
+      "FFFED7AA", // orange-200
+      "FFDCFCE7", // green-100
+      "FFFCE7F3", // pink-100
+    ];
+
+    function hashStr(s) {
+      // djb2
+      let h = 5381;
+      const str = String(s || "");
+      for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) + h) + str.charCodeAt(i);
+        h |= 0;
+      }
+      return Math.abs(h);
+    }
+
+    function fundsTypeFill(typeName) {
+      const t = String(typeName || "").trim();
+      if (!t) return null;
+      const idx = hashStr(t.toLowerCase()) % fundsTypePalette.length;
+      return fundsTypePalette[idx];
+    }
+
+    function formatNumberForWidth(n) {
+      const num = Number(n);
+      if (Number.isNaN(num)) return "";
+      const negative = num < 0;
+      const abs = Math.abs(num);
+
+      // Keep up to 2 decimals, trim trailing zeros
+      let s = (abs % 1 === 0)
+        ? abs.toString()
+        : abs.toFixed(2).replace(/0+$/g, "").replace(/\.$/, "");
+
+      // Add thousands separators to approximate the displayed string
+      s = s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      return negative ? `-${s}` : s;
+    }
 
     function safeExcelFileName(name) {
       // Windows safe-ish + avoid empty filename
@@ -4151,7 +4201,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
 
       labelCell.value = r.label;
       labelCell.font = { bold: true, color: { argb: "FF111827" } };
-      // User request: center alignment for all exported sheet content
+      // User requested center alignment across the exported file
       labelCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       labelCell.fill = {
         type: "pattern",
@@ -4160,7 +4210,8 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       };
 
       valueCell.value = Number(r.value || 0);
-      valueCell.numFmt = (r.label === "Total Balance") ? balanceCurrencyFmt : currencyFmt;
+      // No currency sign + keep decimals only when needed
+      valueCell.numFmt = numberFmt;
       valueCell.font = { bold: true, color: { argb: r.valueColor } };
       valueCell.alignment = { horizontal: "center", vertical: "middle" };
 
@@ -4243,7 +4294,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       const isZebra = (r - bodyStart) % 2 === 1;
       row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
         cell.border = borderThin;
-        // User request: center alignment across the full Excel file
+        // Default alignment: center (requested)
         cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
 
         // Zebra fill for readability
@@ -4262,14 +4313,28 @@ app.post("/api/expenses/export/excel", async (req, res) => {
           if (cell.value instanceof Date) cell.numFmt = "yyyy-mm-dd";
         }
 
+        // Funds Type column: color ONLY this cell based on type (same type => same color)
+        if (colNumber === 2) {
+          const fillArgb = fundsTypeFill(cell.value);
+          if (fillArgb) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: fillArgb },
+            };
+            // keep text readable
+            cell.font = { color: { argb: "FF111827" }, bold: true };
+          }
+        }
+
         // Cash columns
         if (colNumber === 6) {
-          cell.numFmt = currencyFmt;
+          cell.numFmt = numberFmt;
           cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FF16A34A" } };
         }
         if (colNumber === 7) {
-          cell.numFmt = currencyFmt;
+          cell.numFmt = numberFmt;
           cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FFDC2626" } };
         }
@@ -4281,10 +4346,47 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       });
     }
 
-    // Slightly different alignment for some columns
-    // Keep everything centered per request
+    // -------------------------
+    // Auto-fit column widths ("auto fill" requested)
+    // Skip the big merged title row to avoid huge column widths.
+    // -------------------------
+    const AUTO_FROM_ROW = 3;
+    const AUTO_TO_ROW = sheet.rowCount;
+    const MAX_COL_WIDTH = 60;
+    const MIN_COL_WIDTH = 10;
+
+    function cellTextForWidth(cell) {
+      const v = cell?.value;
+      if (v === null || v === undefined) return "";
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      if (typeof v === "number") return formatNumberForWidth(v);
+      if (typeof v === "object") {
+        if (typeof v.text === "string") return v.text;
+        if (Array.isArray(v.richText)) {
+          return v.richText.map((x) => x?.text || "").join("");
+        }
+      }
+      return String(v);
+    }
+
     for (let c = 1; c <= lastCol; c++) {
-      sheet.getColumn(c).alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      let maxLen = 0;
+
+      // Start with the table header label (if any)
+      const headerLabel = columns?.[c - 1]?.header;
+      if (headerLabel) maxLen = Math.max(maxLen, String(headerLabel).length);
+
+      for (let r = AUTO_FROM_ROW; r <= AUTO_TO_ROW; r++) {
+        // Skip title/meta rows (1-2) by starting from 3, but also ignore merged title cell remnants
+        const cell = sheet.getRow(r).getCell(c);
+        const txt = cellTextForWidth(cell);
+        if (!txt) continue;
+        maxLen = Math.max(maxLen, txt.length);
+      }
+
+      // Add a little padding
+      const width = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, maxLen + 2));
+      sheet.getColumn(c).width = width;
     }
 
     const buffer = await workbook.xlsx.writeBuffer();
