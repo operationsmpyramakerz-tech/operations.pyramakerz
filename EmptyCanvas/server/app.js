@@ -580,6 +580,46 @@ app.get("/api/account", requireAuth, async (req, res) => {
     const user = response.results[0];
     const p = user.properties;
 
+    // Try to extract an optional profile photo URL from Notion (files property).
+    // Supported property names (if they exist in your Team_Members DB):
+    // Photo / Personal Photo / Avatar / Profile Photo / Image
+    function firstFileUrl(prop){
+      const files = prop?.files;
+      if (!Array.isArray(files) || files.length === 0) return "";
+      const f = files[0];
+      if (f?.type === "external") return f.external?.url || "";
+      if (f?.type === "file") return f.file?.url || "";
+      return "";
+    }
+
+    function extractProfilePhotoUrl(props){
+      const preferred = [
+        "Photo",
+        "Personal Photo",
+        "Avatar",
+        "Profile Photo",
+        "Profile",
+        "Image",
+      ];
+      for (const key of preferred) {
+        const prop = props?.[key];
+        if (prop?.type === "files") {
+          const url = firstFileUrl(prop);
+          if (url) return url;
+        }
+      }
+      // Fallback: scan any files properties that look like photo/avatar
+      try {
+        for (const [key, prop] of Object.entries(props || {})) {
+          if (prop?.type !== "files") continue;
+          if (!/photo|avatar|profile|image/i.test(key)) continue;
+          const url = firstFileUrl(prop);
+          if (url) return url;
+        }
+      } catch {}
+      return "";
+    }
+
     const freshAllowed = extractAllowedPages(p);
     req.session.allowedPages = freshAllowed;
     const allowedUI = expandAllowedForUI(freshAllowed);
@@ -589,6 +629,7 @@ app.get("/api/account", requireAuth, async (req, res) => {
       username: req.session.username || "",
       department: p?.Department?.select?.name || "",
       position: p?.Position?.select?.name || "",
+      photoUrl: extractProfilePhotoUrl(p) || "",
       phone: p?.Phone?.phone_number || "",
       email: p?.Email?.email || "",
       employeeCode: p?.["Employee Code"]?.number ?? null,
