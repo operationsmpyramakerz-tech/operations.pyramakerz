@@ -592,7 +592,7 @@ app.get("/api/account", requireAuth, async (req, res) => {
       phone: p?.Phone?.phone_number || "",
       email: p?.Email?.email || "",
       employeeCode: p?.["Employee Code"]?.number ?? null,
-      password: p?.Password?.number ?? null,
+      passwordSet: (p?.Password?.number ?? null) !== null,
       allowedPages: allowedUI,
     };
 
@@ -2294,52 +2294,116 @@ app.get(
 );
 
 // Update account info (PATCH) — اختيارى
+// Update account info (PATCH) — requires current password confirmation
 app.patch("/api/account", requireAuth, async (req, res) => {
   if (!teamMembersDatabaseId) {
     return res
       .status(500)
       .json({ error: "Team_Members database ID is not configured." });
   }
+
   try {
-    const { name, phone, email, password } = req.body;
+    const {
+      currentPassword,
+      name,
+      department,
+      position,
+      phone,
+      email,
+      employeeCode,
+      password,
+    } = req.body || {};
+
+    // Fetch current user (by session username)
+    const response = await notion.databases.query({
+      database_id: teamMembersDatabaseId,
+      filter: { property: "Name", title: { equals: req.session.username } },
+    });
+
+    if (response.results.length === 0) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const user = response.results[0];
+    const storedPassword = user.properties?.Password?.number;
+
+    const provided = String(currentPassword ?? "").trim();
+
+    if (storedPassword === null || typeof storedPassword === "undefined") {
+      return res.status(400).json({ error: "No password set for this account." });
+    }
+
+    if (!provided) {
+      return res.status(400).json({ error: "Current password is required." });
+    }
+
+    if (String(storedPassword) !== provided) {
+      return res.status(401).json({ error: "Current password is incorrect." });
+    }
+
     const updateProps = {};
+
     if (typeof phone !== "undefined") {
       updateProps["Phone"] = { phone_number: (phone || "").trim() || null };
     }
+
     if (typeof email !== "undefined") {
       updateProps["Email"] = { email: (email || "").trim() || null };
     }
+
+    if (typeof department !== "undefined") {
+      const d = String(department || "").trim();
+      updateProps["Department"] = d ? { select: { name: d } } : { select: null };
+    }
+
+    if (typeof position !== "undefined") {
+      const pos = String(position || "").trim();
+      updateProps["Position"] = pos ? { select: { name: pos } } : { select: null };
+    }
+
+    if (typeof employeeCode !== "undefined") {
+      if (employeeCode === null || String(employeeCode).trim() === "") {
+        updateProps["Employee Code"] = { number: null };
+      } else {
+        const n = Number(employeeCode);
+        if (Number.isNaN(n)) {
+          return res.status(400).json({ error: "Employee Code must be a number." });
+        }
+        updateProps["Employee Code"] = { number: n };
+      }
+    }
+
     if (typeof password !== "undefined") {
+      if (password === null || String(password).trim() === "") {
+        return res.status(400).json({ error: "Password cannot be empty." });
+      }
       const n = Number(password);
       if (Number.isNaN(n)) {
         return res.status(400).json({ error: "Password must be a number." });
       }
       updateProps["Password"] = { number: n };
     }
-    if (typeof name !== "undefined" && name.trim()) {
-      updateProps["Name"] = { title: [{ text: { content: name.trim() } }] };
+
+    if (typeof name !== "undefined") {
+      const n = String(name || "").trim();
+      if (!n) return res.status(400).json({ error: "Name cannot be empty." });
+      updateProps["Name"] = { title: [{ text: { content: n } }] };
     }
+
     if (Object.keys(updateProps).length === 0) {
       return res.status(400).json({ error: "No valid fields to update." });
     }
 
-    const response = await notion.databases.query({
-      database_id: teamMembersDatabaseId,
-      filter: { property: "Name", title: { equals: req.session.username } },
-    });
-    if (response.results.length === 0) {
-      return res.status(404).json({ error: "User not found." });
-    }
-
-    const userPageId = response.results[0].id;
+    const userPageId = user.id;
 
     await notion.pages.update({
       page_id: userPageId,
       properties: updateProps,
     });
 
+    // Keep session username in sync if Name changed
     if (updateProps["Name"]) {
-      req.session.username = name.trim();
+      req.session.username = String(name || "").trim();
     }
 
     res.json({ success: true });
