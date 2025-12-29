@@ -32,42 +32,34 @@
       50% { transform: translateY(-15px); }
     }
 
-    /* Floating Labels أنيقة */
-    .form-group {
+    /* Icons داخل الـ inputs (بدون Floating Labels) */
+    .input-with-icon {
       position: relative;
-      margin-bottom: 28px;
     }
 
-    .form-group label {
+    .input-with-icon .input-icon {
       position: absolute;
-      left: 16px;
-      top: 16px;
-      color: #999;
-      font-size: 14px;
-      font-weight: 500;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #9CA3AF;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       pointer-events: none;
-      transition: all 0.3s ease;
-      transform-origin: left top;
-      background: white;
-      padding: 0 4px;
     }
 
-    .form-group input:focus ~ label,
-    .form-group input:not(:placeholder-shown) ~ label {
-      top: -8px;
-      left: 12px;
-      font-size: 12px;
-      color: #667eea;
-      font-weight: 600;
+    .input-with-icon .input-icon svg {
+      width: 18px;
+      height: 18px;
     }
 
-    .form-group input {
-      transition: all 0.3s ease;
+    .input-with-icon input {
+      padding-left: 2.65rem;
     }
 
-    .form-group input:focus {
-      transform: scale(1.02);
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+    .input-with-icon:focus-within .input-icon {
+      color: #D97706;
     }
 
     /* Ripple Effect على الزرار */
@@ -140,14 +132,28 @@
 
       <form id="loginForm" class="login-form">
         <div class="form-group">
-          <input type="text" id="username" name="username" required placeholder=" " autocomplete="username" />
-          <label for="username">Username</label>
+          <div class="input-with-icon">
+            <span class="input-icon" aria-hidden="true">
+              <!-- user icon -->
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21a8 8 0 0 0-16 0" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+            </span>
+            <input type="text" id="username" name="username" required placeholder="Username" autocomplete="username" />
+          </div>
         </div>
 
         <div class="form-group">
-          <div class="password-wrapper">
-            <input type="password" id="password" name="password" required placeholder=" " autocomplete="current-password" />
-            <label for="password">Password</label>
+          <div class="password-wrapper input-with-icon">
+            <span class="input-icon" aria-hidden="true">
+              <!-- lock icon -->
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </span>
+            <input type="password" id="password" name="password" required placeholder="Password" autocomplete="current-password" />
             <button type="button" id="togglePassword" class="toggle-password" aria-label="Show password" aria-pressed="false">
               <svg class="icon-eye" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
@@ -173,23 +179,5 @@
 
   <!-- الـ JS بتاعك الأصلي 100% بدون أي تعديل -->
   <script src="/js/login.js"></script>
-
-  <!-- بس أضفنا سطر صغير عشان Floating Labels تشتغل لو في قيمة من البداية -->
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('.form-group input').forEach(input => {
-        if (input.value.trim() !== '') {
-          input.classList.add('not-empty');
-        }
-        input.addEventListener('blur', () => {
-          if (input.value.trim() !== '') {
-            input.classList.add('not-empty');
-          } else {
-            input.classList.remove('not-empty');
-          }
-        });
-      });
-    });
-  </script>
 </body>
 </html>
