@@ -16,6 +16,27 @@ function escapeHtml(str) {
 }
 
 
+function formatGBP(value) {
+  const n = Number(value || 0);
+  const abs = Math.abs(n);
+  const formatted = abs.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+
+  return n < 0 ? `-£${formatted}` : `£${formatted}`;
+}
+
+function setTotalBalanceCard(total) {
+  const card = document.getElementById("totalBalanceCard");
+  if (!card) return;
+
+  const n = Number(total || 0);
+  card.classList.toggle("is-negative", n < 0);
+  card.classList.toggle("is-positive", n > 0);
+}
+
+
 // ---------------------------
 // LOAD USERS + BUILD TABS
 // ---------------------------
@@ -52,11 +73,15 @@ async function loadExpenseUsers() {
       btn.dataset.userId = u.id;
       btn.dataset.userName = u.name;
 
-      const totalStr = (u.total || 0).toLocaleString();
+      const totalValue = Number(u.total || 0);
+      const totalStr = formatGBP(totalValue);
+
+      btn.classList.toggle("has-negative", totalValue < 0);
+      btn.classList.toggle("has-positive", totalValue > 0);
 
       btn.innerHTML = `
-        <span>${u.name}</span>
-        <span class="user-total">£${totalStr}</span>
+        <span class="user-name">${escapeHtml(u.name)}</span>
+        <span class="user-total">${totalStr}</span>
         <span class="user-count">(${u.count} items)</span>
       `;
 
@@ -87,7 +112,8 @@ async function openUserExpensesModal(userId, userName) {
   const listEl = document.getElementById("userExpensesList");
 
   titleEl.textContent = `Expenses — ${userName}`;
-  totalEl.textContent = "Total: £0";
+  totalEl.textContent = formatGBP(0);
+  setTotalBalanceCard(0);
   listEl.innerHTML = "Loading...";
 
   modal.style.display = "flex";
@@ -168,7 +194,8 @@ function applyFiltersAndSorting() {
 
 function renderUserExpenses(items, totalEl, listEl) {
   if (!items || items.length === 0) {
-    totalEl.textContent = "Total: £0";
+    totalEl.textContent = formatGBP(0);
+  setTotalBalanceCard(0);
     listEl.innerHTML = "<p style='color:#9ca3af;'>No expenses for this user.</p>";
     return;
   }
@@ -230,7 +257,8 @@ function renderUserExpenses(items, totalEl, listEl) {
     listEl.appendChild(div);
   });
 
-  totalEl.textContent = `Total: £${total.toLocaleString()}`;
+  totalEl.textContent = formatGBP(total);
+  setTotalBalanceCard(total);
 }
 
 
