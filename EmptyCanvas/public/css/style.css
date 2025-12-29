@@ -3174,3 +3174,112 @@ body.permissions-loading .sidebar li {
   /* Searchbar should not force layout */
   .searchbar{ width: 100% !important; max-width: 100% !important; }
 }
+
+/* =========================================
+   Sidebar "My account" moved above Logout
+   ========================================= */
+.sidebar-footer{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-footer .account-mini{
+  width: 100%;
+  justify-content: center;
+  box-shadow: none;
+  margin: 0;
+}
+
+body.sidebar-mini .sidebar-footer .account-mini{
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 14px;
+  justify-content: center;
+}
+
+body.sidebar-mini .sidebar-footer .account-mini .label{
+  display: none !important;
+}
+
+/* =========================================
+   Account inline edit (Account page)
+   ========================================= */
+.acc-row{ gap: 12px; }
+.acc-right{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.acc-value{
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acc-input{
+  display: none;
+  min-width: 160px;
+  max-width: 360px;
+  width: min(360px, 42vw);
+  padding: .55rem .7rem;
+  border-radius: 12px;
+  border: 1px solid #D1D5DB;
+  font-size: .95rem;
+  font-weight: 600;
+  background: #fff;
+}
+
+.acc-action{
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid #E5EAF2;
+  background: #F9FAFB;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.acc-action:hover{ background: #F3F6FB; }
+.acc-action svg{ width: 16px; height: 16px; }
+
+.acc-save, .acc-cancel{ display: none; }
+
+.acc-row.is-editing .acc-value,
+.acc-row.is-editing .acc-edit{
+  display: none;
+}
+
+.acc-row.is-editing .acc-input{
+  display: block;
+}
+
+.acc-row.is-editing .acc-save,
+.acc-row.is-editing .acc-cancel{
+  display: grid;
+}
+
+.account-hint{
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #6B7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+.account-hint svg{ width: 16px; height: 16px; }
+
+@media (max-width: 520px){
+  .acc-row{ flex-wrap: wrap; }
+  .acc-right{ width: 100%; justify-content: flex-end; }
+  .acc-input{ width: 100%; max-width: 100%; }
+  .acc-value{ max-width: 100%; }
+}
