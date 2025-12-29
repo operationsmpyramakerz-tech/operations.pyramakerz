@@ -78,6 +78,70 @@ body.sidebar-collapsed .sidebar{ transform:translateX(calc(-100% - 14px)); }
 .sidebar-header .logo{ height:32px; margin-right:.75rem; }
 .sidebar-header h2{ margin:0; font-size:1.25rem; color:#F9FAFB; }
 
+/* =================================
+   Sidebar: Brand logo instead of "Dashboard"
+   ================================= */
+.sidebar-brand-logo{ height:32px; width:auto; object-fit:contain; margin-right:0; }
+
+/* =================================
+   Sidebar: Profile header (avatar + name + position)
+   ================================= */
+.sidebar-profile{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:1rem 1.5rem;
+  border-bottom:1px solid #1F2937;
+}
+.sidebar-profile__avatar{
+  width:44px;
+  height:44px;
+  border-radius:50%;
+  overflow:hidden;
+  background:#1F2937;
+  border:1px solid #374151;
+  display:grid;
+  place-items:center;
+  flex-shrink:0;
+}
+.sidebar-profile__img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:none;
+}
+.sidebar-profile__fallback{
+  width:100%;
+  height:100%;
+  display:grid;
+  place-items:center;
+  color:#F9FAFB;
+  font-weight:800;
+  font-size:14px;
+}
+.sidebar-profile__meta{
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+}
+.sidebar-profile__name{
+  color:#F9FAFB;
+  font-weight:800;
+  font-size:14px;
+  line-height:1.2;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.sidebar-profile__role{
+  color:#9CA3AF;
+  font-size:12px;
+  margin-top:2px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
 .nav-label{ white-space:nowrap; }
 .sidebar-nav{ padding:1rem; flex-grow:1; }
 .nav-link{
@@ -316,7 +380,7 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
 .loading-cell{ display:flex; justify-content:center; align-items:center; gap:8px; color:var(--text-secondary); padding:1rem; }
 .loading-icon{ display:inline-block; animation:spin 1.5s linear infinite; vertical-align:middle; }
 
-.sidebar-footer .nav-link{ width:100%; }
+.sidebar-footer .nav-link{ width:100%; margin-bottom:0; }
 
 .create-order-layout{ grid-template-columns:2fr 1fr; gap:2rem; align-items:start; }
 .page-stepper{ grid-column:1 / -1; margin:-.25rem 0 .5rem; }
@@ -337,6 +401,10 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
 
   body.sidebar-mini .sidebar-header h2 { display: none; }
   body.sidebar-mini .nav-label { display: none; }
+
+  /* Sidebar profile collapses to avatar only */
+  body.sidebar-mini .sidebar-profile{ justify-content:center; padding:1rem; }
+  body.sidebar-mini .sidebar-profile__meta{ display:none; }
 
   body.sidebar-mini .sidebar-nav .nav-link { justify-content: center; }
 
