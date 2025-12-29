@@ -118,6 +118,31 @@ body.sidebar-collapsed .main-content{ padding-left:0; }
 .menu-toggle{ background:none; border:none; cursor:pointer; padding:.5rem; color:var(--text-secondary); }
 .menu-toggle:hover{ color:var(--text-primary); }
 
+/* Mobile "Dashboard" open button (injected by common-ui.js) */
+#menu-toggle.menu-toggle{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #E9EDF3;
+  box-shadow: 0 10px 24px rgba(0,0,0,.06);
+  color: #111827;
+  -webkit-tap-highlight-color: transparent;
+}
+#menu-toggle.menu-toggle svg{
+  width: 22px;
+  height: 22px;
+}
+
+/* On desktop the sidebar is already visible → hide the mobile toggle button */
+@media (min-width: 769px){
+  #menu-toggle{ display: none !important; }
+}
+
+
 .greeting-pill{
   position:relative; display:inline-flex; align-items:center; gap:10px;
   background:#fff; border:1px solid #E9EDF3; border-radius:14px;
