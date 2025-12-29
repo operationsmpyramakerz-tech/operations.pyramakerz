@@ -492,6 +492,281 @@
   .expense-person{font-size:.86rem;}
 }
 </style>
+<style>
+/* ============================= */
+/*  Expenses by User - Modern UI */
+/* ============================= */
+
+.ios-modal{
+  background: rgba(2,6,23,0.35);
+  backdrop-filter: blur(6px);
+}
+
+.ios-sheet{
+  background: #f8fafc;
+  border: 1px solid rgba(15,23,42,0.08);
+}
+
+@media (min-width: 900px){
+  .ios-modal{ align-items: center; }
+  .ios-sheet{
+    border-radius: 24px;
+    max-width: 860px;
+    padding: 1.35rem 1.5rem 1.25rem;
+  }
+}
+
+@media (max-width: 899px){
+  .ios-sheet{ border-radius: 22px 22px 0 0; }
+}
+
+.user-expenses-header{
+  text-align: left;
+  margin-bottom: 1rem;
+}
+
+.sheet-header{
+  display:flex;
+  justify-content: space-between;
+  align-items:flex-start;
+  gap: 1rem;
+  padding-bottom: .75rem;
+}
+
+.sheet-header-text{ min-width: 0; }
+
+.user-expenses-title{
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  margin-bottom: .25rem;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.user-expenses-sub{
+  font-size: .92rem;
+  color: #64748b;
+}
+
+.sheet-close-icon{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+  transition: transform .15s ease, box-shadow .15s ease;
+  flex: 0 0 auto;
+}
+
+.sheet-close-icon:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.12);
+}
+
+.sheet-close-icon svg{
+  width: 18px;
+  height: 18px;
+  color: #0f172a;
+}
+
+.total-balance-card{
+  margin-top: .85rem;
+  border-radius: 18px;
+  padding: 1rem 1.1rem;
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: #0f172a;
+  background:
+    radial-gradient(900px 260px at 20% 0%, rgba(99,102,241,0.22), transparent 60%),
+    linear-gradient(135deg, #ffffff, #eef2ff);
+  border: 1px solid rgba(99,102,241,0.22);
+  box-shadow: 0 12px 28px rgba(2,6,23,0.08);
+}
+
+.total-balance-meta{ min-width:0; }
+
+.total-balance-label{
+  display:flex;
+  align-items:center;
+  gap: .55rem;
+  font-weight: 800;
+  font-size: .95rem;
+}
+
+.total-balance-label svg{ width: 18px; height: 18px; color: #4f46e5; }
+
+.total-balance-hint{
+  margin-top: .2rem;
+  font-size: .82rem;
+  color: #64748b;
+}
+
+.total-balance-value{
+  font-size: 1.65rem;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.total-balance-card.is-negative{
+  background:
+    radial-gradient(900px 260px at 20% 0%, rgba(239,68,68,0.18), transparent 60%),
+    linear-gradient(135deg, #ffffff, #fef2f2);
+  border-color: rgba(239,68,68,0.22);
+}
+
+.total-balance-card.is-negative .total-balance-label svg{ color: #ef4444; }
+.total-balance-card.is-negative .total-balance-value{ color: #b91c1c; }
+
+.total-balance-card.is-positive{
+  background:
+    radial-gradient(900px 260px at 20% 0%, rgba(34,197,94,0.16), transparent 60%),
+    linear-gradient(135deg, #ffffff, #f0fdf4);
+  border-color: rgba(34,197,94,0.24);
+}
+
+.total-balance-card.is-positive .total-balance-label svg{ color: #16a34a; }
+.total-balance-card.is-positive .total-balance-value{ color: #166534; }
+
+/* Controls panel */
+.sheet-controls{
+  margin-top: 1rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 1rem 1rem;
+  box-shadow: 0 10px 24px rgba(2,6,23,0.06);
+}
+
+.controls-row{
+  display:flex;
+  align-items:flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.sheet-controls .download-wrapper{ margin-bottom: 0; }
+
+.download-btn{
+  border-radius: 14px;
+  padding: .65rem 1.05rem;
+  box-shadow: 0 10px 20px rgba(53,122,232,0.18);
+}
+
+.download-btn svg{ width: 18px; height: 18px; }
+
+.download-menu{
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.download-option{ padding: .75rem 1rem; }
+
+/* Sort group */
+.sort-wrapper{ margin-bottom: 0; gap: .45rem; }
+
+.control-label{
+  display:block;
+  font-size: .82rem;
+  font-weight: 800;
+  color: #334155;
+  margin-bottom: .35rem;
+}
+
+.select-with-icon{
+  display:flex;
+  align-items:center;
+  gap: .6rem;
+  padding: .55rem .75rem;
+  border: 1.3px solid #d1d5db;
+  background: #f8fafc;
+  border-radius: 14px;
+}
+
+.select-with-icon svg{ width: 18px; height: 18px; color: #64748b; }
+
+.sort-select{
+  padding: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.95rem;
+}
+
+/* Date filter grid */
+.date-filter{
+  margin-bottom: 0;
+  margin-top: .9rem;
+  display:grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: .9rem;
+  align-items:end;
+}
+
+.date-field label{
+  display:block;
+  font-size: .82rem;
+  font-weight: 800;
+  color: #334155;
+  margin-bottom: .35rem;
+}
+
+.date-filter input{
+  width: 100%;
+  padding: .55rem .75rem;
+  border: 1.3px solid #d1d5db;
+  background: #f8fafc;
+  border-radius: 14px;
+}
+
+.date-actions{
+  display:flex;
+  gap: .6rem;
+  justify-content:flex-end;
+}
+
+.filter-btn{
+  border-radius: 14px;
+  padding: .62rem .9rem;
+  font-weight: 800;
+  box-shadow: 0 10px 20px rgba(59,130,246,0.16);
+  display:inline-flex;
+  align-items:center;
+  gap: .45rem;
+}
+
+.filter-btn svg{ width: 18px; height: 18px; }
+
+.reset-btn{ box-shadow: 0 10px 20px rgba(107,114,128,0.14); }
+
+@media (max-width: 560px){
+  .controls-row{ flex-direction: column; align-items: stretch; }
+  .date-filter{ grid-template-columns: 1fr; }
+  .date-actions{ justify-content: stretch; }
+  .filter-btn{ width: 100%; justify-content: center; }
+}
+
+#userExpensesList{ margin-top: 1.15rem; }
+
+.modal-close-btn{
+  margin-top: 1rem;
+  border-radius: 16px;
+  box-shadow: 0 12px 24px rgba(239,68,68,0.20);
+}
+
+/* Negative totals on user tabs */
+.user-tab.has-negative .user-total{ color: #dc2626; }
+.user-tab.active .user-total{ color: #ffffff; }
+</style>
 </head>
 
 <body class="permissions-loading">
@@ -581,50 +856,83 @@
     <div class="ios-drag"></div>
 
     <div class="user-expenses-header">
-      <div class="user-expenses-title" id="userExpensesTitle">User Expenses</div>
-      <div class="user-expenses-sub">
-        All expenses for this team member
+      <div class="sheet-header">
+        <div class="sheet-header-text">
+          <div class="user-expenses-title" id="userExpensesTitle">User Expenses</div>
+          <div class="user-expenses-sub">All expenses for this team member</div>
+        </div>
+
+        <button class="sheet-close-icon" type="button" aria-label="Close" onclick="closeUserExpensesModal()">
+          <i data-feather="x"></i>
+        </button>
       </div>
-      <div class="user-expenses-total" id="userExpensesTotal">Total: £0</div>
+
+      <div class="total-balance-card" id="totalBalanceCard">
+        <div class="total-balance-meta">
+          <div class="total-balance-label">
+            <i data-feather="credit-card"></i>
+            Total balance
+          </div>
+          <div class="total-balance-hint">After filters applied</div>
+        </div>
+
+        <div class="total-balance-value" id="userExpensesTotal">£0</div>
+      </div>
+
+      <div class="sheet-controls">
+        <div class="controls-row">
+          <div class="download-wrapper">
+            <button id="downloadBtn" class="download-btn" type="button">
+              <i data-feather="download"></i>
+              Download
+              <span class="arrow">▼</span>
+            </button>
+
+            <div id="downloadMenu" class="download-menu">
+              <button class="download-option" id="downloadPdfBtn" type="button">Download as PDF</button>
+              <button class="download-option" id="downloadExcelBtn" type="button">Download as Excel</button>
+            </div>
+          </div>
+
+          <div class="sort-wrapper">
+            <label for="sortSelect" class="control-label">Sort</label>
+            <div class="select-with-icon">
+              <i data-feather="arrow-up-down"></i>
+              <select id="sortSelect" class="sort-select">
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="high">Highest amount</option>
+                <option value="low">Lowest amount</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="date-filter">
+          <div class="date-field">
+            <label for="dateFrom">From</label>
+            <input type="date" id="dateFrom" />
+          </div>
+
+          <div class="date-field">
+            <label for="dateTo">To</label>
+            <input type="date" id="dateTo" />
+          </div>
+
+          <div class="date-actions">
+            <button id="applyDateFilterBtn" class="filter-btn" type="button">
+              <i data-feather="filter"></i>
+              Apply
+            </button>
+
+            <button id="resetDateFilterBtn" class="filter-btn reset-btn" type="button">
+              <i data-feather="rotate-ccw"></i>
+              Reset
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
-
-    <div class="download-wrapper">
-  <button id="downloadBtn" class="download-btn">
-    Download
-    <span class="arrow">▼</span>
-  </button>
-
-  <div id="downloadMenu" class="download-menu">
-    <button class="download-option" id="downloadPdfBtn">Download as PDF</button>
-    <button class="download-option" id="downloadExcelBtn">Download as Excel</button>
-  </div>
-</div>
-    <!-- SORTING DROPDOWN -->
-<div class="sort-wrapper">
-  <label style="font-weight:600;">Sort:</label>
-  <select id="sortSelect" class="sort-select">
-    <option value="newest">Newest first</option>
-    <option value="oldest">Oldest first</option>
-    <option value="high">Highest amount</option>
-    <option value="low">Lowest amount</option>
-  </select>
-</div>
-    <!-- DATE FILTER -->
-<div class="date-filter">
-  <label>From:</label>
-  <input type="date" id="dateFrom" />
-
-  <label>To:</label>
-  <input type="date" id="dateTo" />
-
-  <button id="applyDateFilterBtn" class="filter-btn">
-    Apply Filter
-  </button>
-
-  <button id="resetDateFilterBtn" class="filter-btn reset-btn">
-    Reset
-  </button>
-</div>
 
     <div id="userExpensesList">
       <!-- list items -->
