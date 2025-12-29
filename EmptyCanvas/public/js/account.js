@@ -108,18 +108,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         <h3 class="acc-edit-title" id="acc-edit-title">Edit</h3>
 
         <div class="acc-edit-field">
-          <label for="acc-edit-value">New value</label>
+          <label id="acc-edit-value-label" for="acc-edit-value"><i data-feather="edit-3"></i> Value</label>
           <input id="acc-edit-value" type="text" />
         </div>
 
         <div class="acc-edit-field">
-          <label for="acc-edit-password">Current password</label>
+          <label id="acc-edit-password-label" for="acc-edit-password"><i data-feather="lock"></i> Current password</label>
           <input id="acc-edit-password" type="password" inputmode="numeric" autocomplete="current-password" />
         </div>
 
         <div class="acc-edit-actions">
-          <button class="acc-edit-btn confirm" id="acc-edit-confirm" type="button">Confirm</button>
-          <button class="acc-edit-btn cancel" id="acc-edit-cancel" type="button">Cancel</button>
+          <button class="acc-edit-btn confirm" id="acc-edit-confirm" type="button">Submit</button>
+          <button class="acc-edit-btn cancel" id="acc-edit-cancel" type="button">Close</button>
         </div>
       </div>
     `;
@@ -127,6 +127,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.body.appendChild(backdrop);
 
     const titleEl = backdrop.querySelector('#acc-edit-title');
+    const valueLabelEl = backdrop.querySelector('#acc-edit-value-label');
+    const passLabelEl = backdrop.querySelector('#acc-edit-password-label');
     const valueInput = backdrop.querySelector('#acc-edit-value');
     const passInput = backdrop.querySelector('#acc-edit-password');
     const confirmBtn = backdrop.querySelector('#acc-edit-confirm');
@@ -159,7 +161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
 
-    modal = { backdrop, titleEl, valueInput, passInput, confirmBtn, cancelBtn };
+    modal = { backdrop, titleEl, valueLabelEl, passLabelEl, valueInput, passInput, confirmBtn, cancelBtn };
     return modal;
   }
 
@@ -171,6 +173,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeField = meta;
 
     m.titleEl.textContent = `Edit ${meta.label}`;
+
+    // Make the mini-window match the "Settled my account" style (label + icon)
+    if (m.valueLabelEl) {
+      m.valueLabelEl.innerHTML = `<i data-feather="${escapeHTML(meta.icon)}"></i> ${escapeHTML(meta.label)}`;
+    }
+    if (m.passLabelEl) {
+      m.passLabelEl.innerHTML = `<i data-feather="lock"></i> Current password`;
+    }
 
     // Configure input types per field
     m.valueInput.type = meta.inputType || 'text';
