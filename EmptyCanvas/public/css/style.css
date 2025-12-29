@@ -81,60 +81,7 @@ body.sidebar-collapsed .sidebar{ transform:translateX(calc(-100% - 14px)); }
 /* =================================
    Sidebar: Brand logo instead of "Dashboard"
    ================================= */
-/*
-  Brand toggle (logo) in the sidebar header
-  - When sidebar is OPEN  -> show horizontal logo
-  - When sidebar is MINI  -> show icon only
-  With a smooth animation between both states.
-*/
-.sidebar-brand-toggle{
-  display:flex;
-  align-items:center;
-  height:32px;
-  cursor:pointer;
-  user-select:none;
-  overflow:hidden;
-}
-
-.sidebar-brand-toggle img{
-  height:32px;
-  width:auto;
-  display:block;
-  transition: opacity .25s ease, transform .25s ease, max-width .25s ease;
-  will-change: opacity, transform, max-width;
-}
-
-.sidebar-brand-toggle .brand-logo-full{
-  max-width: 190px;
-  opacity: 1;
-  transform: translateX(0);
-}
-
-.sidebar-brand-toggle .brand-logo-icon{
-  max-width: 0;
-  opacity: 0;
-  transform: scale(.92);
-}
-
-/* MINI sidebar state (desktop) → icon only */
-body.sidebar-mini .sidebar-brand-toggle{
-  justify-content:center;
-}
-
-body.sidebar-mini .sidebar-brand-toggle .brand-logo-full{
-  max-width: 0;
-  opacity: 0;
-  transform: translateX(-10px);
-}
-
-body.sidebar-mini .sidebar-brand-toggle .brand-logo-icon{
-  max-width: 34px;
-  opacity: 1;
-  transform: scale(1);
-}
-
-@media (prefers-reduced-motion: reduce){
-  .sidebar-brand-toggle img{ transition: none !important; }
+.sidebar-brand-logo{ height:32px; width:auto; object-fit:contain; margin-right:0;   cursor:pointer;
 }
 
 
@@ -3371,33 +3318,22 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
 }
 
 .acc-action{
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border-radius: 12px;
-  border: 1px solid #E5EAF2;
-  background: #F9FAFB;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
   display: grid;
   place-items: center;
   cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
 }
 
-.acc-action:hover{ background: #F3F6FB; }
-.acc-action svg{ width: 16px; height: 16px; }
-
-/* ✅ Requested: smaller edit button with NO background */
-.acc-action.acc-edit{
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  border-radius: 10px;
-}
-.acc-action.acc-edit:hover{
-  background: transparent;
-  opacity: .85;
-}
-.acc-action.acc-edit svg{ width: 15px; height: 15px; }
+.acc-action:hover{ background: rgba(15, 23, 42, 0.06); }
+.acc-action:active{ transform: translateY(1px); }
+.acc-action:focus-visible{ outline: 2px solid rgba(59, 130, 246, 0.6); outline-offset: 2px; }
+.acc-action svg{ width: 15px; height: 15px; }
 
 .acc-save, .acc-cancel{ display: none; }
 
@@ -3445,48 +3381,54 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
 .acc-edit-backdrop{
   position: fixed;
   inset: 0;
-  /* Match "Settled my account" modal look */
   background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   display: none;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: 2500;
   padding: 18px;
 }
 .acc-edit-backdrop.is-open{ display: flex; }
 
 .acc-edit-modal{
-  background: #ffffff;
-  padding: 1.8rem;
   width: 90%;
   max-width: 420px;
+  background: #ffffff;
+  color: #111827;
   border-radius: 20px;
+  border: none;
   box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-  animation: accModalIn .25s ease;
-}
-
-@keyframes accModalIn{
-  from{ opacity: 0; transform: translateY(12px) scale(.98); }
-  to{ opacity: 1; transform: translateY(0) scale(1); }
+  padding: 1.8rem;
 }
 
 .acc-edit-title{
-  margin: 0 0 1rem;
   font-size: 1.4rem;
   font-weight: 700;
+  margin: 0 0 1rem;
 }
 
 .acc-edit-field{
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 1rem;
+  margin-bottom: 0;
 }
 
 .acc-edit-field label{
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 700;
-  color: #111827;
+  color: #111;
+  margin-top: 0.6rem;
+  margin-bottom: 0.25rem;
+}
+
+.acc-edit-field label svg{
+  width: 16px;
+  height: 16px;
 }
 
 .acc-edit-field input{
@@ -3494,13 +3436,16 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
   padding: 0.8rem;
   border-radius: 12px;
   border: 1.5px solid #d1d5db;
+  margin-bottom: 1rem;
   font-size: 1rem;
+  font-weight: 600;
   background: #fff;
 }
 
 .acc-edit-actions{
   display: flex;
   justify-content: space-between;
+  gap: 12px;
   margin-top: 1rem;
 }
 
@@ -3508,19 +3453,24 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
   padding: 0.7rem 1.4rem;
   border-radius: 12px;
   border: none;
-  font-size: 13px;
+  font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
 }
 
 .acc-edit-btn.confirm{
   background: #3b82f6;
-  color: white;
+  color: #fff;
 }
 
 .acc-edit-btn.cancel{
   background: #ef4444;
-  color: white;
+  color: #fff;
+}
+
+.acc-edit-btn:disabled{
+  opacity: .75;
+  cursor: not-allowed;
 }
 
 @media (max-width: 420px){
