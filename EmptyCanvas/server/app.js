@@ -4061,20 +4061,56 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     const numberFmt = '#,##0.##;-#,##0.##;0';
 
     // Funds Type cell colors (only the cell itself, NOT the whole row)
-    // Use a deterministic mapping (hash) so the same type gets the same color.
+    // Prefer using the same colors configured in Notion for the "Funds Type" select options.
+    // If we can't read Notion colors (or a type isn't found), we fall back to a high-contrast palette.
+    const NOTION_COLOR_TO_FILL = {
+      default: "FFF3F4F6", // light gray
+      gray:    "FFE5E7EB",
+      brown:   "FFF5E6D3",
+      orange:  "FFFED7AA",
+      yellow:  "FFFDE68A",
+      green:   "FFBBF7D0",
+      blue:    "FFBFDBFE",
+      purple:  "FFE9D5FF",
+      pink:    "FFFBCFE8",
+      red:     "FFFECACA",
+    };
+
+    // Map: Funds Type name -> Notion color name
+    const fundsTypeToNotionColor = new Map();
+    try {
+      const expProps = await getExpensesDBProps();
+      const fundsTypeKey =
+        pickPropName(expProps, ["Funds Type", "Funds type", "Fund Type", "Type"]) ||
+        "Funds Type";
+
+      const opts = expProps?.[fundsTypeKey]?.select?.options || [];
+      for (const opt of opts) {
+        if (!opt?.name) continue;
+        fundsTypeToNotionColor.set(String(opt.name).trim(), opt.color || "default");
+      }
+    } catch (e) {
+      console.warn(
+        "Excel export: unable to load Notion Funds Type colors, using fallback palette.",
+        e?.body || e
+      );
+    }
+
+    // Fallback palette (very distinct pastel colors) to avoid similar-looking types.
+    // Still deterministic via hashing so the same type always gets the same fallback color.
     const fundsTypePalette = [
-      "FFFDE68A", // amber-200
+      "FFFDE68A", // yellow-200
       "FFBFDBFE", // blue-200
       "FFBBF7D0", // green-200
       "FFFECACA", // red-200
       "FFE9D5FF", // purple-200
-      "FFCCFBF1", // teal-100
-      "FFE0E7FF", // indigo-100
-      "FFD9F99D", // lime-200
-      "FFFFE4E6", // rose-100
+      "FFFBCFE8", // pink-200
       "FFFED7AA", // orange-200
-      "FFDCFCE7", // green-100
-      "FFFCE7F3", // pink-100
+      "FF99F6E4", // teal-200
+      "FFC7D2FE", // indigo-200
+      "FFD9F99D", // lime-200
+      "FFA5F3FC", // cyan-200
+      "FFF5E6D3", // light brown
     ];
 
     function hashStr(s) {
@@ -4091,9 +4127,17 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     function fundsTypeFill(typeName) {
       const t = String(typeName || "").trim();
       if (!t) return null;
+
+      // 1) Prefer Notion option color (so export matches Notion)
+      const notionColor = fundsTypeToNotionColor.get(t);
+      const notionFill = notionColor ? NOTION_COLOR_TO_FILL[notionColor] : null;
+      if (notionFill) return notionFill;
+
+      // 2) Fallback: deterministic palette
       const idx = hashStr(t.toLowerCase()) % fundsTypePalette.length;
       return fundsTypePalette[idx];
     }
+
 
     function formatNumberForWidth(n) {
       const num = Number(n);
