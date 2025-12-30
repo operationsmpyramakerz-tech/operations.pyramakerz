@@ -104,6 +104,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   const confirmBtn = document.getElementById('accountEditSubmit');
   const cancelBtn = document.getElementById('accountEditClose');
 
+  const errorEl = document.getElementById('accountEditError');
+  const savingOverlayEl = document.getElementById('accountSavingOverlay');
+
+  function setModalError(message) {
+    if (!errorEl) return;
+    if (!message) {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+      return;
+    }
+    errorEl.textContent = String(message);
+    errorEl.style.display = 'block';
+  }
+
+  function showSavingOverlay() {
+    if (!savingOverlayEl) return;
+    savingOverlayEl.style.display = 'flex';
+    savingOverlayEl.setAttribute('aria-hidden', 'false');
+    if (window.feather) feather.replace();
+  }
+
+  function hideSavingOverlay() {
+    if (!savingOverlayEl) return;
+    savingOverlayEl.style.display = 'none';
+    savingOverlayEl.setAttribute('aria-hidden', 'true');
+  }
+
+
   let activeField = null;
 
   function isModalOpen() {
@@ -140,6 +168,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (passInput) passInput.value = '';
+    setModalError('');
 
     modalEl.style.display = 'flex';
     modalEl.setAttribute('aria-hidden', 'false');
@@ -160,6 +189,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeField = null;
     // Clear sensitive fields
     if (passInput) passInput.value = '';
+    setModalError('');
   }
 
   // Close when clicking on the backdrop (outside the box)
@@ -168,6 +198,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   cancelBtn?.addEventListener('click', closeModal);
+
+  passInput?.addEventListener('input', () => setModalError(''));
+  valueInput?.addEventListener('input', () => setModalError(''));
 
   confirmBtn?.addEventListener('click', async () => {
     if (!activeField) return;
@@ -201,6 +234,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const currentPassword = String(passInput?.value || '').trim();
 
+    // Reset error message on every submit
+    setModalError('');
+
     // Client-side validation
     if (meta.required && (!newVal || String(newVal).trim() === '')) {
       toast('warning', 'Required', `${meta.label} cannot be empty.`);
@@ -220,6 +256,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (cancelBtn) cancelBtn.disabled = true;
 
     try {
+      // 1) Verify password first (so if it's correct we can close the modal immediately)
+      const vRes = await fetch('/api/account/verify-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ currentPassword }),
+      });
+
+      const vJson = await vRes.json().catch(() => ({}));
+      if (!vRes.ok) {
+        if (vRes.status === 401) {
+          // Keep modal open and show inline message
+          setModalError('invalid password');
+          passInput?.focus?.();
+          passInput?.select?.();
+          return;
+        }
+        throw new Error(vJson.error || `Request failed (${vRes.status})`);
+      }
+
+      // Password OK → close modal + show saving loader until Notion update completes
+      closeModal();
+      showSavingOverlay();
+
+      // 2) Save changes
       const res = await fetch('/api/account', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -228,7 +289,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+      if (!res.ok) {
+        if (res.status === 401) {
+          toast('error', 'Save failed', 'invalid password');
+          return;
+        }
+        throw new Error(json.error || `Request failed (${res.status})`);
+      }
 
       // Update local state
       if (field === 'password') {
@@ -251,11 +318,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Refresh common UI (greeting + sidebar profile + permissions) from the server
       try { window.dispatchEvent(new Event('user:updated')); } catch {}
 
-      closeModal();
       toast('success', 'Saved', `${meta.label} updated successfully.`);
     } catch (e) {
       toast('error', 'Save failed', e.message || 'Failed to update account.');
     } finally {
+      hideSavingOverlay();
       if (confirmBtn) confirmBtn.disabled = false;
       if (cancelBtn) cancelBtn.disabled = false;
       if (window.feather) feather.replace();
