@@ -27,6 +27,59 @@ function hideSubmitLoader() {
     overlay.style.display = "none";
     overlay.setAttribute("aria-hidden", "true");
   }
+
+
+/* =============================
+   MODERN TOAST (errors / info)
+   - Replaces browser alert() with a modern UI message
+   ============================= */
+function ensureToastContainer() {
+  let el = document.getElementById("toastContainer");
+  if (el) return el;
+
+  el = document.createElement("div");
+  el.id = "toastContainer";
+  el.className = "toast-container";
+  el.setAttribute("aria-live", "polite");
+  el.setAttribute("aria-atomic", "true");
+  document.body.appendChild(el);
+  return el;
+}
+
+function showToast(message, type = "error", { duration = 4000 } = {}) {
+  const container = ensureToastContainer();
+  if (!container) return;
+
+  const safeType = ["error", "success", "info"].includes(type) ? type : "error";
+  const iconMap = { error: "!", success: "✓", info: "i" };
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast--${safeType}`;
+  toast.innerHTML = `
+    <div class="toast__icon" aria-hidden="true">${iconMap[safeType] || "!"}</div>
+    <div class="toast__body">
+      <p class="toast__msg"></p>
+    </div>
+    <button class="toast__close" type="button" aria-label="Close">✕</button>
+  `;
+
+  const msgEl = toast.querySelector(".toast__msg");
+  if (msgEl) msgEl.textContent = String(message || "");
+
+  const closeBtn = toast.querySelector(".toast__close");
+  const remove = () => {
+    try { toast.remove(); } catch {}
+  };
+
+  if (closeBtn) closeBtn.addEventListener("click", remove);
+
+  container.appendChild(toast);
+
+  if (duration && duration > 0) {
+    window.setTimeout(remove, duration);
+  }
+}
+
   document.body.classList.remove("is-loading");
 }
 
@@ -300,8 +353,8 @@ async function submitCashIn() {
     const receiptNumber = receiptInput ? String(receiptInput.value || "").trim() : "";
 
     if (!date || !amount || !receiptNumber) {
-        alert("Please fill required fields.");
-        return;
+        showToast("Please fill required fields.", "error");
+    return;
     }
 
     const btn = document.getElementById("ci_submit");
@@ -326,11 +379,11 @@ async function submitCashIn() {
         if (data.success) {
             await loadExpenses();
         } else {
-            alert("Error: " + (data.error || "Unknown error"));
+            showToast("Error: " + (data.error || "Unknown error"), "error");
         }
     } catch (err) {
         console.error("Cash-in submit error:", err);
-        alert("Failed to submit cash in.");
+        showToast("Failed to submit cash in.", "error");
     } finally {
         hideSubmitLoader();
         IS_CASHIN_SUBMITTING = false;
@@ -355,7 +408,7 @@ async function submitCashOut() {
   const to     = String(document.getElementById("co_to")?.value || "").trim();
 
   if (!type || !reason || !date) {
-    alert("Please fill required fields.");
+    showToast("Please fill required fields.", "error");
     return;
   }
 
@@ -405,14 +458,14 @@ async function submitCashOut() {
     const data = await res.json();
 
     if (!data?.success) {
-      alert("Error: " + (data?.error || "Unknown error"));
+      showToast("Error: " + (data?.error || "Unknown error"), "error");
       return;
     }
 
     await loadExpenses();
   } catch (err) {
     console.error("Cash-out submit error:", err);
-    alert("Failed to submit cash out.");
+    showToast("Failed to submit cash out.", "error");
   } finally {
     hideSubmitLoader();
     IS_CASHOUT_SUBMITTING = false;
@@ -464,7 +517,7 @@ async function submitSettleAccount() {
   const receiptNumber = String(receiptInput?.value || "").trim();
 
   if (!receiptNumber) {
-    alert("Please enter receipt number.");
+    showToast("Please enter receipt number.", "error");
     return;
   }
 
@@ -482,14 +535,14 @@ async function submitSettleAccount() {
     });
     const data = await res.json();
     if (!data?.success) {
-      alert("Error: " + (data?.error || "Unknown error"));
+      showToast("Error: " + (data?.error || "Unknown error"), "error");
       return;
     }
     closeSettleModal();
     await loadExpenses();
   } catch (err) {
     console.error("Settle account error:", err);
-    alert("Failed to settle account.");
+    showToast("Failed to settle account.", "error");
   } finally {
     if (btn) {
       btn.disabled = false;
