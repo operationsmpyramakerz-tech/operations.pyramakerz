@@ -6,6 +6,30 @@ let FUNDS_TYPES = [];
 
 let CASH_IN_FROM_OPTIONS = [];
 
+// Prevent duplicate submits
+let IS_CASHIN_SUBMITTING = false;
+let IS_CASHOUT_SUBMITTING = false;
+
+function showSubmitLoader(text) {
+  const overlay = document.getElementById("submitLoader");
+  const label = document.getElementById("submitLoaderText");
+  if (label) label.textContent = String(text || "Saving...");
+  if (overlay) {
+    overlay.style.display = "flex";
+    overlay.setAttribute("aria-hidden", "false");
+  }
+  document.body.classList.add("is-loading");
+}
+
+function hideSubmitLoader() {
+  const overlay = document.getElementById("submitLoader");
+  if (overlay) {
+    overlay.style.display = "none";
+    overlay.setAttribute("aria-hidden", "true");
+  }
+  document.body.classList.remove("is-loading");
+}
+
 /* =============================
    CASH IN FROM (Searchable Select)
    - User types inside the same field.
@@ -196,10 +220,12 @@ function setupCashInFromSearchableSelect() {
 function openCashInModal() {
     const d = document.getElementById("ci_date");
     const c = document.getElementById("ci_cash");
+    const r = document.getElementById("ci_receipt");
     const f = document.getElementById("ci_from");
     const s = document.getElementById("ci_from_search");
     if (d) d.value = "";
     if (c) c.value = "";
+    if (r) r.value = "";
     if (f) f.value = "";
     if (s) s.value = "";
     hideCashInFromDropdown();
@@ -263,31 +289,41 @@ function fileToDataURL(file) {
    SUBMIT CASH IN
    ============================= */
 async function submitCashIn() {
+    if (IS_CASHIN_SUBMITTING) return;
+
     const dateInput = document.getElementById("ci_date");
     const amountInput = document.getElementById("ci_cash");
-    const fromInput = document.getElementById("ci_from");
+    const receiptInput = document.getElementById("ci_receipt");
 
-    const date = dateInput ? dateInput.value : "";
-    const amount = amountInput ? amountInput.value : "";
-    // Cash in from is a Notion Relation → we send the related page id
-    // "Cash in from" is a Relation dropdown (value = Notion page id)
-    const cashInFrom = fromInput ? String(fromInput.value || "").trim() : "";
+    const date = dateInput ? String(dateInput.value || "").trim() : "";
+    const amount = amountInput ? String(amountInput.value || "").trim() : "";
+    const receiptNumber = receiptInput ? String(receiptInput.value || "").trim() : "";
 
-    if (!date || !amount) {
+    if (!date || !amount || !receiptNumber) {
         alert("Please fill required fields.");
         return;
     }
+
+    const btn = document.getElementById("ci_submit");
+    IS_CASHIN_SUBMITTING = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+    }
+
+    // Close modal immediately & show loader to prevent duplicate submits
+    closeCashInModal();
+    showSubmitLoader("Saving cash in...");
 
     try {
         const res = await fetch("/api/expenses/cash-in", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ date, amount, cashInFrom }),
+            body: JSON.stringify({ date, amount, receiptNumber }),
         });
 
         const data = await res.json();
         if (data.success) {
-            closeCashInModal();
             await loadExpenses();
         } else {
             alert("Error: " + (data.error || "Unknown error"));
@@ -295,6 +331,13 @@ async function submitCashIn() {
     } catch (err) {
         console.error("Cash-in submit error:", err);
         alert("Failed to submit cash in.");
+    } finally {
+        hideSubmitLoader();
+        IS_CASHIN_SUBMITTING = false;
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Submit";
+        }
     }
 }
 
@@ -303,18 +346,34 @@ async function submitCashIn() {
    ============================= */
 
 async function submitCashOut() {
+  if (IS_CASHOUT_SUBMITTING) return;
+
+  const type   = String(document.getElementById("co_type")?.value || "").trim();
+  const reason = String(document.getElementById("co_reason")?.value || "").trim();
+  const date   = String(document.getElementById("co_date")?.value || "").trim();
+  const from   = String(document.getElementById("co_from")?.value || "").trim();
+  const to     = String(document.getElementById("co_to")?.value || "").trim();
+
+  if (!type || !reason || !date) {
+    alert("Please fill required fields.");
+    return;
+  }
+
+  const btn = document.getElementById("co_submit");
+  IS_CASHOUT_SUBMITTING = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+  }
+
+  // Close modal immediately & show loader to prevent duplicate submits
+  closeCashOutModal();
+  showSubmitLoader("Saving cash out...");
+
+  const fileInput = document.getElementById("co_screenshot");
+  const fileNameEl = document.getElementById("co_screenshot_name");
+
   try {
-    const type   = document.getElementById("co_type")?.value || "";
-    const reason = document.getElementById("co_reason")?.value || "";
-    const date   = document.getElementById("co_date")?.value || "";
-    const from   = document.getElementById("co_from")?.value || "";
-    const to     = document.getElementById("co_to")?.value || "";
-
-    if (!type || !reason || !date) {
-      alert("Please fill required fields.");
-      return;
-    }
-
     const body = {
       fundsType: type,
       reason,
@@ -330,8 +389,7 @@ async function submitCashOut() {
       body.amount = Number(document.getElementById("co_cash")?.value || 0);
     }
 
-    // Screenshot
-    const fileInput = document.getElementById("co_screenshot");
+    // Screenshot (optional)
     const file = fileInput?.files?.[0];
     if (file) {
       body.screenshotName = file.name;
@@ -346,21 +404,26 @@ async function submitCashOut() {
 
     const data = await res.json();
 
-    if (!data.success) {
-      alert("Error: " + (data.error || "Unknown error"));
+    if (!data?.success) {
+      alert("Error: " + (data?.error || "Unknown error"));
       return;
     }
 
-    closeCashOutModal();
     await loadExpenses();
-
-    if (fileInput) fileInput.value = "";
-    const fileName = document.getElementById("co_screenshot_name");
-    if (fileName) fileName.textContent = "No file chosen";
-
   } catch (err) {
     console.error("Cash-out submit error:", err);
     alert("Failed to submit cash out.");
+  } finally {
+    hideSubmitLoader();
+    IS_CASHOUT_SUBMITTING = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Submit";
+    }
+
+    // Reset screenshot upload UI
+    if (fileInput) fileInput.value = "";
+    if (fileNameEl) fileNameEl.textContent = "No file chosen";
   }
 }
 
@@ -505,7 +568,11 @@ async function loadExpenses() {
                 const dateLine = it.date ? `<div class="expense-person"><strong>Date:</strong> ${escapeHtml(it.date)}</div>` : "";
 
                 const line1 = isIn
-                  ? `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
+                  ? (
+                      it.reason
+                        ? `<div class="expense-person"><strong>Receipt number:</strong> ${escapeHtml(it.reason)}</div>`
+                        : `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
+                    )
                   : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it.reason || "")}</div>`;
 
                 const line2 = (!isIn && (it.from || it.to))
@@ -677,7 +744,11 @@ function openAllExpensesModal() {
                 const title = isIn ? "Cash In" : (it.fundsType || "Cash Out");
                 const dateLine = it.date ? `<div class="expense-person"><strong>Date:</strong> ${escapeHtml(it.date)}</div>` : "";
                 const line1 = isIn
-                  ? `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
+                  ? (
+                      it.reason
+                        ? `<div class="expense-person"><strong>Receipt number:</strong> ${escapeHtml(it.reason)}</div>`
+                        : `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
+                    )
                   : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it.reason || "")}</div>`;
                 const line2 = (!isIn && (it.from || it.to))
                   ? `<div class="expense-person">${escapeHtml(it.from || "")} → ${escapeHtml(it.to || "")}</div>`
