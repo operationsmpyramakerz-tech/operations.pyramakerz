@@ -6,14 +6,52 @@ let FUNDS_TYPES = [];
 
 let CASH_IN_FROM_OPTIONS = [];
 
-function renderCashInFromSelect(filterText = "") {
+/* =============================
+   CASH IN FROM (Searchable Select)
+   - User types inside the same field.
+   - We show a dropdown list below it.
+   - The hidden <select id="ci_from"> stores the Notion page id.
+   ============================= */
+
+function syncCashInFromHiddenSelect() {
   const sel = document.getElementById("ci_from");
   if (!sel) return;
 
   const current = String(sel.value || "");
-  const q = String(filterText || "").trim().toLowerCase();
-
   sel.innerHTML = `<option value="">Select user...</option>`;
+
+  CASH_IN_FROM_OPTIONS.forEach((o) => {
+    if (!o || !o.id) return;
+    sel.innerHTML += `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name || "Unnamed")}</option>`;
+  });
+
+  // keep selection if still valid
+  if (current) sel.value = current;
+}
+
+function hideCashInFromDropdown() {
+  const dd = document.getElementById("ci_from_dropdown");
+  if (dd) dd.style.display = "none";
+}
+
+function showCashInFromDropdown() {
+  const dd = document.getElementById("ci_from_dropdown");
+  if (dd) dd.style.display = "block";
+}
+
+function setCashInFromSelection(id, name) {
+  const sel = document.getElementById("ci_from");
+  const input = document.getElementById("ci_from_search");
+  if (sel) sel.value = String(id || "");
+  if (input) input.value = String(name || "");
+  hideCashInFromDropdown();
+}
+
+function renderCashInFromDropdown(filterText = "") {
+  const dd = document.getElementById("ci_from_dropdown");
+  if (!dd) return;
+
+  const q = String(filterText || "").trim().toLowerCase();
 
   const filtered = CASH_IN_FROM_OPTIONS.filter((o) => {
     if (!o) return false;
@@ -21,16 +59,18 @@ function renderCashInFromSelect(filterText = "") {
     return String(o.name || "").toLowerCase().includes(q);
   });
 
-  filtered.forEach((o) => {
-    if (!o || !o.id) return;
-    sel.innerHTML += `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name || "Unnamed")}</option>`;
-  });
-
-  // try to keep selection if still present after filtering
-  if (current) {
-    const exists = filtered.some((o) => String(o.id) === current);
-    if (exists) sel.value = current;
+  if (!filtered.length) {
+    dd.innerHTML = `<div class="combo-empty">No matching users</div>`;
+    return;
   }
+
+  dd.innerHTML = filtered
+    .map((o) => {
+      const id = escapeHtml(o.id);
+      const name = escapeHtml(o.name || "Unnamed");
+      return `<div class="combo-item" data-id="${id}">${name}</div>`;
+    })
+    .join("");
 }
 
 function escapeHtml(str) {
@@ -86,25 +126,67 @@ async function loadCashInFromOptions() {
   if (!sel) return;
 
   CASH_IN_FROM_OPTIONS = [];
-  renderCashInFromSelect(document.getElementById("ci_from_search")?.value || "");
+  syncCashInFromHiddenSelect();
+  renderCashInFromDropdown(document.getElementById("ci_from_search")?.value || "");
 
   try {
     const res = await fetch("/api/expenses/cash-in-from/options");
     const data = await res.json();
     if (data && data.success && Array.isArray(data.options)) {
       CASH_IN_FROM_OPTIONS = data.options;
-      renderCashInFromSelect(document.getElementById("ci_from_search")?.value || "");
+      syncCashInFromHiddenSelect();
+      renderCashInFromDropdown(document.getElementById("ci_from_search")?.value || "");
     }
   } catch (err) {
     console.error("Cash-in-from options load error:", err);
   }
 }
 
-function setupCashInFromSearch() {
-  const search = document.getElementById("ci_from_search");
-  if (!search) return;
-  search.addEventListener("input", () => {
-    renderCashInFromSelect(search.value);
+function setupCashInFromSearchableSelect() {
+  const wrap = document.getElementById("ci_from_wrap");
+  const input = document.getElementById("ci_from_search");
+  const sel = document.getElementById("ci_from");
+  const dd = document.getElementById("ci_from_dropdown");
+  if (!wrap || !input || !sel || !dd) return;
+
+  // Ensure the real select stays hidden (value storage only)
+  sel.style.display = "none";
+
+  // Open dropdown when user focuses/clicks the input
+  const open = () => {
+    renderCashInFromDropdown(input.value);
+    showCashInFromDropdown();
+  };
+
+  input.addEventListener("focus", open);
+  input.addEventListener("click", open);
+
+  // Filter as the user types (and clear previous selection)
+  input.addEventListener("input", () => {
+    // If user types, we consider selection changed until they pick again
+    sel.value = "";
+    renderCashInFromDropdown(input.value);
+    showCashInFromDropdown();
+  });
+
+  // Click on an item selects it
+  dd.addEventListener("click", (e) => {
+    const item = e.target && e.target.closest ? e.target.closest(".combo-item") : null;
+    if (!item) return;
+
+    const id = String(item.getAttribute("data-id") || "");
+    const opt = CASH_IN_FROM_OPTIONS.find((o) => String(o?.id || "") === id);
+    setCashInFromSelection(id, opt?.name || item.textContent || "");
+  });
+
+  // Close dropdown on outside click
+  document.addEventListener("click", (e) => {
+    if (!wrap.contains(e.target)) hideCashInFromDropdown();
+  });
+
+  // Close on Escape
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideCashInFromDropdown();
   });
 }
 
@@ -120,7 +202,8 @@ function openCashInModal() {
     if (c) c.value = "";
     if (f) f.value = "";
     if (s) s.value = "";
-    renderCashInFromSelect("");
+    hideCashInFromDropdown();
+    renderCashInFromDropdown("");
     const modal = document.getElementById("cashInModal");
     if (modal) modal.style.display = "flex";
 }
@@ -472,7 +555,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadCashInFromOptions();
     await loadExpenses();
 
-    setupCashInFromSearch();
+    setupCashInFromSearchableSelect();
     setupScreenshotUploadUI();
 
     const cashInBtn  = document.getElementById("cashInBtn");
