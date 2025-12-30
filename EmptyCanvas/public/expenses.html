@@ -222,6 +222,19 @@
       stroke: currentColor;
     }
 
+    /* Required / Optional indicators */
+    .req-star{
+      color:#ef4444;
+      margin-left:4px;
+      font-weight:900;
+    }
+    .opt-tag{
+      margin-left:6px;
+      font-size:0.85rem;
+      font-weight:700;
+      color:#94a3b8;
+    }
+
     /* Receipt thumbnail inside expense cards */
     .expense-screenshot-thumb {
       width: 84px;
@@ -415,7 +428,17 @@
       max-width: 420px;
       border-radius: 20px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+
+      /* ✅ make modal scrollable on small screens */
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
     }
+
+
+    /* Smooth scroll (modal box) */
+    .ex-modal-box::-webkit-scrollbar { width: 6px; }
+    .ex-modal-box::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 10px; }
 
     .ex-modal-title {
       font-size: 1.4rem;
@@ -645,6 +668,84 @@
     overflow: hidden;
   }
 </style>
+
+<style>
+  /* ============================
+     Modern Toast (Errors / Info)
+     ============================ */
+  .toast-container{
+    position:fixed;
+    top:16px;
+    left:50%;
+    transform:translateX(-50%);
+    width:min(92vw, 420px);
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    z-index:100001;
+    pointer-events:none; /* allow clicking through except the toast itself */
+  }
+  .toast{
+    pointer-events:auto;
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    padding:12px 14px;
+    border-radius:16px;
+    background:rgba(255,255,255,0.92);
+    backdrop-filter: blur(10px);
+    box-shadow:0 14px 35px rgba(0,0,0,0.16);
+    border:1px solid rgba(226,232,240,0.9);
+    animation: toastIn 0.22s ease both;
+  }
+  .toast__icon{
+    flex:0 0 auto;
+    width:28px;
+    height:28px;
+    border-radius:10px;
+    display:grid;
+    place-items:center;
+    background:#f1f5f9;
+    color:#0f172a;
+  }
+  .toast__body{
+    flex:1 1 auto;
+    min-width:0;
+  }
+  .toast__msg{
+    margin:0;
+    font-weight:800;
+    color:#0f172a;
+    line-height:1.35;
+    font-size:0.95rem;
+  }
+  .toast__close{
+    flex:0 0 auto;
+    border:none;
+    background:transparent;
+    color:#64748b;
+    cursor:pointer;
+    padding:4px;
+    border-radius:10px;
+    line-height:0;
+  }
+  .toast__close:hover{ background:rgba(15,23,42,0.06); }
+
+  .toast--error{ border-left:4px solid #ef4444; }
+  .toast--error .toast__icon{ background:rgba(239,68,68,0.12); color:#ef4444; }
+
+  .toast--success{ border-left:4px solid #22c55e; }
+  .toast--success .toast__icon{ background:rgba(34,197,94,0.12); color:#16a34a; }
+
+  .toast--info{ border-left:4px solid #3b82f6; }
+  .toast--info .toast__icon{ background:rgba(59,130,246,0.12); color:#2563eb; }
+
+  @keyframes toastIn{
+    from{ opacity:0; transform: translateY(-6px) scale(0.98); }
+    to  { opacity:1; transform: translateY(0) scale(1); }
+  }
+</style>
+
 </head>
 
 <body class="permissions-loading">
@@ -754,13 +855,13 @@
 
     <h3 class="ex-modal-title">Add Cash In</h3>
 
-    <label class="field-label"><i data-feather="calendar"></i> Date</label>
+    <label class="field-label"><i data-feather="calendar"></i> Date <span class="req-star">*</span></label>
     <input id="ci_date" type="date" class="ex-input"/>
 
-    <label class="field-label"><i data-feather="plus-circle"></i> Cash in</label>
+    <label class="field-label"><i data-feather="plus-circle"></i> Cash in <span class="req-star">*</span></label>
     <input id="ci_cash" type="number" class="ex-input"/>
 
-    <label class="field-label"><i data-feather="hash"></i> Receipt number</label>
+    <label class="field-label"><i data-feather="hash"></i> Receipt number <span class="req-star">*</span></label>
     <input id="ci_receipt" type="text" class="ex-input" placeholder="Enter receipt number"/>
 
     <div class="ex-modal-actions">
@@ -777,30 +878,30 @@
 
     <h3 class="ex-modal-title">Add Cash Out</h3>
 
-    <label class="field-label"><i data-feather="tag"></i> Funds Type</label>
+    <label class="field-label"><i data-feather="tag"></i> Funds Type <span class="req-star">*</span></label>
     <select id="co_type" class="ex-input"></select>
 
-    <label class="field-label"><i data-feather="edit-3"></i> Reason</label>
+    <label class="field-label"><i data-feather="edit-3"></i> Reason <span class="req-star">*</span></label>
     <input id="co_reason" type="text" class="ex-input"/>
 
-    <label class="field-label"><i data-feather="calendar"></i> Date</label>
+    <label class="field-label"><i data-feather="calendar"></i> Date <span class="req-star">*</span></label>
     <input id="co_date" type="date" class="ex-input"/>
 
-    <label class="field-label"><i data-feather="log-out"></i> From</label>
+    <label class="field-label"><i data-feather="log-out"></i> From <span class="opt-tag">(Optional)</span></label>
     <input id="co_from" type="text" class="ex-input"/>
 
-    <label class="field-label"><i data-feather="log-in"></i> To</label>
+    <label class="field-label"><i data-feather="log-in"></i> To <span class="opt-tag">(Optional)</span></label>
     <input id="co_to" type="text" class="ex-input"/>
 
     <div id="co_km_block" style="display:none;">
-      <label class="field-label"><i data-feather="navigation"></i> Kilometer</label>
+      <label class="field-label"><i data-feather="navigation"></i> Kilometer <span class="opt-tag">(Optional)</span></label>
       <input id="co_km" type="number" class="ex-input"/>
     </div>
 
     <div id="co_cash_block">
       <!-- Screenshot (receipt) -->
 <div class="form-group">
-  <label for="co_screenshot" class="field-label"><i data-feather="image"></i> Screenshot</label>
+  <label for="co_screenshot" class="field-label"><i data-feather="image"></i> Screenshot <span class="opt-tag">(Optional)</span></label>
   <div class="upload-control">
     <input id="co_screenshot" class="upload-input" type="file" accept="image/*" />
     <div class="upload-row">
@@ -814,7 +915,7 @@
   <small class="help">Upload a receipt screenshot (JPG/PNG).</small>
 </div>
       
-      <label class="field-label"><i data-feather="minus-circle"></i> Cash out</label>
+      <label class="field-label"><i data-feather="minus-circle"></i> Cash out <span class="opt-tag">(Optional)</span></label>
       <input id="co_cash" type="number" class="ex-input"/>
     </div>
 
@@ -832,7 +933,7 @@
 
     <h3 class="ex-modal-title">Settled my account</h3>
 
-    <label class="field-label"><i data-feather="hash"></i> Receipt number</label>
+    <label class="field-label"><i data-feather="hash"></i> Receipt number <span class="req-star">*</span></label>
     <input id="settle_receipt" type="text" class="ex-input" placeholder="Enter receipt number"/>
 
     <div class="ex-modal-actions">
@@ -863,6 +964,8 @@
 
   </div>
 </div>
+
+<div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
 <!-- GLOBAL LOADER (shown while submitting to prevent duplicates) -->
 <div id="submitLoader" class="loader-overlay" aria-hidden="true">
