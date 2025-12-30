@@ -260,6 +260,26 @@ function toHyphenatedUUID(val) {
   return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
 }
 
+// Normalize any Notion ID (page/database) to a comparable 32-hex string
+// (no hyphens, lowercase). Some env vars are stored without hyphens while
+// the Notion API returns hyphenated IDs — direct string compare will fail.
+function normalizeNotionId(id) {
+  const raw = String(id || "").trim();
+  if (!raw) return "";
+
+  // If the user stored a full Notion URL, extract the first 32-hex chunk.
+  const m32 = raw.match(/[0-9a-fA-F]{32}/);
+  if (m32) return m32[0].toLowerCase();
+
+  // Or a standard UUID with hyphens.
+  const muuid = raw.match(
+    /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/
+  );
+  if (muuid) return muuid[0].replace(/-/g, "").toLowerCase();
+
+  return raw.replace(/-/g, "").toLowerCase();
+}
+
 async function findOrCreatePageByTitle(databaseId, titleText) {
   const name = String(titleText || "").trim();
   if (!databaseId || !name) return null;
@@ -3231,7 +3251,12 @@ app.get("/api/expenses/screenshot/:expenseId", async (req, res) => {
 
     const page = await notion.pages.retrieve({ page_id: expenseId });
     const parentDbId = page?.parent?.type === "database_id" ? page.parent.database_id : null;
-    if (!parentDbId || parentDbId !== expDbId) {
+
+    // IMPORTANT: Notion may return IDs with hyphens, while env vars are often stored without hyphens.
+    // Compare normalized 32-hex forms to avoid false "Not found".
+    const parentNorm = normalizeNotionId(parentDbId);
+    const expDbNorm = normalizeNotionId(expDbId);
+    if (!parentNorm || !expDbNorm || parentNorm !== expDbNorm) {
       return res.status(404).send("Not found");
     }
 
