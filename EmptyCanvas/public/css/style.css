@@ -2867,20 +2867,32 @@ main:has(#sv-list) {
 
 /* The area that contains the menu links */
 .sidebar-nav {
-  flex: 1 1 auto;                  /* take remaining space */
+  /*
+    ✅ Requested: center the footer actions (Settings + Logout)
+    in the middle of the sidebar.
+
+    When the nav uses `flex: 1`, it consumes all remaining height,
+    which forces the footer to stick to the very bottom and leaves a
+    large empty area above it (especially for users with limited links).
+
+    Using `flex: 0` keeps the nav sized to its content, while still
+    allowing it to shrink and scroll when needed.
+  */
+  flex: 0 1 auto;
   min-height: 0;                   /* CRITICAL for flex + overflow to work */
   overflow-y: auto;                /* scroll only the links area */
   overscroll-behavior: contain;    /* nicer scroll behavior */
   padding-right: 4px;              /* room for scrollbar */
 }
 
-/* Keep the logout area anchored at the bottom and always visible */
+/* Center Settings/Logout vertically inside the sidebar */
 .sidebar-footer {
   flex: 0 0 auto;
-  margin-top: auto;                /* pins it to the bottom of the flex column */
+  margin-top: auto;
+  margin-bottom: auto;
   background: var(--sidebar-bg, #0f172a);
   border-top: 1px solid rgba(255,255,255,0.06);
-  /* Keep it at the bottom via flex (more reliable than sticky inside fixed). */
+  /* Use auto margins to center it when there is free vertical space. */
 }
 
 /* Optional: subtle scrollbar styling (WebKit/Blink) */
