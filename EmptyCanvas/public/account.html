@@ -77,6 +77,17 @@
   .ex-primary{ background: #3b82f6; color: white; }
   .ex-danger{ background: #ef4444; color: white; }
 
+  /* Inline error message inside modal */
+  .ex-error{
+    display: none;
+    margin-top: -0.5rem;
+    margin-bottom: 0.8rem;
+    color: #B91C1C;
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+
+
   /* Label row with icon (like expenses modals) */
   .field-label{
     display: flex;
@@ -227,12 +238,26 @@
     <label class="field-label" id="accountEditPasswordLabel"><i data-feather="lock"></i> Current password</label>
     <input id="accountEditPassword" type="password" class="ex-input" inputmode="numeric" autocomplete="current-password" />
 
+    <div id="accountEditError" class="ex-error" role="alert">invalid password</div>
+
     <div class="ex-modal-actions">
       <button id="accountEditSubmit" class="ex-btn ex-primary" type="button">Submit</button>
       <button id="accountEditClose" class="ex-btn ex-danger" type="button">Close</button>
     </div>
   </div>
 </div>
+
+<!-- ACCOUNT SAVING OVERLAY -->
+<div id="accountSavingOverlay" class="ex-modal" aria-hidden="true" style="display:none;">
+  <div class="ex-modal-box" role="status" aria-live="polite" style="max-width: 320px; text-align:center;">
+    <h3 class="ex-modal-title" style="margin-bottom:0.75rem;">Saving...</h3>
+    <p style="margin:0; display:flex; align-items:center; justify-content:center; gap:10px;">
+      <i class="loading-icon" data-feather="loader"></i>
+      <span>Please wait</span>
+    </p>
+  </div>
+</div>
+
     <script>feather.replace();</script>
 <script src="/js/common-ui.js"></script>
 <script src="/js/script.js"></script>
