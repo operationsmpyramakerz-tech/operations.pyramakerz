@@ -2711,7 +2711,7 @@ if (screenshotDataUrl) {
 
 // Cash In
 app.post("/api/expenses/cash-in", async (req, res) => {
-  const { date, amount, cashInFrom } = req.body;
+  const { date, amount, cashInFrom, receiptNumber } = req.body;
 
   try {
     const teamMemberPageId = await getCurrentUserRelationPage(req);
@@ -2731,8 +2731,17 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       });
     }
 
-    // Detect property type for "Cash in from" (some Notion schemas use relation)
+    const receipt = String(receiptNumber || "").trim();
+    if (!receipt) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing receipt number",
+      });
+    }
+
+    // Detect Expenses DB properties (title + optional Cash in from)
     const expProps = await getExpensesDBProps();
+    const titleKey = firstTitlePropName(expProps) || "Reason";
     const cashInFromKey =
       pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
       "Cash in from";
@@ -2741,7 +2750,7 @@ app.post("/api/expenses/cash-in", async (req, res) => {
     let cashInFromValue = null;
     const fromVal = String(cashInFrom || "").trim();
 
-    if (cashInFromProp?.type === "relation") {
+    if (fromVal && cashInFromProp?.type === "relation") {
       // Notion expects: { relation: [{ id: "..." }] }
       const relDbId = cashInFromProp?.relation?.database_id;
 
@@ -2764,7 +2773,7 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       } else {
         cashInFromValue = { relation: [] };
       }
-    } else if (cashInFromProp?.type === "rich_text") {
+    } else if (fromVal && cashInFromProp?.type === "rich_text") {
       // Old schema uses rich_text
       cashInFromValue = {
         rich_text: [{ type: "text", text: { content: fromVal } }],
@@ -2774,6 +2783,10 @@ app.post("/api/expenses/cash-in", async (req, res) => {
     const propsToCreate = {
       "Team Member": {
         relation: teamMemberPageId ? [{ id: teamMemberPageId }] : [],
+      },
+      // Store receipt number in the DB title (same behavior as "Settled my account")
+      [titleKey]: {
+        title: [{ text: { content: receipt } }],
       },
       "Date": {
         date: { start: date },
