@@ -3198,6 +3198,69 @@ app.get(
   }
 );
 
+// ============================================
+// Expenses: Screenshot proxy (Notion files expire)
+// ============================================
+// Notion "file" URLs are time-limited signed URLs (S3...Request has expired).
+// If we put those URLs directly into Excel, they will stop working after a while.
+//
+// This endpoint returns a fresh URL at click-time by re-reading the Notion page and
+// redirecting to the latest file URL.
+//
+// NOTE:
+// - We keep it public (no requireAuth) so Excel links behave like the old signed links.
+// - We still restrict it to ONLY pages that belong to the Expenses database.
+// - If you prefer to lock it behind auth, add `requireAuth` as middleware.
+app.get("/api/expenses/screenshot/:expenseId", async (req, res) => {
+  try {
+    const raw = String(req.params.expenseId || "").trim();
+    if (!raw) return res.status(400).send("Missing expenseId");
+
+    // Accept both hyphenated and non-hyphenated UUIDs
+    if (!looksLikeNotionId(raw)) {
+      // allow already-hyphenated UUIDs
+      const noHyphen = raw.replace(/-/g, "");
+      if (!looksLikeNotionId(noHyphen)) {
+        return res.status(400).send("Invalid expenseId");
+      }
+    }
+
+    const expenseId = toHyphenatedUUID(raw);
+    const expDbId = expensesDatabaseId || process.env.Expenses_Database;
+    if (!expDbId) return res.status(500).send("Expenses DB not configured");
+
+    const page = await notion.pages.retrieve({ page_id: expenseId });
+    const parentDbId = page?.parent?.type === "database_id" ? page.parent.database_id : null;
+    if (!parentDbId || parentDbId !== expDbId) {
+      return res.status(404).send("Not found");
+    }
+
+    // Optional screenshot (Notion property: "Screenshot" - files)
+    const props = page.properties || {};
+    const screenshotProp = props?.["Screenshot"];
+    if (!screenshotProp || screenshotProp.type !== "files") {
+      return res.status(404).send("No screenshot");
+    }
+
+    const f = (screenshotProp.files || [])[0];
+    if (!f) return res.status(404).send("No screenshot");
+
+    let url = "";
+    if (f.type === "external") url = f.external?.url || "";
+    if (f.type === "file") url = f.file?.url || "";
+    url = String(url || "").trim();
+
+    if (!url) return res.status(404).send("No screenshot");
+
+    // Avoid caching a potentially short-lived redirect
+    res.setHeader("Cache-Control", "no-store");
+    return res.redirect(url);
+  } catch (err) {
+    console.error("/api/expenses/screenshot/:expenseId error:", err?.body || err);
+    return res.status(500).send("Failed to open screenshot");
+  }
+});
+
 // === Helper: upload base64 image to Vercel Blob (SDK v2) and return a public URL ===
 async function uploadToBlobFromBase64(dataUrl, filenameHint = "receipt.jpg") {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
@@ -4028,6 +4091,10 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     const rawName = String(userName || "Expenses").trim();
     const displayName = (rawName.replace(/^Expenses\s*[—\-]\s*/i, "").trim() || rawName);
 
+    // Base URL used for stable hyperlinks inside Excel.
+    // (Notion file URLs expire, so we link to our proxy endpoint instead.)
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+
     const totalCashIn = safeItems.reduce(
       (sum, it) => sum + Number(it?.cashIn || 0),
       0
@@ -4317,8 +4384,14 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       const d = it?.date ? new Date(it.date) : null;
       const dateVal = d && !Number.isNaN(d.getTime()) ? d : (it?.date || "");
 
-      const screenshotUrl = String(it?.screenshotUrl || "").trim();
+      // Notion-hosted "file" URLs expire. Use a stable proxy URL (fresh redirect at click-time).
+      const screenshotUrlRaw = String(it?.screenshotUrl || "").trim();
       const screenshotText = String(it?.screenshotName || "Open").trim() || "Open";
+
+      const expenseId = String(it?.id || "").trim();
+      const screenshotUrl = (screenshotUrlRaw && expenseId)
+        ? `${baseUrl}/api/expenses/screenshot/${encodeURIComponent(expenseId)}`
+        : screenshotUrlRaw;
 
       const row = sheet.addRow([
         dateVal,
