@@ -3589,3 +3589,18 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
   .acc-edit-actions{ flex-direction: column; }
   .acc-edit-btn{ width: 100%; }
 }
+/* ✅ Center Settings + Logout in the middle of the sidebar (exact center) */
+aside.sidebar .sidebar-footer{
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+
+  margin-top: 0 !important;      /* cancels bottom pinning */
+  width: max-content !important; /* so it can be centered */
+}
+
+/* make buttons not full width so they truly sit in the center */
+aside.sidebar .sidebar-footer .logout-btn{
+  width: auto !important;
+}
