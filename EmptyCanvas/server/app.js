@@ -2354,6 +2354,50 @@ app.get(
   },
 );
 
+
+// Verify current password (used by Account page before saving)
+app.post("/api/account/verify-password", requireAuth, async (req, res) => {
+  if (!teamMembersDatabaseId) {
+    return res
+      .status(500)
+      .json({ error: "Team_Members database ID is not configured." });
+  }
+
+  try {
+    const { currentPassword } = req.body || {};
+    const provided = String(currentPassword ?? "").trim();
+
+    if (!provided) {
+      return res.status(400).json({ error: "Current password is required." });
+    }
+
+    const response = await notion.databases.query({
+      database_id: teamMembersDatabaseId,
+      filter: { property: "Name", title: { equals: req.session.username } },
+    });
+
+    if (response.results.length === 0) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const user = response.results[0];
+    const storedPassword = user.properties?.Password?.number;
+
+    if (storedPassword === null || typeof storedPassword === "undefined") {
+      return res.status(400).json({ error: "No password set for this account." });
+    }
+
+    if (String(storedPassword) !== provided) {
+      return res.status(401).json({ error: "invalid password" });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Error verifying account password:", error.body || error);
+    return res.status(500).json({ error: "Failed to verify password." });
+  }
+});
+
 // Update account info (PATCH) — اختيارى
 // Update account info (PATCH) — requires current password confirmation
 app.patch("/api/account", requireAuth, async (req, res) => {
@@ -2399,7 +2443,7 @@ app.patch("/api/account", requireAuth, async (req, res) => {
     }
 
     if (String(storedPassword) !== provided) {
-      return res.status(401).json({ error: "Current password is incorrect." });
+      return res.status(401).json({ error: "invalid password" });
     }
 
     const updateProps = {};
