@@ -432,6 +432,44 @@
       font-size: 1rem;
     }
 
+    /* =============================
+       Searchable "Select user" (Cash in from)
+       The real <select> stays hidden (stores the Notion page id).
+       ============================= */
+    .combo-wrap{
+      position: relative;
+      margin-bottom: 1rem;
+    }
+    .combo-wrap .ex-input{ margin-bottom: 0; }
+    .combo-dropdown{
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      background: #ffffff;
+      border: 1.5px solid #d1d5db;
+      border-radius: 14px;
+      box-shadow: 0 14px 35px rgba(0,0,0,0.14);
+      max-height: 240px;
+      overflow: auto;
+      z-index: 10000;
+      display: none;
+    }
+    .combo-item{
+      padding: 0.75rem 0.85rem;
+      cursor: pointer;
+      font-weight: 600;
+      color: #0f172a;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .combo-item:last-child{ border-bottom: none; }
+    .combo-item:hover{ background: #f8fafc; }
+    .combo-empty{
+      padding: 0.8rem;
+      color: #64748b;
+      font-weight: 600;
+    }
+
     .ex-modal-actions {
       display: flex;
       justify-content: space-between;
@@ -672,8 +710,12 @@
     <input id="ci_cash" type="number" class="ex-input"/>
 
     <label class="field-label"><i data-feather="user"></i> Cash in from</label>
-    <input id="ci_from_search" type="text" class="ex-input" placeholder="Search user..."/>
-    <select id="ci_from" class="ex-input"></select>
+    <div class="combo-wrap" id="ci_from_wrap">
+      <input id="ci_from_search" type="text" class="ex-input" placeholder="Select user..." autocomplete="off"/>
+      <div id="ci_from_dropdown" class="combo-dropdown"></div>
+      <!-- Hidden: stores the selected Notion page id (used by submitCashIn) -->
+      <select id="ci_from" class="ex-input" style="display:none;"></select>
+    </div>
 
     <div class="ex-modal-actions">
       <button id="ci_submit" class="ex-btn ex-primary">Submit</button>
