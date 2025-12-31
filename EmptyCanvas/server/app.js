@@ -413,6 +413,16 @@ app.get("/orders", requireAuth, requirePage("Current Orders"), (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "current-orders.html"));
 });
 
+// Order tracking page (opened from Current Orders cards)
+app.get(
+  "/orders/tracking",
+  requireAuth,
+  requirePage("Current Orders"),
+  (req, res) => {
+    res.sendFile(path.join(__dirname, "..", "public", "order-tracking.html"));
+  },
+);
+
 app.get(
   "/orders/requested",
   requireAuth,
@@ -735,6 +745,80 @@ app.get(
       }
       const userId = userQuery.results[0].id;
 
+      // Cache product lookups to avoid repeated Notion calls
+      const productCache = new Map();
+
+      const numberFromProp = (prop) => {
+        if (!prop) return undefined;
+
+        // number
+        if (typeof prop.number === "number") return prop.number;
+
+        // formula
+        if (prop.formula && typeof prop.formula.number === "number") {
+          return prop.formula.number;
+        }
+
+        // rollup
+        if (prop.rollup) {
+          if (typeof prop.rollup.number === "number") return prop.rollup.number;
+          if (prop.rollup.type === "array" && Array.isArray(prop.rollup.array)) {
+            // find first number-like element
+            for (const el of prop.rollup.array) {
+              if (el && typeof el.number === "number") return el.number;
+              if (el && el.formula && typeof el.formula.number === "number") return el.formula.number;
+            }
+          }
+        }
+
+        return undefined;
+      };
+
+      const coverUrlFromPage = (p) => {
+        const cover = p?.cover;
+        if (cover?.type === "external") return cover.external?.url || null;
+        if (cover?.type === "file") return cover.file?.url || null;
+        const icon = p?.icon;
+        if (icon?.type === "file") return icon.file?.url || null;
+        return null;
+      };
+
+      const findUnitPriceProp = (props) => {
+        if (!props) return null;
+        return (
+          props["Unity Price"] ||
+          props["Unit price"] ||
+          props["Unit Price"] ||
+          props["Unit price "] ||
+          Object.entries(props).find(([k]) => {
+            const nk = normKey(k);
+            return nk === "unityprice" || nk === "unitprice";
+          })?.[1] ||
+          null
+        );
+      };
+
+      const getProductInfo = async (productId) => {
+        if (!productId) return { productName: "Unknown Product", unitPrice: 0, productImage: null };
+        if (productCache.has(productId)) return productCache.get(productId);
+
+        try {
+          const productPage = await notion.pages.retrieve({ page_id: productId });
+          const props = productPage.properties || {};
+          const productName = props?.Name?.title?.[0]?.plain_text || "Unknown Product";
+          const unitPrice = numberFromProp(findUnitPriceProp(props)) ?? 0;
+          const productImage = coverUrlFromPage(productPage);
+          const info = { productName, unitPrice, productImage };
+          productCache.set(productId, info);
+          return info;
+        } catch (e) {
+          console.error("Could not retrieve related product page:", e.body || e.message);
+          const info = { productName: "Unknown Product", unitPrice: 0, productImage: null };
+          productCache.set(productId, info);
+          return info;
+        }
+      };
+
       const allOrders = [];
       let hasMore = true;
       let startCursor = undefined;
@@ -749,31 +833,19 @@ app.get(
 
         for (const page of response.results) {
           const productRelation = page.properties.Product?.relation;
-          let productName = "Unknown Product";
-          if (productRelation && productRelation.length > 0) {
-            try {
-              const productPage = await notion.pages.retrieve({
-                page_id: productRelation[0].id,
-              });
-              productName =
-                productPage.properties?.Name?.title?.[0]?.plain_text ||
-                "Unknown Product";
-            } catch (e) {
-              console.error(
-                "Could not retrieve related product page:",
-                e.body || e.message,
-              );
-            }
-          }
+          const productId = (productRelation && productRelation[0] && productRelation[0].id) ? productRelation[0].id : null;
+
+          const pInfo = await getProductInfo(productId);
 
           allOrders.push({
             id: page.id,
-            reason:
-              page.properties?.Reason?.title?.[0]?.plain_text || "No Reason",
-            productName,
+            reason: page.properties?.Reason?.title?.[0]?.plain_text || "No Reason",
+            productId,
+            productName: pInfo.productName,
+            productImage: pInfo.productImage,
+            unitPrice: pInfo.unitPrice,
             quantity: page.properties?.["Quantity Requested"]?.number || 0,
-            status:
-              page.properties?.["Status"]?.select?.name || "Pending",
+            status: page.properties?.["Status"]?.select?.name || "Pending",
             createdTime: page.created_time,
           });
         }
@@ -802,6 +874,177 @@ app.get(
     } catch (error) {
       console.error("Error fetching orders from Notion:", error.body || error);
       res.status(500).json({ error: "Failed to fetch orders from Notion." });
+    }
+  },
+);
+
+// Order tracking details (for a "group" opened from Current Orders cards)
+// groupId = Notion page id of one item inside Products_list
+app.get(
+  "/api/orders/tracking",
+  requireAuth,
+  requirePage("Current Orders"),
+  async (req, res) => {
+    if (!ordersDatabaseId || !teamMembersDatabaseId) {
+      return res.status(500).json({ error: "Database IDs are not configured." });
+    }
+
+    const groupIdRaw = req.query.groupId;
+    if (!groupIdRaw) return res.status(400).json({ error: "Missing groupId" });
+    const groupId = toHyphenatedUUID(groupIdRaw);
+
+    try {
+      // Resolve current user Notion page id
+      const userQuery = await notion.databases.query({
+        database_id: teamMembersDatabaseId,
+        filter: { property: "Name", title: { equals: req.session.username } },
+      });
+      if (userQuery.results.length === 0) return res.status(404).json({ error: "User not found." });
+      const userId = userQuery.results[0].id;
+
+      // Fetch the clicked order page and validate access
+      const groupPage = await notion.pages.retrieve({ page_id: groupId });
+      const groupProps = groupPage.properties || {};
+      const rel = groupProps?.["Teams Members"]?.relation || [];
+      const allowed = Array.isArray(rel) && rel.some((r) => r?.id === userId);
+      if (!allowed) return res.status(403).json({ error: "Not allowed." });
+
+      const reason = groupProps?.Reason?.title?.[0]?.plain_text || "No Reason";
+
+      // Cache product lookups for this request
+      const productCache = new Map();
+      const numberFromProp = (prop) => {
+        if (!prop) return undefined;
+        if (typeof prop.number === "number") return prop.number;
+        if (prop.formula && typeof prop.formula.number === "number") return prop.formula.number;
+        if (prop.rollup) {
+          if (typeof prop.rollup.number === "number") return prop.rollup.number;
+          if (prop.rollup.type === "array" && Array.isArray(prop.rollup.array)) {
+            for (const el of prop.rollup.array) {
+              if (el && typeof el.number === "number") return el.number;
+              if (el && el.formula && typeof el.formula.number === "number") return el.formula.number;
+            }
+          }
+        }
+        return undefined;
+      };
+      const coverUrlFromPage = (p) => {
+        const cover = p?.cover;
+        if (cover?.type === "external") return cover.external?.url || null;
+        if (cover?.type === "file") return cover.file?.url || null;
+        const icon = p?.icon;
+        if (icon?.type === "file") return icon.file?.url || null;
+        return null;
+      };
+      const findUnitPriceProp = (props) => {
+        if (!props) return null;
+        return (
+          props["Unity Price"] ||
+          props["Unit price"] ||
+          props["Unit Price"] ||
+          Object.entries(props).find(([k]) => {
+            const nk = normKey(k);
+            return nk === "unityprice" || nk === "unitprice";
+          })?.[1] ||
+          null
+        );
+      };
+      const getProductInfo = async (productId) => {
+        if (!productId) return { productName: "Unknown Product", unitPrice: 0, productImage: null };
+        if (productCache.has(productId)) return productCache.get(productId);
+        try {
+          const productPage = await notion.pages.retrieve({ page_id: productId });
+          const props = productPage.properties || {};
+          const productName = props?.Name?.title?.[0]?.plain_text || "Unknown Product";
+          const unitPrice = numberFromProp(findUnitPriceProp(props)) ?? 0;
+          const productImage = coverUrlFromPage(productPage);
+          const info = { productName, unitPrice, productImage };
+          productCache.set(productId, info);
+          return info;
+        } catch (e) {
+          const info = { productName: "Unknown Product", unitPrice: 0, productImage: null };
+          productCache.set(productId, info);
+          return info;
+        }
+      };
+
+      // Query all items with same Reason for this user
+      const q = await notion.databases.query({
+        database_id: ordersDatabaseId,
+        filter: {
+          and: [
+            { property: "Teams Members", relation: { contains: userId } },
+            { property: "Reason", title: { equals: reason } },
+          ],
+        },
+        sorts: [{ timestamp: "created_time", direction: "descending" }],
+      });
+
+      const items = [];
+      for (const page of q.results || []) {
+        const productRelation = page.properties.Product?.relation;
+        const productId = (productRelation && productRelation[0] && productRelation[0].id) ? productRelation[0].id : null;
+        const pInfo = await getProductInfo(productId);
+        items.push({
+          id: page.id,
+          productId,
+          productName: pInfo.productName,
+          productImage: pInfo.productImage,
+          unitPrice: pInfo.unitPrice,
+          quantity: page.properties?.["Quantity Requested"]?.number || 0,
+          status: page.properties?.["Status"]?.select?.name || "Pending",
+          createdTime: page.created_time,
+        });
+      }
+
+      const statuses = items.map((it) => norm(it.status));
+      const deliveredSet = new Set(["received", "delivered"]);
+      const onTheWaySet = new Set([
+        "prepared",
+        "on the way",
+        "ontheway",
+        "on_the_way",
+        "shipped",
+        "delivering",
+      ]);
+
+      let stage = { step: 1, label: "Order Received", subtitle: "We’ve received your order." };
+      if (statuses.length > 0 && statuses.every((s) => deliveredSet.has(s))) {
+        stage = { step: 3, label: "Delivered", subtitle: "Your cargo has been delivered." };
+      } else if (statuses.some((s) => onTheWaySet.has(s))) {
+        stage = { step: 2, label: "On the way", subtitle: "Your cargo is on delivery." };
+      }
+
+      const totalQuantity = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+      const estimateTotal = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0), 0);
+
+      // Try to read ETA from a date property if it exists; otherwise fallback
+      let etaISO = null;
+      for (const [k, v] of Object.entries(groupProps)) {
+        if (!/eta|estimated.*delivery|delivery.*time/i.test(String(k))) continue;
+        if (v?.type === "date" && v.date?.start) { etaISO = v.date.start; break; }
+      }
+      if (!etaISO) {
+        const base = new Date(groupPage.created_time);
+        const addHours = stage.step === 1 ? 2 : stage.step === 2 ? 1 : 0;
+        etaISO = new Date(base.getTime() + addHours * 60 * 60 * 1000).toISOString();
+      }
+
+      return res.json({
+        groupId,
+        reason,
+        stage,
+        eta: etaISO,
+        summary: {
+          itemsCount: items.length,
+          totalQuantity,
+          estimateTotal,
+        },
+        items,
+      });
+    } catch (error) {
+      console.error("Tracking error:", error.body || error);
+      return res.status(500).json({ error: "Failed to load tracking." });
     }
   },
 );
