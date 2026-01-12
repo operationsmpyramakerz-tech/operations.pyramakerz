@@ -399,6 +399,18 @@ if (document.querySelector('.sidebar')) {
     if (window.feather) feather.replace();
   }
 
+
+  // Rename sidebar labels (display-only) without changing routes
+  function renameSidebarLabels(){
+    // Operations Orders (was: Operations Requested Orders)
+    document
+      .querySelectorAll('a.nav-item[href^="/orders/requested"], a.nav-link[href^="/orders/requested"]')
+      .forEach((a) => {
+        const lbl = a.querySelector('.nav-label');
+        if (lbl) lbl.textContent = 'Operations Orders';
+      });
+  }
+
   async function ensureGreetingAndPages(){
     const cached = getCachedName();
     if (cached) {
@@ -609,4 +621,135 @@ if (document.querySelector('.sidebar')) {
 
   window.UI = window.UI || {};
   window.UI.toast = toast;
+})();
+
+// ============================================================================
+// Global protection against double-submits (auto busy state)
+// - Adds a loading spinner animation on the last clicked button while a
+//   mutating fetch (POST/PATCH/PUT/DELETE) is in-flight.
+// - Disables the button to prevent multiple clicks.
+// Works across all pages without needing to manually update every handler.
+// ============================================================================
+(function () {
+  if (window.__opsAutoBusyWrapped) return;
+  window.__opsAutoBusyWrapped = true;
+
+  // Track the last clicked actionable element (more reliable than activeElement
+  // when the code disables the button before starting the fetch).
+  let lastActionEl = null;
+  let lastActionAt = 0;
+
+  const ACTION_SELECTOR = "button, .btn, .ro-action-btn";
+
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      const el = e.target && e.target.closest ? e.target.closest(ACTION_SELECTOR) : null;
+      if (!el) return;
+      lastActionEl = el;
+      lastActionAt = Date.now();
+    },
+    true,
+  );
+
+  function getRequestMethod(input, init) {
+    try {
+      if (init && init.method) return String(init.method).toUpperCase();
+      if (input && typeof input === "object" && input.method) return String(input.method).toUpperCase();
+    } catch {}
+    return "GET";
+  }
+
+  function getBusyTarget() {
+    // Prefer currently focused element
+    const active = document.activeElement;
+    const a = active && active.closest ? active.closest(ACTION_SELECTOR) : null;
+    if (a) return a;
+
+    // Fallback to the last clicked element (within a short window)
+    if (lastActionEl && Date.now() - lastActionAt < 2500) return lastActionEl;
+    return null;
+  }
+
+  function setAutoBusy(el, busy) {
+    if (!el) return;
+    const key = "autoBusyCount";
+    const count = Number(el.dataset[key] || 0);
+
+    if (busy) {
+      const next = count + 1;
+      el.dataset[key] = String(next);
+      if (next === 1) {
+        el.classList.add("is-auto-busy");
+
+        // aria-busy is used for accessibility + can be used by CSS if needed
+        const hadAriaBusy = el.getAttribute("aria-busy") === "true";
+        el.dataset.autoBusyHadAria = hadAriaBusy ? "1" : "0";
+        el.setAttribute("aria-busy", "true");
+
+        // Disable only if it is a real <button> and it was not disabled already
+        if (String(el.tagName).toUpperCase() === "BUTTON") {
+          const wasDisabled = !!el.disabled;
+          el.dataset.autoBusyWeDisabled = wasDisabled ? "0" : "1";
+          if (!wasDisabled) el.disabled = true;
+        }
+      }
+      return;
+    }
+
+    const next = Math.max(0, count - 1);
+    el.dataset[key] = String(next);
+    if (next === 0) {
+      el.classList.remove("is-auto-busy");
+
+      if (el.dataset.autoBusyHadAria === "0") {
+        el.removeAttribute("aria-busy");
+      }
+
+      if (String(el.tagName).toUpperCase() === "BUTTON" && el.dataset.autoBusyWeDisabled === "1") {
+        el.disabled = false;
+      }
+
+      delete el.dataset[key];
+      delete el.dataset.autoBusyHadAria;
+      delete el.dataset.autoBusyWeDisabled;
+    }
+  }
+
+  // Wrap fetch
+  if (!window.fetch) return;
+  const origFetch = window.fetch.bind(window);
+  const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+  window.fetch = function (input, init) {
+    const method = getRequestMethod(input, init);
+
+    let target = null;
+    if (MUTATING.has(method)) {
+      target = getBusyTarget();
+      if (target && target.getAttribute && target.getAttribute("data-no-auto-busy") !== null) {
+        target = null;
+      }
+      if (target) setAutoBusy(target, true);
+    }
+
+    const p = origFetch(input, init);
+    if (!target) return p;
+
+    // Ensure cleanup on both success and failure
+    if (p && typeof p.finally === "function") {
+      return p.finally(() => setAutoBusy(target, false));
+    }
+
+    return p.then(
+      (r) => {
+        setAutoBusy(target, false);
+        return r;
+      },
+      (e) => {
+        setAutoBusy(target, false);
+        throw e;
+      },
+    );
+  };
 })();

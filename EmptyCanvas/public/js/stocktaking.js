@@ -1,10 +1,21 @@
 document.addEventListener('DOMContentLoaded', function() {
   const groupsContainer = document.getElementById('stock-groups');
   const searchInput     = document.getElementById('stockSearch');
+  const downloadPdfBtn  = document.getElementById('downloadPdfBtn');
+  const downloadExcelBtn = document.getElementById('downloadExcelBtn');
 
   let allStock = [];
 
+  // Keep inventory inputs persistent even when the table re-renders (search/filter)
+  // { [notionPageId]: string }
+  const inventoryValues = {};
+
   const norm = (s) => String(s || '').toLowerCase().trim();
+
+  const isPositiveQty = (item) => {
+    const n = Number(item?.quantity);
+    return Number.isFinite(n) && n > 0;
+  };
 
   // ألوان Notion للـ select
   const colorVars = (color = 'default') => {
@@ -60,7 +71,9 @@ document.addEventListener('DOMContentLoaded', function() {
   const renderGroups = (rows) => {
     groupsContainer.innerHTML = '';
 
-    if (!rows || rows.length === 0) {
+    const visibleRows = (rows || []).filter(isPositiveQty);
+
+    if (!visibleRows || visibleRows.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'empty-block';
       empty.textContent = 'No results found.';
@@ -68,7 +81,7 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    const groups = groupByTag(rows);
+    const groups = groupByTag(visibleRows);
     const frag = document.createDocumentFragment();
 
     groups.forEach(group => {
@@ -104,10 +117,11 @@ document.addEventListener('DOMContentLoaded', function() {
       thead.innerHTML = `
         <tr>
           <th>Component</th>
-          <th class="col-kit">One Kit Quantity</th>
           <th class="col-num">In Stock</th>
+          <th class="col-num col-inventory">Inventory</th>
         </tr>
       `;
+
 
       const tbody = document.createElement('tbody');
       group.items
@@ -119,17 +133,31 @@ document.addEventListener('DOMContentLoaded', function() {
           tdName.textContent = item.name || '-';
           tdName.style.fontWeight = '600';
 
-          const tdKit = document.createElement('td');
-          tdKit.className = 'col-kit';
-          tdKit.appendChild(makeQtyPill(item.oneKitQuantity));
+          const tdInStock = document.createElement('td');
+          tdInStock.className = 'col-num';
+          tdInStock.textContent = (item.quantity ?? 0).toString();
 
-          const tdQty = document.createElement('td');
-          tdQty.className = 'col-num';
-          tdQty.textContent = (item.quantity ?? 0).toString();
+          const tdInventory = document.createElement('td');
+          tdInventory.className = 'col-num col-inventory';
+
+          // Editable input for manual inventory counting
+          const invInput = document.createElement('input');
+          invInput.type = 'number';
+          invInput.min = '0';
+          invInput.step = '1';
+          invInput.className = 'inventory-input';
+          invInput.setAttribute('inputmode', 'numeric');
+          invInput.setAttribute('aria-label', `Inventory for ${item.name || 'item'}`);
+          invInput.dataset.itemId = item.id;
+          invInput.value = (inventoryValues[item.id] ?? '');
+          invInput.addEventListener('input', () => {
+            inventoryValues[item.id] = invInput.value;
+          });
+          tdInventory.appendChild(invInput);
 
           tr.appendChild(tdName);
-          tr.appendChild(tdKit);
-          tr.appendChild(tdQty);
+          tr.appendChild(tdInStock);
+          tr.appendChild(tdInventory);
           tbody.appendChild(tr);
         });
 
@@ -159,8 +187,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
   const fetchStockData = async () => {
     groupsContainer.innerHTML = `
-      <div class="loading-block">
-        <i data-feather="loader" class="loading-icon"></i> Loading stock data...
+      <div class="modern-loading" role="status" aria-live="polite">
+        <div class="modern-loading__spinner" aria-hidden="true"></div>
+        <div class="modern-loading__text">
+          Loading stock data
+          <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        </div>
       </div>
     `;
     try {
@@ -176,6 +208,8 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json();
       // متوقع: [{ id, name, quantity, oneKitQuantity, tag }]
       allStock = Array.isArray(data) ? data : [];
+      // Filter: show only items that have a positive In Stock value
+      allStock = allStock.filter(isPositiveQty);
       renderGroups(allStock);
     } catch (error) {
       console.error('Error fetching stock data:', error);
@@ -194,25 +228,78 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
   }
-});
-// Download PDF button
-document.addEventListener('DOMContentLoaded', () => {
-  const btn = document.getElementById('downloadPdfBtn');
-  if (!btn) return;
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
+
+  // ---------- Export helpers (PDF / Excel) ----------
+  const buildInventoryPayload = () => {
+    const out = {};
+    for (const [id, raw] of Object.entries(inventoryValues)) {
+      if (raw === '' || raw === null || typeof raw === 'undefined') continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) continue;
+      out[id] = n;
+    }
+    return out;
+  };
+
+  const downloadBlobResponse = async (res, fallbackName) => {
+    const blob = await res.blob();
+    const cd = res.headers.get('content-disposition') || '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+    const filename = decodeURIComponent((m && (m[1] || m[2])) || fallbackName);
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportFile = async (btn, endpoint, fallbackName) => {
+    if (!btn) return;
     btn.disabled = true;
     btn.classList.add('is-busy');
-    // هنفتح الرابط مباشرة، الهيدر هيجبر التحميل
-    const link = document.createElement('a');
-    link.href = '/api/stock/pdf';
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => {
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ inventory: buildInventoryPayload() }),
+      });
+
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.message || 'Export failed');
+      }
+
+      await downloadBlobResponse(res, fallbackName);
+    } catch (e) {
+      console.error(e);
+      alert(e.message || 'Export failed');
+    } finally {
       btn.disabled = false;
       btn.classList.remove('is-busy');
-    }, 1200);
-  });
+    }
+  };
+
+  if (downloadPdfBtn) {
+    downloadPdfBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      exportFile(downloadPdfBtn, '/api/stock/pdf', 'Stocktaking.pdf');
+    });
+  }
+
+  if (downloadExcelBtn) {
+    downloadExcelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      exportFile(downloadExcelBtn, '/api/stock/excel', 'Stocktaking.xlsx');
+    });
+  }
 });
