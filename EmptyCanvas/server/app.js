@@ -164,16 +164,25 @@ function extractAllowedPages(props = {}) {
 }
 
 function firstAllowedPath(allowed = []) {
-  if (allowed.includes("Current Orders")) return "/orders";
-  if (allowed.includes("Requested Orders")) return "/orders/requested";
-  if (allowed.includes("Assigned Schools Requested Orders")) return "/orders/assigned";
-  if (allowed.includes("Create New Order")) return "/orders/new";
-  if (allowed.includes("Stocktaking")) return "/stocktaking";
-  if (allowed.includes("Funds")) return "/funds";
-  if (allowed.includes("Expenses")) return "/expenses";
-   if (allowed.includes("Expenses Users")) return "/expenses/users";  // ⬅ الجديد
-  if (allowed.includes("Logistics")) return "/logistics";
-  return "/login";
+  const list = Array.isArray(allowed) ? allowed : [];
+
+  // Prefer a deterministic order for the best UX
+  if (list.includes("Current Orders")) return "/orders";
+  if (list.includes("Requested Orders")) return "/orders/requested";
+  if (list.includes("Assigned Schools Requested Orders")) return "/orders/assigned";
+  if (list.includes("S.V schools orders")) return "/orders/sv-orders";
+  if (list.includes("Create New Order")) return "/orders/new";
+  if (list.includes("Stocktaking")) return "/stocktaking";
+  if (list.includes("Logistics")) return "/logistics";
+  if (list.includes("Damaged Assets")) return "/damaged-assets";
+  if (list.includes("S.V Schools Assets")) return "/sv-assets";
+  if (list.includes("Funds")) return "/funds";
+  if (list.includes("Expenses Users")) return "/expenses/users";
+  if (list.includes("Expenses")) return "/expenses";
+
+  // Fallback (important): avoid redirect loops if user only has a page we don't recognize.
+  // /account does NOT require page permission, so it is a safe landing page.
+  return "/account";
 }
 
 // Helpers — Notion
@@ -413,15 +422,9 @@ app.get("/orders", requireAuth, requirePage("Current Orders"), (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "current-orders.html"));
 });
 
-// Order tracking page (opened from Current Orders cards)
-app.get(
-  "/orders/tracking",
-  requireAuth,
-  requirePage("Current Orders"),
-  (req, res) => {
-    res.sendFile(path.join(__dirname, "..", "public", "order-tracking.html"));
-  },
-);
+app.get("/orders/tracking", requireAuth, requirePage("Current Orders"), (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "order-tracking.html"));
+});
 
 app.get(
   "/orders/requested",
@@ -466,11 +469,8 @@ app.get(
   requireAuth,
   requirePage("Create New Order"),
   (req, res) => {
-    const d = req.session.orderDraft || {};
-    if (!Array.isArray(d.products) || d.products.length === 0) {
-      return res.redirect("/orders/new/products");
-    }
-    res.sendFile(path.join(__dirname, "..", "public", "create-order-review.html"));
+    // Review step removed — Checkout now submits directly from Products page
+    return res.redirect("/orders/new/products");
   },
 );
 
@@ -745,83 +745,159 @@ app.get(
       }
       const userId = userQuery.results[0].id;
 
-      // Cache product lookups to avoid repeated Notion calls
-      const productCache = new Map();
-
-      const numberFromProp = (prop) => {
-        if (!prop) return undefined;
-
-        // number
-        if (typeof prop.number === "number") return prop.number;
-
-        // formula
-        if (prop.formula && typeof prop.formula.number === "number") {
-          return prop.formula.number;
-        }
-
-        // rollup
-        if (prop.rollup) {
-          if (typeof prop.rollup.number === "number") return prop.rollup.number;
-          if (prop.rollup.type === "array" && Array.isArray(prop.rollup.array)) {
-            // find first number-like element
-            for (const el of prop.rollup.array) {
-              if (el && typeof el.number === "number") return el.number;
-              if (el && el.formula && typeof el.formula.number === "number") return el.formula.number;
-            }
-          }
-        }
-
-        return undefined;
-      };
-
-      const coverUrlFromPage = (p) => {
-        const cover = p?.cover;
-        if (cover?.type === "external") return cover.external?.url || null;
-        if (cover?.type === "file") return cover.file?.url || null;
-        const icon = p?.icon;
-        if (icon?.type === "file") return icon.file?.url || null;
-        return null;
-      };
-
-      const findUnitPriceProp = (props) => {
-        if (!props) return null;
-        return (
-          props["Unity Price"] ||
-          props["Unit price"] ||
-          props["Unit Price"] ||
-          props["Unit price "] ||
-          Object.entries(props).find(([k]) => {
-            const nk = normKey(k);
-            return nk === "unityprice" || nk === "unitprice";
-          })?.[1] ||
-          null
-        );
-      };
-
-      const getProductInfo = async (productId) => {
-        if (!productId) return { productName: "Unknown Product", unitPrice: 0, productImage: null };
-        if (productCache.has(productId)) return productCache.get(productId);
-
-        try {
-          const productPage = await notion.pages.retrieve({ page_id: productId });
-          const props = productPage.properties || {};
-          const productName = props?.Name?.title?.[0]?.plain_text || "Unknown Product";
-          const unitPrice = numberFromProp(findUnitPriceProp(props)) ?? 0;
-          const productImage = coverUrlFromPage(productPage);
-          const info = { productName, unitPrice, productImage };
-          productCache.set(productId, info);
-          return info;
-        } catch (e) {
-          console.error("Could not retrieve related product page:", e.body || e.message);
-          const info = { productName: "Unknown Product", unitPrice: 0, productImage: null };
-          productCache.set(productId, info);
-          return info;
-        }
-      };
-
       const allOrders = [];
       let hasMore = true;
       let startCursor = undefined;
+
+      // ----- Notion "ID" (unique_id) helpers -----
+      // We support different property names by:
+      // 1) trying a property named "ID" (case-insensitive)
+      // 2) falling back to the first property of type "unique_id"
+      const getPropInsensitive = (props, name) => {
+        if (!props || !name) return null;
+        const target = String(name).trim().toLowerCase();
+        for (const [k, v] of Object.entries(props)) {
+          if (String(k).trim().toLowerCase() === target) return v;
+        }
+        return null;
+      };
+
+      const extractUniqueIdDetails = (prop) => {
+        try {
+          if (!prop) return { text: null, prefix: null, number: null };
+
+          // Native Notion "ID" property
+          if (prop.type === 'unique_id') {
+            const u = prop.unique_id;
+            if (!u || typeof u.number !== 'number') {
+              return { text: null, prefix: null, number: null };
+            }
+            const prefix = u.prefix ? String(u.prefix).trim() : '';
+            const number = u.number;
+            const text = prefix ? `${prefix}-${number}` : String(number);
+            return { text, prefix: prefix || null, number };
+          }
+
+          // Best-effort fallback (if "ID" is stored in another type)
+          let text = null;
+          if (prop.type === 'number' && typeof prop.number === 'number') text = String(prop.number);
+          if (prop.type === 'formula') {
+            if (prop.formula?.type === 'string') text = String(prop.formula.string || '').trim() || null;
+            if (prop.formula?.type === 'number' && typeof prop.formula.number === 'number') text = String(prop.formula.number);
+          }
+          if (prop.type === 'rich_text') {
+            text = (prop.rich_text || []).map((x) => x?.plain_text || '').join('').trim() || null;
+          }
+          if (prop.type === 'title') {
+            text = (prop.title || []).map((x) => x?.plain_text || '').join('').trim() || null;
+          }
+          if (!text) return { text: null, prefix: null, number: null };
+
+          // Try to parse prefix/number from a string like "ORD-95"
+          const m = String(text).trim().match(/^(.*?)(\d+)\s*$/);
+          const prefix = m ? String(m[1] || '').replace(/[-\s]+$/, '').trim() : '';
+          const number = m ? Number(m[2]) : null;
+          return {
+            text: String(text).trim(),
+            prefix: prefix || null,
+            number: Number.isFinite(number) ? number : null,
+          };
+        } catch {
+          return { text: null, prefix: null, number: null };
+        }
+      };
+
+      const getOrderUniqueIdDetails = (props) => {
+        const direct = getPropInsensitive(props, 'ID');
+        const d = extractUniqueIdDetails(direct);
+        if (d.text) return d;
+
+        // fallback: first unique_id property in the page
+        for (const v of Object.values(props || {})) {
+          if (v?.type === 'unique_id') {
+            const x = extractUniqueIdDetails(v);
+            if (x.text) return x;
+          }
+        }
+        return { text: null, prefix: null, number: null };
+      };
+
+      // ----- Helper: Team member names (Created By) -----
+      const nameCache = new Map();
+      async function memberName(id) {
+        if (!id) return "";
+        if (nameCache.has(id)) return nameCache.get(id);
+        try {
+          const page = await notion.pages.retrieve({ page_id: id });
+          const nm = page.properties?.Name?.title?.[0]?.plain_text || "";
+          nameCache.set(id, nm);
+          return nm;
+        } catch {
+          return "";
+        }
+      }
+
+      // ----- Helper: extract a URL from a Notion property (url + rich_text/title fallbacks) -----
+      const extractFirstFileUrl = (prop) => {
+        try {
+          if (!prop) return null;
+          if (prop.type === "files") {
+            const f = prop.files?.[0];
+            if (!f) return null;
+            if (f.type === "file") return f.file?.url || null;
+            if (f.type === "external") return f.external?.url || null;
+            return null;
+          }
+          if (prop.type === "url") return prop.url || null;
+          return null;
+        } catch {
+          return null;
+        }
+      };
+
+      const extractUrl = (prop) => {
+        try {
+          if (!prop) return null;
+          if (prop.type === "url") return prop.url || null;
+
+          const tryText = (text) => {
+            const s = String(text || "").trim();
+            if (!s) return null;
+            if (/^https?:\/\//i.test(s)) return s;
+            return null;
+          };
+
+          if (prop.type === "rich_text") {
+            for (const rt of prop.rich_text || []) {
+              const href = rt?.href;
+              if (href) return String(href);
+              const t = tryText(rt?.plain_text);
+              if (t) return t;
+            }
+            return null;
+          }
+
+          if (prop.type === "title") {
+            for (const t of prop.title || []) {
+              const href = t?.href;
+              if (href) return String(href);
+              const x = tryText(t?.plain_text);
+              if (x) return x;
+            }
+            return null;
+          }
+
+          return extractFirstFileUrl(prop);
+        } catch {
+          return null;
+        }
+      };
+
+      const receivedProp = (await (async () => {
+        const props = await getOrdersDBProps();
+        if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })());
 
       while (hasMore) {
         const response = await notion.databases.query({
@@ -832,20 +908,141 @@ app.get(
         });
 
         for (const page of response.results) {
-          const productRelation = page.properties.Product?.relation;
-          const productId = (productRelation && productRelation[0] && productRelation[0].id) ? productRelation[0].id : null;
+                    const productRelation = page.properties.Product?.relation;
+          let productName = "Unknown Product";
+          let unitPrice = null;
+          let productImage = null;
+          let productUrl = null;
 
-          const pInfo = await getProductInfo(productId);
+          // Helper to safely extract numbers from Notion props (number / formula / rollup / rich_text)
+          const parseNumberProp = (prop) => {
+            if (!prop) return null;
+            try {
+              if (prop.type === "number") return prop.number ?? null;
+
+              if (prop.type === "formula") {
+                if (prop.formula?.type === "number") return prop.formula.number ?? null;
+                if (prop.formula?.type === "string") {
+                  const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+                  return Number.isFinite(n) ? n : null;
+                }
+              }
+
+              if (prop.type === "rollup") {
+                if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+
+                if (prop.rollup?.type === "array") {
+                  const arr = prop.rollup.array || [];
+                  for (const x of arr) {
+                    if (x.type === "number" && typeof x.number === "number") return x.number;
+                    if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+                    if (x.type === "formula" && x.formula?.type === "string") {
+                      const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                      if (Number.isFinite(n)) return n;
+                    }
+                    if (x.type === "rich_text") {
+                      const t = (x.rich_text || []).map(r => r.plain_text).join("").trim();
+                      const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+                      if (Number.isFinite(n)) return n;
+                    }
+                  }
+                }
+              }
+
+              if (prop.type === "rich_text") {
+                const t = (prop.rich_text || []).map(r => r.plain_text).join("").trim();
+                const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+                return Number.isFinite(n) ? n : null;
+              }
+            } catch {}
+            return null;
+          };
+
+          if (productRelation && productRelation.length > 0) {
+            try {
+              const productPage = await notion.pages.retrieve({
+                page_id: productRelation[0].id,
+              });
+
+              productName =
+                productPage.properties?.Name?.title?.[0]?.plain_text ||
+                "Unknown Product";
+
+              // Price in Products_Database is a Number named "Unity Price"
+              unitPrice =
+                parseNumberProp(productPage.properties?.["Unity Price"]) ??
+                parseNumberProp(productPage.properties?.["Unit price"]) ??
+                parseNumberProp(productPage.properties?.["Unit Price"]) ??
+                parseNumberProp(productPage.properties?.["Price"]) ??
+                null;
+
+              // Use Notion cover/icon as a lightweight product image if present
+              if (productPage.cover?.type === "external") productImage = productPage.cover.external.url;
+              if (productPage.cover?.type === "file") productImage = productPage.cover.file.url;
+              if (!productImage && productPage.icon?.type === "external") productImage = productPage.icon.external.url;
+              if (!productImage && productPage.icon?.type === "file") productImage = productPage.icon.file.url;
+
+              // Product URL (if exists)
+              const urlProp =
+                getPropInsensitive(productPage.properties, "URL") ||
+                getPropInsensitive(productPage.properties, "Link") ||
+                getPropInsensitive(productPage.properties, "Website") ||
+                getPropInsensitive(productPage.properties, "Product URL") ||
+                getPropInsensitive(productPage.properties, "Product Link");
+              productUrl = extractUrl(urlProp);
+            } catch (e) {
+              console.error(
+                "Could not retrieve related product page:",
+                e.body || e.message,
+              );
+            }
+          }
+
+          const uid = getOrderUniqueIdDetails(page.properties || {});
+
+          // Created by (Teams Members relation)
+          let createdById = "";
+          let createdByName = "";
+          const teamRel = page.properties?.["Teams Members"]?.relation;
+          if (Array.isArray(teamRel) && teamRel.length) {
+            createdById = teamRel[0].id;
+            createdByName = await memberName(createdById);
+          }
+
+          // Status + color (select/status)
+          const statusProp = page.properties?.["Status"];
+          const statusName =
+            statusProp?.select?.name || statusProp?.status?.name || "Pending";
+          const statusColor =
+            statusProp?.select?.color || statusProp?.status?.color || "default";
+
+          const qtyRequested = page.properties?.["Quantity Requested"]?.number || 0;
+          const qtyReceived =
+            receivedProp && page.properties?.[receivedProp]
+              ? page.properties?.[receivedProp]?.number
+              : null;
+          const qtyForUI =
+            qtyReceived !== null && qtyReceived !== undefined && Number.isFinite(Number(qtyReceived))
+              ? Number(qtyReceived)
+              : Number(qtyRequested) || 0;
 
           allOrders.push({
             id: page.id,
-            reason: page.properties?.Reason?.title?.[0]?.plain_text || "No Reason",
-            productId,
-            productName: pInfo.productName,
-            productImage: pInfo.productImage,
-            unitPrice: pInfo.unitPrice,
-            quantity: page.properties?.["Quantity Requested"]?.number || 0,
-            status: page.properties?.["Status"]?.select?.name || "Pending",
+            // Human-readable order identifier from Notion "ID" (unique_id)
+            orderId: uid.text,
+            orderIdPrefix: uid.prefix,
+            orderIdNumber: uid.number,
+            reason:
+              page.properties?.Reason?.title?.[0]?.plain_text || "No Reason",
+            productName,
+            productImage,
+            productUrl,
+            unitPrice,
+            quantity: qtyForUI,
+            status: statusName,
+            statusColor,
+            createdById,
+            createdByName,
             createdTime: page.created_time,
           });
         }
@@ -878,8 +1075,8 @@ app.get(
   },
 );
 
-// Order tracking details (for a "group" opened from Current Orders cards)
-// groupId = Notion page id of one item inside Products_list
+
+// Order Tracking (Current Orders) — fetch a whole "order group" by representative page id
 app.get(
   "/api/orders/tracking",
   requireAuth,
@@ -890,162 +1087,223 @@ app.get(
     }
 
     const groupIdRaw = req.query.groupId;
-    if (!groupIdRaw) return res.status(400).json({ error: "Missing groupId" });
+    if (!groupIdRaw || !looksLikeNotionId(groupIdRaw)) {
+      return res.status(400).json({ error: "Missing or invalid groupId." });
+    }
     const groupId = toHyphenatedUUID(groupIdRaw);
 
+    res.set("Cache-Control", "no-store");
+
     try {
-      // Resolve current user Notion page id
+      // Find current user
       const userQuery = await notion.databases.query({
         database_id: teamMembersDatabaseId,
         filter: { property: "Name", title: { equals: req.session.username } },
       });
-      if (userQuery.results.length === 0) return res.status(404).json({ error: "User not found." });
+      if (userQuery.results.length === 0) {
+        return res.status(404).json({ error: "User not found." });
+      }
       const userId = userQuery.results[0].id;
 
-      // Fetch the clicked order page and validate access
-      const groupPage = await notion.pages.retrieve({ page_id: groupId });
-      const groupProps = groupPage.properties || {};
-      const rel = groupProps?.["Teams Members"]?.relation || [];
-      const allowed = Array.isArray(rel) && rel.some((r) => r?.id === userId);
-      if (!allowed) return res.status(403).json({ error: "Not allowed." });
+      // Retrieve a reference order page to extract the Reason/title
+      let basePage;
+      try {
+        basePage = await notion.pages.retrieve({ page_id: groupId });
+      } catch (e) {
+        return res.status(404).json({ error: "Order not found." });
+      }
 
-      const reason = groupProps?.Reason?.title?.[0]?.plain_text || "No Reason";
+      // Ensure it belongs to the Orders DB (best-effort safety)
+      const parentDb = basePage.parent?.database_id;
+      if (parentDb && normalizeNotionId(parentDb) !== normalizeNotionId(ordersDatabaseId)) {
+        return res.status(404).json({ error: "Order not found." });
+      }
 
-      // Cache product lookups for this request
-      const productCache = new Map();
-      const numberFromProp = (prop) => {
-        if (!prop) return undefined;
-        if (typeof prop.number === "number") return prop.number;
-        if (prop.formula && typeof prop.formula.number === "number") return prop.formula.number;
-        if (prop.rollup) {
-          if (typeof prop.rollup.number === "number") return prop.rollup.number;
-          if (prop.rollup.type === "array" && Array.isArray(prop.rollup.array)) {
-            for (const el of prop.rollup.array) {
-              if (el && typeof el.number === "number") return el.number;
-              if (el && el.formula && typeof el.formula.number === "number") return el.formula.number;
+      const reason =
+        basePage.properties?.Reason?.title?.[0]?.plain_text || "No Reason";
+
+      // Helpers
+      const parseNumberProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "number") return prop.number ?? null;
+
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "number") return prop.formula.number ?? null;
+            if (prop.formula?.type === "string") {
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              return Number.isFinite(n) ? n : null;
             }
           }
-        }
-        return undefined;
-      };
-      const coverUrlFromPage = (p) => {
-        const cover = p?.cover;
-        if (cover?.type === "external") return cover.external?.url || null;
-        if (cover?.type === "file") return cover.file?.url || null;
-        const icon = p?.icon;
-        if (icon?.type === "file") return icon.file?.url || null;
+
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              for (const x of arr) {
+                if (x.type === "number" && typeof x.number === "number") return x.number;
+                if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+                if (x.type === "formula" && x.formula?.type === "string") {
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  if (Number.isFinite(n)) return n;
+                }
+                if (x.type === "rich_text") {
+                  const t = (x.rich_text || []).map(r => r.plain_text).join("").trim();
+                  const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+                  if (Number.isFinite(n)) return n;
+                }
+              }
+            }
+          }
+
+          if (prop.type === "rich_text") {
+            const t = (prop.rich_text || []).map(r => r.plain_text).join("").trim();
+            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            return Number.isFinite(n) ? n : null;
+          }
+        } catch {}
         return null;
       };
-      const findUnitPriceProp = (props) => {
-        if (!props) return null;
-        return (
-          props["Unity Price"] ||
-          props["Unit price"] ||
-          props["Unit Price"] ||
-          Object.entries(props).find(([k]) => {
-            const nk = normKey(k);
-            return nk === "unityprice" || nk === "unitprice";
-          })?.[1] ||
-          null
-        );
-      };
-      const getProductInfo = async (productId) => {
-        if (!productId) return { productName: "Unknown Product", unitPrice: 0, productImage: null };
-        if (productCache.has(productId)) return productCache.get(productId);
+
+      const tryEtaProp = (prop) => {
+        if (!prop) return null;
         try {
-          const productPage = await notion.pages.retrieve({ page_id: productId });
-          const props = productPage.properties || {};
-          const productName = props?.Name?.title?.[0]?.plain_text || "Unknown Product";
-          const unitPrice = numberFromProp(findUnitPriceProp(props)) ?? 0;
-          const productImage = coverUrlFromPage(productPage);
-          const info = { productName, unitPrice, productImage };
-          productCache.set(productId, info);
+          if (prop.type === "date") return prop.date?.start || null;
+          if (prop.type === "rich_text") {
+            const t = (prop.rich_text || []).map(r => r.plain_text).join("").trim();
+            return t || null;
+          }
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "string") return prop.formula.string || null;
+            if (prop.formula?.type === "date") return prop.formula.date?.start || null;
+          }
+        } catch {}
+        return null;
+      };
+
+      const eta =
+        tryEtaProp(basePage.properties?.["Estimated delivery time"]) ??
+        tryEtaProp(basePage.properties?.["Estimated Delivery Time"]) ??
+        tryEtaProp(basePage.properties?.["ETA"]) ??
+        tryEtaProp(basePage.properties?.["Delivery time"]) ??
+        null;
+
+      // Collect all items for the same Reason (scoped to the current user)
+      const items = [];
+      let hasMore = true;
+      let startCursor = undefined;
+
+      const productCache = new Map();
+      async function getProductInfo(productPageId) {
+        if (!productPageId) return { name: "Unknown Product", unitPrice: null, image: null };
+        if (productCache.has(productPageId)) return productCache.get(productPageId);
+
+        try {
+          const productPage = await notion.pages.retrieve({ page_id: productPageId });
+          const name =
+            productPage.properties?.Name?.title?.[0]?.plain_text || "Unknown Product";
+
+          const unitPrice =
+            parseNumberProp(productPage.properties?.["Unity Price"]) ??
+            parseNumberProp(productPage.properties?.["Unit price"]) ??
+            parseNumberProp(productPage.properties?.["Unit Price"]) ??
+            parseNumberProp(productPage.properties?.["Price"]) ??
+            null;
+
+          let image = null;
+          if (productPage.cover?.type === "external") image = productPage.cover.external.url;
+          if (productPage.cover?.type === "file") image = productPage.cover.file.url;
+          if (!image && productPage.icon?.type === "external") image = productPage.icon.external.url;
+          if (!image && productPage.icon?.type === "file") image = productPage.icon.file.url;
+
+          const info = { name, unitPrice, image };
+          productCache.set(productPageId, info);
           return info;
         } catch (e) {
-          const info = { productName: "Unknown Product", unitPrice: 0, productImage: null };
-          productCache.set(productId, info);
+          const info = { name: "Unknown Product", unitPrice: null, image: null };
+          productCache.set(productPageId, info);
           return info;
         }
-      };
+      }
 
-      // Query all items with same Reason for this user
-      const q = await notion.databases.query({
-        database_id: ordersDatabaseId,
-        filter: {
-          and: [
-            { property: "Teams Members", relation: { contains: userId } },
-            { property: "Reason", title: { equals: reason } },
-          ],
-        },
-        sorts: [{ timestamp: "created_time", direction: "descending" }],
-      });
-
-      const items = [];
-      for (const page of q.results || []) {
-        const productRelation = page.properties.Product?.relation;
-        const productId = (productRelation && productRelation[0] && productRelation[0].id) ? productRelation[0].id : null;
-        const pInfo = await getProductInfo(productId);
-        items.push({
-          id: page.id,
-          productId,
-          productName: pInfo.productName,
-          productImage: pInfo.productImage,
-          unitPrice: pInfo.unitPrice,
-          quantity: page.properties?.["Quantity Requested"]?.number || 0,
-          status: page.properties?.["Status"]?.select?.name || "Pending",
-          createdTime: page.created_time,
+      while (hasMore) {
+        const response = await notion.databases.query({
+          database_id: ordersDatabaseId,
+          start_cursor: startCursor,
+          filter: {
+            and: [
+              { property: "Teams Members", relation: { contains: userId } },
+              { property: "Reason", title: { equals: reason } },
+            ],
+          },
+          sorts: [{ timestamp: "created_time", direction: "descending" }],
         });
+
+        for (const page of response.results) {
+          const productRelation = page.properties.Product?.relation;
+          const productPageId =
+            productRelation && productRelation.length > 0
+              ? productRelation[0].id
+              : null;
+
+          const prod = await getProductInfo(productPageId);
+
+          items.push({
+            id: page.id,
+            productName: prod.name,
+            productImage: prod.image,
+            unitPrice: prod.unitPrice,
+            quantity: page.properties?.["Quantity Requested"]?.number || 0,
+            status: page.properties?.["Status"]?.select?.name || "Pending",
+            createdTime: page.created_time,
+          });
+        }
+
+        hasMore = response.has_more;
+        startCursor = response.next_cursor;
       }
 
-      const statuses = items.map((it) => norm(it.status));
-      const deliveredSet = new Set(["received", "delivered"]);
-      const onTheWaySet = new Set([
-        "prepared",
-        "on the way",
-        "ontheway",
-        "on_the_way",
-        "shipped",
-        "delivering",
-      ]);
+      const st = (s) => String(s || "").toLowerCase();
+      const allReceived =
+        items.length > 0 && items.every((i) => st(i.status).includes("received"));
 
-      let stage = { step: 1, label: "Order Received", subtitle: "We’ve received your order." };
-      if (statuses.length > 0 && statuses.every((s) => deliveredSet.has(s))) {
-        stage = { step: 3, label: "Delivered", subtitle: "Your cargo has been delivered." };
-      } else if (statuses.some((s) => onTheWaySet.has(s))) {
-        stage = { step: 2, label: "On the way", subtitle: "Your cargo is on delivery." };
-      }
+      // Stage mapping (keeps UI consistent with your reference screenshots)
+      // 1: Order placed, 2: On the way, 3: Delivered
+      const stage = allReceived ? 3 : 2;
 
-      const totalQuantity = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
-      const estimateTotal = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0), 0);
+      const headerTitle = stage === 3 ? "Delivered" : "On the way";
+      const headerSubtitle = stage === 3 ? "Your cargo has arrived." : "Your cargo is on delivery.";
 
-      // Try to read ETA from a date property if it exists; otherwise fallback
-      let etaISO = null;
-      for (const [k, v] of Object.entries(groupProps)) {
-        if (!/eta|estimated.*delivery|delivery.*time/i.test(String(k))) continue;
-        if (v?.type === "date" && v.date?.start) { etaISO = v.date.start; break; }
-      }
-      if (!etaISO) {
-        const base = new Date(groupPage.created_time);
-        const addHours = stage.step === 1 ? 2 : stage.step === 2 ? 1 : 0;
-        etaISO = new Date(base.getTime() + addHours * 60 * 60 * 1000).toISOString();
-      }
+      const estimateTotal = items.reduce((sum, it) => {
+        const p = Number(it.unitPrice);
+        const q = Number(it.quantity);
+        if (!Number.isFinite(p) || !Number.isFinite(q)) return sum;
+        return sum + p * q;
+      }, 0);
+
+      const totalQty = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
 
       return res.json({
         groupId,
         reason,
+        createdTime: basePage.created_time,
         stage,
-        eta: etaISO,
-        summary: {
+        headerTitle,
+        headerSubtitle,
+        eta,
+        totals: {
           itemsCount: items.length,
-          totalQuantity,
+          totalQty,
           estimateTotal,
         },
         items,
       });
     } catch (error) {
-      console.error("Tracking error:", error.body || error);
-      return res.status(500).json({ error: "Failed to load tracking." });
+      console.error("Error fetching tracking data:", error.body || error);
+      return res.status(500).json({ error: "Failed to fetch tracking data." });
     }
+
   },
 );
 
@@ -1114,6 +1372,196 @@ app.get(
         return "Assigned To";
       };
 
+      // Helper: safely read numbers from Notion props (number / formula / rollup / rich_text)
+      const parseNumberProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "number") return prop.number ?? null;
+
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "number") return prop.formula.number ?? null;
+            if (prop.formula?.type === "string") {
+              const n = parseFloat(
+                String(prop.formula.string || "").replace(/[^0-9.]/g, ""),
+              );
+              return Number.isFinite(n) ? n : null;
+            }
+          }
+
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              for (const x of arr) {
+                if (x.type === "number" && typeof x.number === "number") return x.number;
+                if (x.type === "formula" && x.formula?.type === "number")
+                  return x.formula.number;
+                if (x.type === "formula" && x.formula?.type === "string") {
+                  const n = parseFloat(
+                    String(x.formula.string || "").replace(/[^0-9.]/g, ""),
+                  );
+                  if (Number.isFinite(n)) return n;
+                }
+                if (x.type === "rich_text") {
+                  const t = (x.rich_text || [])
+                    .map((r) => r.plain_text)
+                    .join("")
+                    .trim();
+                  const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+                  if (Number.isFinite(n)) return n;
+                }
+              }
+            }
+          }
+
+          if (prop.type === "rich_text") {
+            const t = (prop.rich_text || [])
+              .map((r) => r.plain_text)
+              .join("")
+              .trim();
+            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            return Number.isFinite(n) ? n : null;
+          }
+        } catch {}
+        return null;
+      };
+
+      // ----- Notion "ID" (unique_id) helpers for Requested Orders -----
+      const getPropInsensitive = (props, name) => {
+        if (!props || !name) return null;
+        const target = String(name).trim().toLowerCase();
+        for (const [k, v] of Object.entries(props)) {
+          if (String(k).trim().toLowerCase() === target) return v;
+        }
+        return null;
+      };
+
+      const extractUniqueIdDetails = (prop) => {
+        try {
+          if (!prop) return { text: null, prefix: null, number: null };
+
+          if (prop.type === "unique_id") {
+            const u = prop.unique_id;
+            if (!u || typeof u.number !== "number") {
+              return { text: null, prefix: null, number: null };
+            }
+            const prefix = u.prefix ? String(u.prefix).trim() : "";
+            const number = u.number;
+            const text = prefix ? `${prefix}-${number}` : String(number);
+            return { text, prefix: prefix || null, number };
+          }
+
+          // Best-effort fallback
+          let text = null;
+          if (prop.type === "number" && typeof prop.number === "number")
+            text = String(prop.number);
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "string")
+              text = String(prop.formula.string || "").trim() || null;
+            if (prop.formula?.type === "number" && typeof prop.formula.number === "number")
+              text = String(prop.formula.number);
+          }
+          if (prop.type === "rich_text") {
+            text = (prop.rich_text || [])
+              .map((x) => x?.plain_text || "")
+              .join("")
+              .trim() || null;
+          }
+          if (prop.type === "title") {
+            text = (prop.title || [])
+              .map((x) => x?.plain_text || "")
+              .join("")
+              .trim() || null;
+          }
+          if (!text) return { text: null, prefix: null, number: null };
+
+          const m = String(text).trim().match(/^(.*?)(\d+)\s*$/);
+          const prefix = m
+            ? String(m[1] || "").replace(/[-\s]+$/, "").trim()
+            : "";
+          const number = m ? Number(m[2]) : null;
+
+          return {
+            text: String(text).trim(),
+            prefix: prefix || null,
+            number: Number.isFinite(number) ? number : null,
+          };
+        } catch {
+          return { text: null, prefix: null, number: null };
+        }
+      };
+
+      const getOrderUniqueIdDetails = (props) => {
+        const direct = getPropInsensitive(props, "ID");
+        const d = extractUniqueIdDetails(direct);
+        if (d.text) return d;
+        for (const v of Object.values(props || {})) {
+          if (v?.type === "unique_id") {
+            const x = extractUniqueIdDetails(v);
+            if (x.text) return x;
+          }
+        }
+        return { text: null, prefix: null, number: null };
+      };
+
+      // Product cache (avoid retrieving same product page many times)
+      const productCache = new Map();
+      async function getProductInfo(productPageId) {
+        if (!productPageId) {
+          return { name: "Unknown Product", unitPrice: null, image: null, url: null };
+        }
+        if (productCache.has(productPageId)) return productCache.get(productPageId);
+        try {
+          const productPage = await notion.pages.retrieve({ page_id: productPageId });
+          const name =
+            productPage.properties?.Name?.title?.[0]?.plain_text ||
+            "Unknown Product";
+
+          const unitPrice =
+            parseNumberProp(productPage.properties?.["Unity Price"]) ??
+            parseNumberProp(productPage.properties?.["Unit price"]) ??
+            parseNumberProp(productPage.properties?.["Unit Price"]) ??
+            parseNumberProp(productPage.properties?.["Price"]) ??
+            null;
+
+          let image = null;
+          if (productPage.cover?.type === "external") image = productPage.cover.external.url;
+          if (productPage.cover?.type === "file") image = productPage.cover.file.url;
+          if (!image && productPage.icon?.type === "external") image = productPage.icon.external.url;
+          if (!image && productPage.icon?.type === "file") image = productPage.icon.file.url;
+
+          // Prefer the external product URL property (Products DB column "URL")
+          // Fallback to Notion page URL if the property is missing.
+          let url = null;
+          try {
+            const urlProp =
+              getPropInsensitive(productPage.properties, "URL") ||
+              getPropInsensitive(productPage.properties, "Url") ||
+              getPropInsensitive(productPage.properties, "Link") ||
+              getPropInsensitive(productPage.properties, "Website");
+
+            if (urlProp?.type === "url") url = urlProp.url || null;
+            if (!url && urlProp?.type === "rich_text") {
+              const t = (urlProp.rich_text || [])
+                .map((x) => x?.plain_text || "")
+                .join("")
+                .trim();
+              url = t || null;
+            }
+          } catch {}
+          if (!url) url = productPage.url || null;
+          const info = { name, unitPrice, image, url };
+          productCache.set(productPageId, info);
+          return info;
+        } catch {
+          const info = { name: "Unknown Product", unitPrice: null, image: null, url: null };
+          productCache.set(productPageId, info);
+          return info;
+        }
+      }
+
+      const receivedQtyPropName = await detectReceivedQtyPropName();
+
       while (hasMore) {
         const resp = await notion.databases.query({
           database_id: ordersDatabaseId,
@@ -1124,24 +1572,55 @@ app.get(
         for (const page of resp.results) {
           const props = page.properties || {};
 
-          // Product name
-          let productName = "Unknown Product";
+          const uid = getOrderUniqueIdDetails(props);
+
+          // Product info
           const productRel = props.Product?.relation;
-          if (Array.isArray(productRel) && productRel.length) {
-            try {
-              const productPage = await notion.pages.retrieve({
-                page_id: productRel[0].id,
-              });
-              productName =
-                productPage.properties?.Name?.title?.[0]?.plain_text ||
-                productName;
-            } catch {}
-          }
+          const productPageId =
+            Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
+          const prod = await getProductInfo(productPageId);
+          const productName = prod.name;
+          const unitPrice = prod.unitPrice;
+          const productImage = prod.image;
+          const productUrl = prod.url;
 
           const reason = props.Reason?.title?.[0]?.plain_text || "No Reason";
-          const qty = props["Quantity Requested"]?.number || 0;
-          const status = props["Status"]?.select?.name || "Pending";
-          const createdTime = page.created_time;
+
+// Qty in the UI should come from "Quantity Progress" (fallback to "Quantity Requested" if missing)
+const qtyProgress =
+  parseNumberProp(getPropInsensitive(props, "Quantity Progress")) ??
+  parseNumberProp(getPropInsensitive(props, "Quantity progress"));
+
+const qtyRequested =
+  parseNumberProp(getPropInsensitive(props, "Quantity Requested")) ??
+  props["Quantity Requested"]?.number ??
+  0;
+
+const qty =
+  qtyProgress !== null && qtyProgress !== undefined && Number.isFinite(Number(qtyProgress))
+    ? Number(qtyProgress)
+    : Number(qtyRequested) || 0;
+
+const qtyReceivedRaw = receivedQtyPropName ? parseNumberProp(props[receivedQtyPropName]) : null;
+const qtyReceived =
+  qtyReceivedRaw === null || qtyReceivedRaw === undefined
+    ? null
+    : Number.isFinite(Number(qtyReceivedRaw))
+      ? Number(qtyReceivedRaw)
+      : null;
+
+// Status + Notion label color
+const statusPropObj = getPropInsensitive(props, "Status") || props["Status"];
+const status =
+  statusPropObj?.select?.name ||
+  statusPropObj?.status?.name ||
+  "Pending";
+const statusColor =
+  statusPropObj?.select?.color ||
+  statusPropObj?.status?.color ||
+  null;
+
+const createdTime = page.created_time;
           // 🔥 Extract S.V Approval (select/status)
 const svApproval =
   props["S.V Approval"]?.select?.name ||
@@ -1165,22 +1644,80 @@ if (svApproval !== "Approved") continue;
           const assignedKey = findAssignedProp(props);
           let assignedToId = "";
           let assignedToName = "";
+          let assignedToIds = [];
+          let assignedToNames = [];
           const assignedRel = props[assignedKey]?.relation;
           if (Array.isArray(assignedRel) && assignedRel.length) {
-            assignedToId = assignedRel[0].id;
-            assignedToName = await memberName(assignedToId);
+            assignedToIds = assignedRel.map((r) => r.id).filter(Boolean);
+            assignedToNames = await Promise.all(
+              assignedToIds.map((id) => memberName(id)),
+            );
+            assignedToId = assignedToIds[0] || "";
+            assignedToName = assignedToNames[0] || "";
           }
 
-          
-all.push({
+          // Operations (who clicked "Received by operations")
+          const opsProp =
+            getPropInsensitive(props, "Person Received by Operations") ||
+            getPropInsensitive(props, "Received by operations") ||
+            getPropInsensitive(props, "Operations") ||
+            props["Person Received by Operations"] ||
+            props["Received by operations"] ||
+            props["Operations"];
+          let operationsByIds = [];
+          let operationsByNames = [];
+          let operationsById = "";
+          let operationsByName = "";
+
+          if (opsProp?.type === "relation") {
+            const rel = opsProp.relation;
+            if (Array.isArray(rel) && rel.length) {
+              operationsByIds = rel.map((r) => r.id).filter(Boolean);
+              operationsByNames = await Promise.all(
+                operationsByIds.map((id) => memberName(id)),
+              );
+              operationsById = operationsByIds[0] || "";
+              operationsByName = operationsByNames[0] || "";
+            }
+          } else if (opsProp?.type === "people") {
+            const ppl = opsProp.people || [];
+            operationsByIds = ppl.map((p) => p.id).filter(Boolean);
+            operationsByNames = ppl.map((p) => p.name).filter(Boolean);
+            operationsById = operationsByIds[0] || "";
+            operationsByName = operationsByNames[0] || "";
+          } else if (opsProp?.type === "rich_text") {
+            const t = (opsProp.rich_text || []).map((r) => r.plain_text).join("").trim();
+            if (t) {
+              operationsByNames = [t];
+              operationsByName = t;
+            }
+          }
+
+          all.push({
     id: page.id,
+    // Human-readable order identifier from Notion "ID" (unique_id)
+    orderId: uid.text,
+    orderIdPrefix: uid.prefix,
+    orderIdNumber: uid.number,
     reason,
     productName,
+    productPageId,
+    productUrl,
+    productImage,
+    unitPrice,
     quantity: qty,
+    quantityReceived: qtyReceived,
     status,
+    statusColor,
+    operationsByIds,
+    operationsByNames,
+    operationsById,
+    operationsByName,
     createdTime,
     createdById,
     createdByName,
+    assignedToIds,
+    assignedToNames,
     assignedToId,
     assignedToName,
     svApproval, // ⬅⬅⬅ مهم جداً
@@ -1245,6 +1782,1126 @@ app.post(
     } catch (e) {
       console.error("Assign error:", e.body || e);
       res.status(500).json({ error: "Failed to assign member" });
+    }
+  },
+);
+
+// Mark a requested order as received by operations (Status => "Shipped")
+// Body: { orderIds: [notionPageId, ...] }
+app.post(
+  "/api/orders/requested/mark-shipped",
+  requireAuth,
+  requirePage("Requested Orders"),
+  async (req, res) => {
+    try {
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const statusProp = await detectStatusPropName();
+
+      // Determine property type + pick the *exact* option name from the DB (case-insensitive)
+      // to avoid Notion "option not found" errors due to casing/spacing differences.
+      const dbProps = await getOrdersDBProps();
+      const dbPropMeta = dbProps?.[statusProp];
+      let statusType = dbPropMeta?.type;
+      if (!statusType) {
+        const sample = await notion.pages.retrieve({ page_id: ids[0] });
+        statusType = sample.properties?.[statusProp]?.type;
+      }
+
+      const desired = "Shipped";
+      let shippedName = desired;
+      // Pull options safely so we can:
+      // 1) choose an exact option name (avoids Notion "option not found")
+      // 2) return the label color to the UI
+      let statusOptions = [];
+      try {
+        statusOptions =
+          statusType === "status"
+            ? (dbPropMeta?.status?.options || [])
+            : (dbPropMeta?.select?.options || []);
+        if (!Array.isArray(statusOptions)) statusOptions = [];
+      } catch {
+        statusOptions = [];
+      }
+
+      if (statusOptions.length) {
+        const exact = statusOptions.find((o) => norm(o?.name) === norm(desired));
+        const partial = statusOptions.find((o) => norm(o?.name).includes(norm(desired)));
+        shippedName = (exact?.name || partial?.name || desired);
+      }
+
+      const value =
+        statusType === "status"
+          ? { status: { name: shippedName } }
+          : { select: { name: shippedName } };
+
+      // When user clicks "Received by operations" we want to ensure
+      // "Quantity received by operations" is filled for ALL items:
+      // - If the user edited an item qty, we keep the edited value (already stored).
+      // - If the user did NOT edit an item qty, we write the original qty (Quantity Progress / Requested).
+      const receivedProp = await (async () => {
+        // Prefer hardbind if exists and is number
+        const props = await getOrdersDBProps();
+        if (props?.[REC_PROP_HARDBIND]?.type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })();
+
+      // Helpers local to this route
+      const getPropInsensitive = (props, name) => {
+        const target = normKey(name);
+        for (const k of Object.keys(props || {})) {
+          if (normKey(k) === target) return props[k];
+        }
+        return null;
+      };
+
+      const parseNumberProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "number") return prop.number ?? null;
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "number") return prop.formula.number ?? null;
+            if (prop.formula?.type === "string") {
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              return Number.isFinite(n) ? n : null;
+            }
+          }
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              for (const x of arr) {
+                if (x.type === "number" && typeof x.number === "number") return x.number;
+                if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+                if (x.type === "formula" && x.formula?.type === "string") {
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  if (Number.isFinite(n)) return n;
+                }
+              }
+            }
+          }
+          if (prop.type === "rich_text") {
+            const t = (prop.rich_text || []).map((r) => r.plain_text).join("").trim();
+            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            return Number.isFinite(n) ? n : null;
+          }
+        } catch {}
+        return null;
+      };
+
+            const currentUserPageId = await getCurrentUserRelationPage(req);
+
+      // Store who clicked "Received by operations" in the proper Notion column (Relation),
+      // prefer "Person Received by Operations", fallback to "Operations" for older setups.
+      let operationsProp = null;
+      let operationsMeta = null;
+
+      const opsCandidates = [
+        "Person Received by Operations",
+        "Received by operations",
+        "Operations",
+      ];
+
+      for (const cand of opsCandidates) {
+        for (const [key, meta] of Object.entries(dbProps || {})) {
+          if (normKey(key) === normKey(cand)) {
+            operationsProp = key;
+            operationsMeta = meta;
+            break;
+          }
+        }
+        if (operationsProp) break;
+      }
+
+      const shippedOpt = (statusOptions || []).find((o) => norm(o?.name) === norm(shippedName));
+      const shippedColor = shippedOpt?.color || null;
+
+      const propsToUpdate = { [statusProp]: value };
+
+      if (operationsProp && currentUserPageId && operationsMeta?.type === "relation") {
+        propsToUpdate[operationsProp] = { relation: [{ id: currentUserPageId }] };
+      } else if (operationsProp && req.session.username && operationsMeta?.type === "rich_text") {
+        propsToUpdate[operationsProp] = {
+          rich_text: [{ text: { content: req.session.username } }],
+        };
+      }
+
+      await Promise.all(
+        ids.map(async (id) => {
+          // Retrieve current page to check if received qty is already set
+          // (so we don't overwrite user edits)
+          let pageProps = null;
+          try {
+            const page = await notion.pages.retrieve({ page_id: id });
+            pageProps = page?.properties || {};
+          } catch (err) {
+            console.error("mark-shipped retrieve error:", err?.body || err);
+            pageProps = null;
+          }
+
+          const updateProps = { ...propsToUpdate };
+
+          if (receivedProp && pageProps) {
+            const recValRaw = parseNumberProp(pageProps[receivedProp]);
+            const recVal =
+              recValRaw === null || recValRaw === undefined
+                ? null
+                : Number.isFinite(Number(recValRaw))
+                  ? Number(recValRaw)
+                  : null;
+
+            // Fill only if it's missing (null/undefined/NaN)
+            if (recVal === null) {
+              const qtyProgressRaw =
+                parseNumberProp(getPropInsensitive(pageProps, "Quantity Progress")) ??
+                parseNumberProp(getPropInsensitive(pageProps, "Quantity progress"));
+
+              const qtyRequestedRaw =
+                parseNumberProp(getPropInsensitive(pageProps, "Quantity Requested")) ??
+                parseNumberProp(getPropInsensitive(pageProps, "Quantity requested"));
+
+              const baseQtyNum =
+                qtyProgressRaw !== null &&
+                qtyProgressRaw !== undefined &&
+                Number.isFinite(Number(qtyProgressRaw))
+                  ? Number(qtyProgressRaw)
+                  : qtyRequestedRaw !== null &&
+                      qtyRequestedRaw !== undefined &&
+                      Number.isFinite(Number(qtyRequestedRaw))
+                    ? Number(qtyRequestedRaw)
+                    : 0;
+
+              const safeQty = Math.max(0, Math.floor(baseQtyNum || 0));
+              updateProps[receivedProp] = { number: safeQty };
+            }
+          }
+
+          return notion.pages.update({
+            page_id: id,
+            properties: updateProps,
+          });
+        }),
+      );
+
+      res.json({
+        success: true,
+        status: shippedName,
+        statusColor: shippedColor,
+        operationsByName: req.session.username || "",
+      });
+    } catch (e) {
+      console.error("mark-shipped error:", e.body || e);
+      res.status(500).json({ error: "Failed to update status" });
+    }
+  },
+);
+
+// Mark a requested order as received after shipping (Status => "Arrived" / "Delivered")
+// Body: { orderIds: [notionPageId, ...] }
+app.post(
+  "/api/orders/requested/mark-arrived",
+  requireAuth,
+  requirePage("Requested Orders"),
+  async (req, res) => {
+    try {
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const statusProp = await detectStatusPropName();
+
+      // Determine property type + pick the exact option name from the DB (case-insensitive)
+      const dbProps = await getOrdersDBProps();
+      const dbPropMeta = dbProps?.[statusProp];
+      let statusType = dbPropMeta?.type;
+      if (!statusType) {
+        const sample = await notion.pages.retrieve({ page_id: ids[0] });
+        statusType = sample.properties?.[statusProp]?.type;
+      }
+
+      const desiredCandidates = ["Arrived", "Delivered", "Received"]; // try these in order
+      let arrivedName = desiredCandidates[0];
+      let arrivedOptions = [];
+      try {
+        const opts =
+          statusType === "status"
+            ? dbPropMeta?.status?.options
+            : dbPropMeta?.select?.options;
+        arrivedOptions = Array.isArray(opts) ? opts : [];
+        if (arrivedOptions.length) {
+          for (const cand of desiredCandidates) {
+            const exact = arrivedOptions.find((o) => norm(o?.name) === norm(cand));
+            const partial = arrivedOptions.find((o) => norm(o?.name).includes(norm(cand)));
+            const picked = exact?.name || partial?.name;
+            if (picked) {
+              arrivedName = picked;
+              break;
+            }
+          }
+        }
+      } catch {}
+
+      const arrivedOpt = (arrivedOptions || []).find((o) => norm(o?.name) === norm(arrivedName));
+      const arrivedColor = arrivedOpt?.color || null;
+
+      const value =
+        statusType === "status"
+          ? { status: { name: arrivedName } }
+          : { select: { name: arrivedName } };
+
+      await Promise.all(
+        ids.map((id) =>
+          notion.pages.update({
+            page_id: id,
+            properties: {
+              [statusProp]: value,
+            },
+          }),
+        ),
+      );
+
+      res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
+    } catch (e) {
+      console.error("mark-arrived error:", e.body || e);
+      res.status(500).json({ error: "Failed to update status" });
+    }
+  },
+);
+
+// Update "Quantity Received by operations" for a single order item (Operations edit Qty)
+// Body: { value: number }
+app.post(
+  "/api/orders/requested/:id/received-quantity",
+  requireAuth,
+  requirePage("Requested Orders"),
+  async (req, res) => {
+    try {
+      const rawId = String(req.params.id || "").trim();
+      const id = looksLikeNotionId(rawId) ? toHyphenatedUUID(rawId) : rawId;
+      const { value } = req.body || {};
+
+      const vNum = Number(value);
+      if (!Number.isFinite(vNum) || vNum < 0) {
+        return res.status(400).json({ error: "value must be a non-negative number" });
+      }
+
+      // Detect received quantity property name (Number)
+      const receivedProp = (await (async () => {
+        const props = await getOrdersDBProps();
+        if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })());
+
+      if (!receivedProp) {
+        return res.status(500).json({ error: 'Received-quantity column not found (expected: "Quantity Received by operations")' });
+      }
+
+      await notion.pages.update({
+        page_id: id,
+        properties: {
+          [receivedProp]: { number: vNum },
+        },
+      });
+
+      return res.json({ success: true, value: vNum });
+    } catch (e) {
+      console.error("received-quantity update error:", e.body || e);
+      return res.status(500).json({ error: "Failed to update received quantity" });
+    }
+  },
+);
+
+
+// Export requested order to PDF (Delivery receipt)
+// Body: { orderIds: [notionPageId, ...] }
+app.post(
+  "/api/orders/requested/export/pdf",
+  requireAuth,
+  requirePage("Requested Orders"),
+  async (req, res) => {
+    try {
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const parseNumberProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "number") return prop.number ?? null;
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "number") return prop.formula.number ?? null;
+            if (prop.formula?.type === "string") {
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              return Number.isFinite(n) ? n : null;
+            }
+          }
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              for (const x of arr) {
+                if (x.type === "number" && typeof x.number === "number") return x.number;
+                if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+                if (x.type === "formula" && x.formula?.type === "string") {
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  if (Number.isFinite(n)) return n;
+                }
+              }
+            }
+          }
+          if (prop.type === "rich_text") {
+            const t = (prop.rich_text || []).map((r) => r.plain_text).join("").trim();
+            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            return Number.isFinite(n) ? n : null;
+          }
+        } catch {}
+        return null;
+      };
+
+      const getPropInsensitive = (props, name) => {
+        if (!props || !name) return null;
+        const target = String(name).trim().toLowerCase();
+        for (const [k, v] of Object.entries(props)) {
+          if (String(k).trim().toLowerCase() === target) return v;
+        }
+        return null;
+      };
+
+      const extractUniqueIdDetails = (prop) => {
+        try {
+          if (!prop) return { text: null, prefix: null, number: null };
+          if (prop.type === "unique_id") {
+            const u = prop.unique_id;
+            if (!u || typeof u.number !== "number") return { text: null, prefix: null, number: null };
+            const prefix = u.prefix ? String(u.prefix).trim() : "";
+            const number = u.number;
+            const text = prefix ? `${prefix}-${number}` : String(number);
+            return { text, prefix: prefix || null, number };
+          }
+        } catch {}
+        return { text: null, prefix: null, number: null };
+      };
+
+      const getOrderUniqueIdDetails = (props) => {
+        const direct = getPropInsensitive(props, "ID");
+        const d = extractUniqueIdDetails(direct);
+        if (d.text) return d;
+        for (const v of Object.values(props || {})) {
+          if (v?.type === "unique_id") {
+            const x = extractUniqueIdDetails(v);
+            if (x.text) return x;
+          }
+        }
+        return { text: null, prefix: null, number: null };
+      };
+
+      const computeOrderIdRange = (uids) => {
+        const nums = uids.filter((u) => typeof u.number === "number");
+        if (nums.length) {
+          const prefix = nums[0].prefix || "";
+          const samePrefix = nums.every((x) => (x.prefix || "") === prefix);
+          const min = Math.min(...nums.map((x) => x.number));
+          const max = Math.max(...nums.map((x) => x.number));
+          if (min === max) return prefix ? `${prefix}-${min}` : String(min);
+          if (samePrefix && prefix) return `${prefix}-${min} : ${prefix}-${max}`;
+        }
+        const texts = uids.map((u) => u.text).filter(Boolean);
+        if (!texts.length) return "Order";
+        if (texts.length === 1) return texts[0];
+        return `${texts[0]} : ${texts[texts.length - 1]}`;
+      };
+
+      const money = (n) => {
+        const num = Number(n) || 0;
+        return `£${num.toFixed(2)}`;
+      };
+
+      // Detect received quantity property name (Number)
+      const receivedProp = (await (async () => {
+        const props = await getOrdersDBProps();
+        if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })());
+
+      // Load pages
+      const pages = (await Promise.all(
+        ids.map(async (id) => {
+          try {
+            return await notion.pages.retrieve({ page_id: id });
+          } catch {
+            return null;
+          }
+        }),
+      )).filter(Boolean);
+
+      if (!pages.length) return res.status(404).json({ error: "Orders not found" });
+
+      // Member name cache
+      const nameCache = new Map();
+      async function memberName(id) {
+        if (!id) return "";
+        if (nameCache.has(id)) return nameCache.get(id);
+        try {
+          const p = await notion.pages.retrieve({ page_id: id });
+          const nm = p.properties?.Name?.title?.[0]?.plain_text || "";
+          nameCache.set(id, nm);
+          return nm;
+        } catch {
+          return "";
+        }
+      }
+
+      // Product cache
+      const productCache = new Map();
+      async function productInfo(productPageId) {
+        if (!productPageId) return { name: "Unknown", unitPrice: null, url: null };
+        if (productCache.has(productPageId)) return productCache.get(productPageId);
+        try {
+          const p = await notion.pages.retrieve({ page_id: productPageId });
+          const name = p.properties?.Name?.title?.[0]?.plain_text || "Unknown";
+          const idCode = _extractIdCodeFromProps(p.properties || {});
+          const unitPrice =
+            parseNumberProp(p.properties?.["Unity Price"]) ??
+            parseNumberProp(p.properties?.["Unit price"]) ??
+            parseNumberProp(p.properties?.["Unit Price"]) ??
+            parseNumberProp(p.properties?.["Price"]) ??
+            null;
+          let url = null;
+          try {
+            const urlProp =
+              getPropInsensitive(p.properties, "URL") ||
+              getPropInsensitive(p.properties, "Url") ||
+              getPropInsensitive(p.properties, "Link") ||
+              getPropInsensitive(p.properties, "Website");
+
+            if (urlProp?.type === "url") url = urlProp.url || null;
+            if (!url && urlProp?.type === "rich_text") {
+              const t = (urlProp.rich_text || []).map((x) => x?.plain_text || "").join("").trim();
+              url = t || null;
+            }
+          } catch {}
+          if (!url) url = p.url || null;
+          const info = { name, idCode, unitPrice, url };
+          productCache.set(productPageId, info);
+          return info;
+        } catch {
+          const info = { name: "Unknown", idCode: null, unitPrice: null, url: null };
+          productCache.set(productPageId, info);
+          return info;
+        }
+      }
+
+      // Header info
+      const createdTimes = pages.map((p) => new Date(p.created_time));
+      const createdAt = new Date(Math.min(...createdTimes.map((d) => d.getTime())));
+
+      // Team member (from first page relation)
+      let teamMember = "";
+      const firstProps = pages[0].properties || {};
+      const teamRel = firstProps["Teams Members"]?.relation;
+      if (Array.isArray(teamRel) && teamRel.length) {
+        teamMember = await memberName(teamRel[0].id);
+      }
+
+      const uids = pages.map((p) => getOrderUniqueIdDetails(p.properties || {}));
+      const orderIdRange = computeOrderIdRange(uids);
+
+      // Build rows
+      const rows = [];
+      let grandTotal = 0;
+      let grandQty = 0;
+
+      for (const p of pages) {
+        const props = p.properties || {};
+        const reason = props.Reason?.title?.[0]?.plain_text || "";
+
+        // Base qty: "Quantity Progress" (fallback to "Quantity Requested")
+        const qtyProgressProp = props["Quantity Progress"] || props["Quantity progress"];
+        const qtyProgress =
+          qtyProgressProp?.number ??
+          qtyProgressProp?.formula?.number ??
+          qtyProgressProp?.rollup?.number ??
+          null;
+
+        const qtyRequested = props["Quantity Requested"]?.number || 0;
+        const baseQty =
+          qtyProgress !== null && qtyProgress !== undefined ? qtyProgress : qtyRequested;
+
+        // Received qty (Operations override)
+        const recQtyRaw = receivedProp ? parseNumberProp(props[receivedProp]) : null;
+        const qty =
+          recQtyRaw === null || recQtyRaw === undefined
+            ? Number(baseQty) || 0
+            : Number.isFinite(Number(recQtyRaw))
+              ? Number(recQtyRaw)
+              : Number(baseQty) || 0;
+
+        const productRel = props.Product?.relation;
+        const productPageId =
+          Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
+
+        const prod = await productInfo(productPageId);
+        const unit = Number(prod.unitPrice) || 0;
+        const total = (Number(qty) || 0) * unit;
+
+        grandTotal += total;
+        grandQty += Number(qty) || 0;
+
+        rows.push({
+          idCode: prod.idCode || "",
+          component: prod.name,
+          qty,
+          reason,
+          link: prod.url,
+          unit,
+          total,
+        });
+      }
+
+      const safeName = String(orderIdRange || "order")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "_")
+        .slice(0, 60);
+
+      const fileName = `delivery_receipt_${safeName}.pdf`;
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      );
+      res.setHeader("Cache-Control", "no-store");
+
+      // Generate a nicer PDF (logo + meta table + better signatures layout)
+      const { pipeDeliveryReceiptPDF } = require("./deliveryReceiptPdf");
+      pipeDeliveryReceiptPDF(
+        {
+          orderId: orderIdRange,
+          createdAt,
+          teamMember,
+          preparedBy: req.session.username || "—",
+          rows,
+          grandQty,
+          grandTotal,
+        },
+        res,
+      );
+    } catch (e) {
+      console.error("export requested pdf error:", e.body || e);
+      try {
+        if (!res.headersSent) res.status(500).json({ error: "Failed to export PDF" });
+      } catch {}
+    }
+  },
+);
+
+// Export requested order to Excel
+// Body: { orderIds: [notionPageId, ...] }
+app.post(
+  "/api/orders/requested/export/excel",
+  requireAuth,
+  requirePage("Requested Orders"),
+  async (req, res) => {
+    try {
+      const ExcelJS = require("exceljs");
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      // Helpers
+      const parseNumberProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "number") return prop.number ?? null;
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "number") return prop.formula.number ?? null;
+            if (prop.formula?.type === "string") {
+              const n = parseFloat(
+                String(prop.formula.string || "").replace(/[^0-9.]/g, ""),
+              );
+              return Number.isFinite(n) ? n : null;
+            }
+          }
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              for (const x of arr) {
+                if (x.type === "number" && typeof x.number === "number") return x.number;
+                if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+                if (x.type === "formula" && x.formula?.type === "string") {
+                  const n = parseFloat(
+                    String(x.formula.string || "").replace(/[^0-9.]/g, ""),
+                  );
+                  if (Number.isFinite(n)) return n;
+                }
+              }
+            }
+          }
+        } catch {}
+        return null;
+      };
+
+      const getPropInsensitive = (props, name) => {
+        if (!props || !name) return null;
+        const target = String(name).trim().toLowerCase();
+        for (const [k, v] of Object.entries(props)) {
+          if (String(k).trim().toLowerCase() === target) return v;
+        }
+        return null;
+      };
+
+      const extractUniqueIdDetails = (prop) => {
+        try {
+          if (!prop) return { text: null, prefix: null, number: null };
+          if (prop.type === "unique_id") {
+            const u = prop.unique_id;
+            if (!u || typeof u.number !== "number") return { text: null, prefix: null, number: null };
+            const prefix = u.prefix ? String(u.prefix).trim() : "";
+            const number = u.number;
+            const text = prefix ? `${prefix}-${number}` : String(number);
+            return { text, prefix: prefix || null, number };
+          }
+        } catch {}
+        return { text: null, prefix: null, number: null };
+      };
+
+      const getOrderUniqueIdDetails = (props) => {
+        const direct = getPropInsensitive(props, "ID");
+        const d = extractUniqueIdDetails(direct);
+        if (d.text) return d;
+        for (const v of Object.values(props || {})) {
+          if (v?.type === "unique_id") {
+            const x = extractUniqueIdDetails(v);
+            if (x.text) return x;
+          }
+        }
+        return { text: null, prefix: null, number: null };
+      };
+
+      const computeOrderIdRange = (uids) => {
+        const nums = uids.filter((u) => typeof u.number === "number");
+        if (nums.length) {
+          const prefix = nums[0].prefix || "";
+          const samePrefix = nums.every((x) => (x.prefix || "") === prefix);
+          const min = Math.min(...nums.map((x) => x.number));
+          const max = Math.max(...nums.map((x) => x.number));
+          if (min === max) return prefix ? `${prefix}-${min}` : String(min);
+          if (samePrefix && prefix) return `${prefix}-${min} : ${prefix}-${max}`;
+        }
+        const texts = uids.map((u) => u.text).filter(Boolean);
+        if (!texts.length) return "Order";
+        if (texts.length === 1) return texts[0];
+        return `${texts[0]} : ${texts[texts.length - 1]}`;
+      };
+
+      // Received Quantity property (Number) — if filled, use it instead of base quantity
+      const receivedProp = (await (async () => {
+        const props = await getOrdersDBProps();
+        if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })());
+
+      // Load pages
+      const pages = (await Promise.all(
+        ids.map(async (id) => {
+          try {
+            return await notion.pages.retrieve({ page_id: id });
+          } catch {
+            return null;
+          }
+        }),
+      )).filter(Boolean);
+
+      if (!pages.length) return res.status(404).json({ error: "Orders not found" });
+
+      // Member name cache
+      const nameCache = new Map();
+      async function memberName(id) {
+        if (!id) return "";
+        if (nameCache.has(id)) return nameCache.get(id);
+        try {
+          const p = await notion.pages.retrieve({ page_id: id });
+          const nm = p.properties?.Name?.title?.[0]?.plain_text || "";
+          nameCache.set(id, nm);
+          return nm;
+        } catch {
+          return "";
+        }
+      }
+
+      // Product cache
+      const productCache = new Map();
+      async function productInfo(productPageId) {
+        if (!productPageId) return { name: "Unknown", unitPrice: null, url: null };
+        if (productCache.has(productPageId)) return productCache.get(productPageId);
+        try {
+          const p = await notion.pages.retrieve({ page_id: productPageId });
+          const name = p.properties?.Name?.title?.[0]?.plain_text || "Unknown";
+          const idCode = _extractIdCodeFromProps(p.properties || {});
+          const unitPrice =
+            parseNumberProp(p.properties?.["Unity Price"]) ??
+            parseNumberProp(p.properties?.["Unit price"]) ??
+            parseNumberProp(p.properties?.["Unit Price"]) ??
+            parseNumberProp(p.properties?.["Price"]) ??
+            null;
+          // Prefer Products DB "URL" property (external website URL), fallback to Notion page URL.
+          let url = null;
+          try {
+            const urlProp =
+              getPropInsensitive(p.properties, "URL") ||
+              getPropInsensitive(p.properties, "Url") ||
+              getPropInsensitive(p.properties, "Link") ||
+              getPropInsensitive(p.properties, "Website");
+
+            if (urlProp?.type === "url") url = urlProp.url || null;
+            if (!url && urlProp?.type === "rich_text") {
+              const t = (urlProp.rich_text || [])
+                .map((x) => x?.plain_text || "")
+                .join("")
+                .trim();
+              url = t || null;
+            }
+          } catch {}
+          if (!url) url = p.url || null;
+          const info = { name, idCode, unitPrice, url };
+          productCache.set(productPageId, info);
+          return info;
+        } catch {
+          const info = { name: "Unknown", idCode: null, unitPrice: null, url: null };
+          productCache.set(productPageId, info);
+          return info;
+        }
+      }
+
+      // Derive order header info
+      const createdTimes = pages.map((p) => new Date(p.created_time));
+      const createdAt = new Date(Math.min(...createdTimes.map((d) => d.getTime())));
+
+      // Team member (from first page relation)
+      let teamMember = "";
+      const firstProps = pages[0].properties || {};
+      const teamRel = firstProps["Teams Members"]?.relation;
+      if (Array.isArray(teamRel) && teamRel.length) {
+        teamMember = await memberName(teamRel[0].id);
+      }
+
+      const uids = pages.map((p) => getOrderUniqueIdDetails(p.properties || {}));
+      const orderIdRange = computeOrderIdRange(uids);
+
+      // Build rows
+      const rows = [];
+      let grandTotal = 0;
+      let grandQty = 0;
+      for (const p of pages) {
+        const props = p.properties || {};
+        const reason = props.Reason?.title?.[0]?.plain_text || "";
+        // Qty should come from "Quantity Progress" (fallback to "Quantity Requested")
+        const qtyProgressProp = props["Quantity Progress"] || props["Quantity progress"];
+        const qtyProgress =
+          qtyProgressProp?.number ??
+          qtyProgressProp?.formula?.number ??
+          qtyProgressProp?.rollup?.number ??
+          null;
+        const qtyRequested = props["Quantity Requested"]?.number || 0;
+        const baseQty =
+          qtyProgress !== null && qtyProgress !== undefined ? qtyProgress : qtyRequested;
+
+        // Use received quantity if Operations already set it
+        const recQtyRaw = receivedProp ? parseNumberProp(props[receivedProp]) : null;
+        const qty =
+          recQtyRaw === null || recQtyRaw === undefined
+            ? Number(baseQty) || 0
+            : Number.isFinite(Number(recQtyRaw))
+              ? Number(recQtyRaw)
+              : Number(baseQty) || 0;
+        const productRel = props.Product?.relation;
+        const productPageId =
+          Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
+        const prod = await productInfo(productPageId);
+        const unit = Number(prod.unitPrice) || 0;
+        const total = (Number(qty) || 0) * unit;
+        grandTotal += total;
+        grandQty += Number(qty) || 0;
+
+        rows.push({
+          idCode: prod.idCode || "",
+          component: prod.name,
+          qty: Number(qty) || 0,
+          reason,
+          link: prod.url,
+          unit,
+          total,
+        });
+      }
+
+      // Create workbook
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Operations Hub";
+      const ws = wb.addWorksheet("Order");
+
+      const formatDateTime = (date) => {
+        try {
+          const d = date instanceof Date ? date : new Date(date);
+          if (Number.isNaN(d.getTime())) return String(date || "-");
+          return d.toLocaleString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        } catch {
+          return String(date || "-");
+        }
+      };
+
+      const borderThin = {
+        top: { style: "thin", color: { argb: "FFDDDDDD" } },
+        left: { style: "thin", color: { argb: "FFDDDDDD" } },
+        bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
+        right: { style: "thin", color: { argb: "FFDDDDDD" } },
+      };
+      const borderLight = {
+        top: { style: "thin", color: { argb: "FFEEEEEE" } },
+        left: { style: "thin", color: { argb: "FFEEEEEE" } },
+        bottom: { style: "thin", color: { argb: "FFEEEEEE" } },
+        right: { style: "thin", color: { argb: "FFEEEEEE" } },
+      };
+
+      // ---- Meta small table (top) ----
+      ws.addRow(["Order ID", orderIdRange, "Date", formatDateTime(createdAt)]);
+      ws.addRow([
+        "Team member",
+        String(teamMember || ""),
+        "Prepared by (Operations)",
+        String(req.session?.username || "—"),
+      ]);
+      ws.addRow([
+        "Total quantity",
+        Number(grandQty) || 0,
+        "Estimate total",
+        Number(grandTotal) || 0,
+      ]);
+
+      // Style meta table A1:D3
+      for (let r = 1; r <= 3; r++) {
+        const row = ws.getRow(r);
+        row.height = 20;
+        for (let c = 1; c <= 4; c++) {
+          const cell = row.getCell(c);
+          cell.border = borderThin;
+          cell.alignment = {
+            vertical: "middle",
+            horizontal: "left",
+            wrapText: true,
+          };
+        }
+        // label cells
+        [1, 3].forEach((c) => {
+          const cell = row.getCell(c);
+          cell.font = { bold: true };
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFEFEFEF" },
+          };
+        });
+        // value cells
+        [2, 4].forEach((c) => {
+          const cell = row.getCell(c);
+          cell.font = { bold: true };
+        });
+      }
+      ws.getRow(3).getCell(2).numFmt = "0";
+      ws.getRow(3).getCell(4).numFmt = '"£"#,##0.00';
+
+      ws.addRow([]);
+
+      // ---- Data table (grouped by Reason, with different colors per group) ----
+      const EXCEL_TAG_PALETTE = [
+        { bg: "FFFDF2F8", header: "FFFCE7F3", font: "FF9D174D" }, // pink
+        { bg: "FFECFDF5", header: "FFD1FAE5", font: "FF065F46" }, // green
+        { bg: "FFEFF6FF", header: "FFDBEAFE", font: "FF1E40AF" }, // blue
+        { bg: "FFFEFCE8", header: "FFFEF3C7", font: "FF92400E" }, // yellow
+        { bg: "FFF5F3FF", header: "FFEDE9FE", font: "FF5B21B6" }, // purple
+        { bg: "FFFFF7ED", header: "FFFFEDD5", font: "FF9A3412" }, // orange
+        { bg: "FFF0FDFA", header: "FFCCFBF1", font: "FF115E59" }, // teal
+      ];
+      const hashString = (str) => {
+        const s = String(str || "");
+        let h = 0;
+        for (let i = 0; i < s.length; i++) {
+          h = (h << 5) - h + s.charCodeAt(i);
+          h |= 0;
+        }
+        return h;
+      };
+      const pickExcelColors = (key) => {
+        const idx = Math.abs(hashString(key)) % EXCEL_TAG_PALETTE.length;
+        return EXCEL_TAG_PALETTE[idx];
+      };
+
+      // Group rows by Reason
+      const reasonMap = new Map();
+      for (const row of rows || []) {
+        const reason = String(row.reason || "").trim() || "No Reason";
+        if (!reasonMap.has(reason)) reasonMap.set(reason, []);
+        reasonMap.get(reason).push(row);
+      }
+
+      let reasons = Array.from(reasonMap.keys()).sort((a, b) => String(a).localeCompare(String(b)));
+      // Put No Reason at the end
+      const noReasonIdx = reasons.findIndex((x) => x === "No Reason");
+      if (noReasonIdx !== -1) {
+        const [nr] = reasons.splice(noReasonIdx, 1);
+        reasons.push(nr);
+      }
+
+      const dataHeaderCols = [
+        "ID Code",
+        "Component",
+        "Quantity",
+        "Reason",
+        "Component link",
+        "Unit cost",
+        "Total cost",
+      ];
+
+      for (let gi = 0; gi < reasons.length; gi++) {
+        const reason = reasons[gi];
+        const items = (reasonMap.get(reason) || []).slice().sort((a, b) =>
+          String(a?.component || "").localeCompare(String(b?.component || "")),
+        );
+        const colors = pickExcelColors(reason);
+
+        // Group title row (merged across the table)
+        const titleRow = ws.addRow([`Reason: ${reason} (${items.length} items)`]);
+        const titleRowNum = titleRow.number;
+        ws.mergeCells(`A${titleRowNum}:G${titleRowNum}`);
+        const titleCell = ws.getCell(`A${titleRowNum}`);
+        titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.bg } };
+        titleCell.font = { bold: true, color: { argb: colors.font } };
+        titleCell.alignment = { vertical: "middle", horizontal: "left" };
+        // Add borders on the merged row
+        for (let c = 1; c <= 7; c++) {
+          const cell = ws.getRow(titleRowNum).getCell(c);
+          cell.border = borderThin;
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.bg } };
+        }
+
+        // Header row for this group
+        const header = ws.addRow(dataHeaderCols);
+        header.font = { bold: true, color: { argb: colors.font } };
+        header.alignment = { vertical: "middle" };
+        header.eachCell((cell) => {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.header } };
+          cell.border = borderThin;
+        });
+
+        for (const row of items) {
+          const r = ws.addRow([
+            row.idCode || "",
+            row.component,
+            row.qty,
+            row.reason,
+            row.link || "",
+            row.unit === null || typeof row.unit === "undefined" ? "" : Number(row.unit),
+            row.total === null || typeof row.total === "undefined" ? "" : Number(row.total),
+          ]);
+
+          // hyperlink (show the actual URL text, pointing to the product website URL)
+          if (row.link) {
+            r.getCell(5).value = { text: row.link, hyperlink: row.link };
+            r.getCell(5).font = { color: { argb: "FF2563EB" }, underline: true };
+          }
+
+          // formats
+          r.getCell(3).numFmt = "0";
+          r.getCell(6).numFmt = '"£"#,##0.00';
+          r.getCell(7).numFmt = '"£"#,##0.00';
+
+          // borders / alignment
+          r.eachCell((cell) => {
+            cell.border = borderLight;
+            cell.alignment = { vertical: "middle", wrapText: true };
+          });
+        }
+
+        // blank row between groups (except after last)
+        if (gi !== reasons.length - 1) ws.addRow([]);
+      }
+
+      // Column widths
+      ws.columns = [
+        { width: 14 },
+        { width: 32 },
+        { width: 10 },
+        { width: 24 },
+        { width: 48 },
+        { width: 12 },
+        { width: 12 },
+      ];
+
+      // Freeze meta rows + blank row (rows 1-4)
+      ws.views = [{ state: "frozen", ySplit: 4 }];
+
+      const safeName = String(orderIdRange || "order")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "_")
+        .slice(0, 60);
+      const fileName = `order_${safeName}.xlsx`;
+
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(
+          fileName,
+        )}`,
+      );
+      res.setHeader("Cache-Control", "no-store");
+      res.send(Buffer.from(buf));
+    } catch (e) {
+      console.error("export requested excel error:", e.body || e);
+      res.status(500).json({ error: "Failed to export Excel" });
     }
   },
 );
@@ -1882,6 +3539,303 @@ app.get(
     const allComponents = [];
     let hasMore = true;
     let startCursor = undefined;
+
+    // ---- helpers: safely extract number/file url/... ----
+    // NOTE:
+    // - Pricing in Products_Database is expected to be a Number property ("Unity Price").
+    // - Some workspaces may also have a legacy/alternate name like "Unit price".
+    const normKeyLocal = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const getPropInsensitive = (props, name) => {
+      if (!props) return null;
+      if (props[name]) return props[name];
+      const want = normKeyLocal(name);
+      for (const k of Object.keys(props)) {
+        if (normKeyLocal(k) === want) return props[k];
+      }
+      return null;
+    };
+
+    const extractFirstFileUrl = (prop) => {
+      try {
+        if (!prop) return null;
+        // Notion files property
+        if (prop.type === 'files') {
+          const f = prop.files?.[0];
+          if (!f) return null;
+          if (f.type === 'file') return f.file?.url || null;
+          if (f.type === 'external') return f.external?.url || null;
+          return null;
+        }
+        // sometimes stored as url property
+        if (prop.type === 'url') return prop.url || null;
+        return null;
+      } catch {
+        return null;
+      }
+    };
+
+    // Extract a URL from a Notion property (supports url + rich_text/title fallbacks)
+    const extractUrl = (prop) => {
+      try {
+        if (!prop) return null;
+        if (prop.type === 'url') return prop.url || null;
+
+        const tryText = (text) => {
+          const s = String(text || '').trim();
+          if (!s) return null;
+          if (/^https?:\/\//i.test(s)) return s;
+          return null;
+        };
+
+        if (prop.type === 'rich_text') {
+          for (const rt of prop.rich_text || []) {
+            const href = rt?.href;
+            if (href) return String(href);
+            const t = tryText(rt?.plain_text);
+            if (t) return t;
+          }
+          return null;
+        }
+
+        if (prop.type === 'title') {
+          for (const t of prop.title || []) {
+            const href = t?.href;
+            if (href) return String(href);
+            const x = tryText(t?.plain_text);
+            if (x) return x;
+          }
+          return null;
+        }
+
+        // last resort: files/external
+        return extractFirstFileUrl(prop);
+      } catch {
+        return null;
+      }
+    };
+
+    const extractNumber = (prop) => {
+      try {
+        if (!prop) return null;
+
+        // Some Notion setups store currency/price as text (e.g. "£40.00")
+        // and/or rollup arrays of text values. We try to parse a number from
+        // those cases so the UI doesn't show $0.
+        const parseNumberFromText = (text) => {
+          if (text == null) return null;
+          let s = String(text).trim();
+          if (!s) return null;
+          // Remove spaces
+          s = s.replace(/\s+/g, '');
+          // If both comma and dot exist: assume comma is thousands separator
+          if (s.includes('.') && s.includes(',')) {
+            s = s.replace(/,/g, '');
+          } else if (!s.includes('.') && s.includes(',')) {
+            // If only comma exists: assume comma is decimal separator (e.g. 40,00)
+            const last = s.lastIndexOf(',');
+            s = s.slice(0, last).replace(/,/g, '') + '.' + s.slice(last + 1);
+          }
+          // Keep digits, sign and dot only
+          s = s.replace(/[^0-9+\-\.]/g, '');
+          if (!s || s === '.' || s === '+' || s === '-') return null;
+          const n = Number(s);
+          return Number.isFinite(n) ? n : null;
+        };
+
+        const extractFromValue = (val) => {
+          try {
+            if (!val) return null;
+            if (val.type === 'number') return val.number ?? null;
+            if (val.type === 'formula') {
+              if (val.formula?.type === 'number') return val.formula?.number ?? null;
+              if (val.formula?.type === 'string') return parseNumberFromText(val.formula?.string);
+              return null;
+            }
+            if (val.type === 'rich_text') {
+              const t = (val.rich_text || []).map((x) => x?.plain_text || '').join('');
+              return parseNumberFromText(t);
+            }
+            if (val.type === 'title') {
+              const t = (val.title || []).map((x) => x?.plain_text || '').join('');
+              return parseNumberFromText(t);
+            }
+            if (val.type === 'select') return parseNumberFromText(val.select?.name);
+            if (val.type === 'status') return parseNumberFromText(val.status?.name);
+            return null;
+          } catch {
+            return null;
+          }
+        };
+
+        if (prop.type === 'number') return prop.number ?? null;
+        if (prop.type === 'formula') {
+          if (prop.formula?.type === 'number') return prop.formula?.number ?? null;
+          if (prop.formula?.type === 'string') return parseNumberFromText(prop.formula?.string);
+          return null;
+        }
+        if (prop.type === 'rich_text') {
+          const t = (prop.rich_text || []).map((x) => x?.plain_text || '').join('');
+          return parseNumberFromText(t);
+        }
+        if (prop.type === 'title') {
+          const t = (prop.title || []).map((x) => x?.plain_text || '').join('');
+          return parseNumberFromText(t);
+        }
+        if (prop.type === 'rollup') {
+          const r = prop.rollup;
+          if (!r) return null;
+          if (r.type === 'number') return r.number ?? null;
+          if (r.type === 'array') {
+            // Some rollups return an array. Try:
+            // - sum numbers
+            // - parse numbers from text
+            const arr = Array.isArray(r.array) ? r.array : [];
+            const nums = arr
+              .map((x) => extractFromValue(x))
+              .filter((n) => typeof n === 'number' && Number.isFinite(n));
+            if (nums.length === 0) return null;
+            return nums.reduce((a, b) => a + b, 0);
+          }
+          return null;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    };
+
+    const extractUniqueIdText = (prop) => {
+      try {
+        if (!prop) return null;
+
+        // Notion "ID" property type
+        if (prop.type === 'unique_id') {
+          const u = prop.unique_id;
+          if (!u) return null;
+          const prefix = u.prefix ? String(u.prefix).trim() : '';
+          const num = typeof u.number === 'number' ? u.number : null;
+          if (num === null) return null;
+          return prefix ? `${prefix}-${num}` : String(num);
+        }
+
+        // If it's stored as something else, try best-effort fallbacks
+        if (prop.type === 'number' && typeof prop.number === 'number') {
+          return String(prop.number);
+        }
+        if (prop.type === 'formula') {
+          if (prop.formula?.type === 'string') return String(prop.formula.string || '').trim() || null;
+          if (prop.formula?.type === 'number' && typeof prop.formula.number === 'number') return String(prop.formula.number);
+        }
+        if (prop.type === 'rich_text') {
+          const t = (prop.rich_text || []).map((x) => x?.plain_text || '').join('').trim();
+          return t || null;
+        }
+        if (prop.type === 'title') {
+          const t = (prop.title || []).map((x) => x?.plain_text || '').join('').trim();
+          return t || null;
+        }
+        if (prop.type === 'rollup') {
+          const r = prop.rollup;
+          if (!r) return null;
+          if (r.type === 'number' && typeof r.number === 'number') return String(r.number);
+          if (r.type === 'array') {
+            const arr = Array.isArray(r.array) ? r.array : [];
+            // return first non-empty text-like value
+            for (const v of arr) {
+              if (!v) continue;
+              if (v.type === 'unique_id') {
+                const x = extractUniqueIdText(v);
+                if (x) return x;
+              }
+              if (v.type === 'rich_text') {
+                const t = (v.rich_text || []).map((x) => x?.plain_text || '').join('').trim();
+                if (t) return t;
+              }
+              if (v.type === 'title') {
+                const t = (v.title || []).map((x) => x?.plain_text || '').join('').trim();
+                if (t) return t;
+              }
+              if (v.type === 'number' && typeof v.number === 'number') return String(v.number);
+            }
+          }
+        }
+
+        return null;
+      } catch {
+        return null;
+      }
+    };
+
+    // Optional mapping:
+    // Some workspaces keep the human-readable Product "ID" (Notion unique_id)
+    // inside the Products_list database (ordersDatabaseId), not inside
+    // Products_Database itself.
+    //
+    // We build a map: { productPageId -> products_list.ID }
+    // by scanning Products_list pages and reading:
+    // - relation property: "Product" -> page id in Products_Database
+    // - unique id property: "ID" -> e.g. ORD-86
+    const productIdToProductsListId = new Map();
+    if (ordersDatabaseId) {
+      try {
+        let hasMoreList = true;
+        let startCursorList = undefined;
+
+        while (hasMoreList) {
+          let respList;
+          try {
+            // Fast path: only records that have Product relation
+            respList = await notion.databases.query({
+              database_id: ordersDatabaseId,
+              start_cursor: startCursorList,
+              page_size: 100,
+              filter: {
+                property: 'Product',
+                relation: { is_not_empty: true },
+              },
+              sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+            });
+          } catch (e) {
+            // If the filter fails (e.g. property name differs), retry without it
+            respList = await notion.databases.query({
+              database_id: ordersDatabaseId,
+              start_cursor: startCursorList,
+              page_size: 100,
+              sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+            });
+          }
+
+          for (const pg of respList.results || []) {
+            const props = pg.properties || {};
+            const prodRelProp = getPropInsensitive(props, 'Product');
+            const rel = prodRelProp?.relation;
+            if (!Array.isArray(rel) || rel.length === 0) continue;
+            const prodId = rel[0]?.id;
+            if (!prodId) continue;
+
+            const idProp = getPropInsensitive(props, 'ID');
+            const idText = extractUniqueIdText(idProp);
+            if (!idText) continue;
+
+            // Keep first encountered (we query newest first)
+            if (!productIdToProductsListId.has(prodId)) {
+              productIdToProductsListId.set(prodId, idText);
+            }
+          }
+
+          hasMoreList = !!respList.has_more;
+          startCursorList = respList.next_cursor;
+
+          // Safety valve for very large DBs
+          if (productIdToProductsListId.size > 5000) break;
+        }
+      } catch (e) {
+        console.warn(
+          '[api/components] Could not build Products_list ID map:',
+          e?.body || e?.message || e,
+        );
+      }
+    }
     try {
       while (hasMore) {
         const response = await notion.databases.query({
@@ -1892,12 +3846,45 @@ app.get(
         const componentsFromPage = response.results
           .map((page) => {
             const titleProperty = page.properties?.Name;
-            const urlProperty = page.properties?.URL;
+
+            // URL: prefer a proper Notion URL property named "URL" (case-insensitive),
+            // but also accept common alternatives like "Link"/"Website".
+            const urlProperty =
+              getPropInsensitive(page.properties, 'URL') ||
+              getPropInsensitive(page.properties, 'Link') ||
+              getPropInsensitive(page.properties, 'Website');
+            // Price: "Unity Price" (Number) in Products_Database
+            const unitPriceProp =
+              getPropInsensitive(page.properties, 'Unity Price') ||
+              getPropInsensitive(page.properties, 'Unit price');
+            const unitPrice = extractNumber(unitPriceProp);
+
+            // Display ID inside the product icon.
+            // Priority:
+            // 1) Products_list "ID" (if a mapping exists for this product)
+            // 2) Products_Database "ID" (fallback)
+            const displayIdFromProductsList =
+              productIdToProductsListId.get(page.id) || null;
+            const displayIdProp = getPropInsensitive(page.properties, 'ID');
+            const displayIdFromProductsDb = extractUniqueIdText(displayIdProp);
+            const displayId = displayIdFromProductsList || displayIdFromProductsDb;
+
+            // Optional image (if exists in DB). We support several common property names.
+            const imageProp =
+              getPropInsensitive(page.properties, 'Image') ||
+              getPropInsensitive(page.properties, 'Photo') ||
+              getPropInsensitive(page.properties, 'Picture') ||
+              getPropInsensitive(page.properties, 'Thumbnail') ||
+              getPropInsensitive(page.properties, 'Icon');
+            const imageUrl = extractFirstFileUrl(imageProp);
             if (titleProperty?.title?.length > 0) {
               return {
                 id: page.id,
                 name: titleProperty.title[0].plain_text,
-                url: urlProperty ? urlProperty.url : null,
+                url: extractUrl(urlProperty),
+                unitPrice: typeof unitPrice === 'number' && Number.isFinite(unitPrice) ? unitPrice : null,
+                displayId: displayId || null,
+                imageUrl: imageUrl || null,
               };
             }
             return null;
@@ -2001,6 +3988,15 @@ app.post(
         .status(500)
         .json({ success: false, message: "Database IDs are not configured." });
     }
+      // Password confirmation (requested): user must enter their password
+      // again before submitting an order.
+      const password = String(req.body?.password || "").trim();
+      if (!password) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Password is required before checkout." });
+      }
+
 let { products } = req.body || {};
 if (!Array.isArray(products) || products.length === 0) {
   const d = req.session.orderDraft;
@@ -2036,7 +4032,15 @@ if (cleanedProducts.some(p => !p.reason)) {
       if (userQuery.results.length === 0) {
         return res.status(404).json({ error: "User not found." });
       }
-      const userId = userQuery.results[0].id;
+      const userPage = userQuery.results[0];
+      const userId = userPage.id;
+
+      const storedPassword = userPage?.properties?.Password?.number;
+      if (!storedPassword || String(storedPassword) !== password) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Invalid password. Please try again." });
+      }
 
       const creations = await Promise.all(
   cleanedProducts.map(async (product) => {
@@ -2046,7 +4050,7 @@ if (cleanedProducts.some(p => !p.reason)) {
               Reason: { title: [{ text: { content: product.reason } }] },
               "Quantity Requested": { number: Number(product.quantity) },
               Product: { relation: [{ id: product.id }] },
-              "Status": { select: { name: "Pending" } },
+              "Status": { select: { name: "Order Placed" } },
               "Teams Members": { relation: [{ id: userId }] },
             },
           });
@@ -2077,7 +4081,7 @@ if (cleanedProducts.some(p => !p.reason)) {
   reason: c.reason,
   productName: c.productName,
   quantity: c.quantity,
-  status: "Pending",
+  status: "Order Placed",
   createdTime: c.createdTime,
 }));
       req.session.recentOrders = (req.session.recentOrders || []).concat(
@@ -2137,6 +4141,294 @@ app.post(
 );
 
 // ===== Stocktaking data (JSON) — requires Stocktaking =====
+
+// ===== Helpers: Stocktaking / Products "ID code" extraction (Notion) =====
+function _propInsensitive(props = {}, name = "") {
+  const target = String(name || "").trim().toLowerCase();
+  if (!target) return null;
+  for (const [k, v] of Object.entries(props || {})) {
+    if (String(k || "").trim().toLowerCase() === target) return v;
+  }
+  return null;
+}
+
+function _extractPropText(prop) {
+  try {
+    if (!prop) return null;
+    if (prop.type === "unique_id" && prop.unique_id && typeof prop.unique_id.number === "number") {
+      const prefix = prop.unique_id.prefix ? String(prop.unique_id.prefix).trim() : "";
+      const n = prop.unique_id.number;
+      return prefix ? `${prefix}-${n}` : String(n);
+    }
+    if (prop.type === "rich_text") {
+      const t = (prop.rich_text || []).map((r) => r?.plain_text || "").join("").trim();
+      return t || null;
+    }
+    if (prop.type === "title") {
+      const t = (prop.title || []).map((r) => r?.plain_text || "").join("").trim();
+      return t || null;
+    }
+    if (prop.type === "number" && (prop.number === 0 || typeof prop.number === "number")) {
+      return String(prop.number);
+    }
+    if (prop.type === "select") return prop.select?.name || null;
+    if (prop.type === "formula") {
+      if (prop.formula?.type === "string") {
+        const t = String(prop.formula.string || "").trim();
+        return t || null;
+      }
+      if (prop.formula?.type === "number" && typeof prop.formula.number === "number") {
+        return String(prop.formula.number);
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function _extractPropNumber(prop) {
+  try {
+    if (!prop) return null;
+
+    if (prop.type === "number" && typeof prop.number === "number") return prop.number;
+
+    if (prop.type === "formula") {
+      if (prop.formula?.type === "number" && typeof prop.formula.number === "number") {
+        return prop.formula.number;
+      }
+      if (prop.formula?.type === "string") {
+        const t = String(prop.formula.string || "").trim();
+        if (!t) return null;
+        const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+        return Number.isFinite(n) ? n : null;
+      }
+    }
+
+    if (prop.type === "rollup") {
+      if (prop.rollup?.type === "number" && typeof prop.rollup.number === "number") {
+        return prop.rollup.number;
+      }
+      if (prop.rollup?.type === "array") {
+        const arr = prop.rollup.array || [];
+        for (const x of arr) {
+          if (x?.type === "number" && typeof x.number === "number") return x.number;
+          if (x?.type === "formula" && x.formula?.type === "number" && typeof x.formula.number === "number") {
+            return x.formula.number;
+          }
+          if (x?.type === "formula" && x.formula?.type === "string") {
+            const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+            if (Number.isFinite(n)) return n;
+          }
+          if (x?.type === "rich_text") {
+            const t = (x.rich_text || []).map((r) => r?.plain_text || "").join("").trim();
+            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            if (Number.isFinite(n)) return n;
+          }
+        }
+      }
+    }
+
+    if (prop.type === "rich_text") {
+      const t = (prop.rich_text || []).map((r) => r?.plain_text || "").join("").trim();
+      const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+      return Number.isFinite(n) ? n : null;
+    }
+  } catch {}
+  return null;
+}
+
+function _extractIdCodeFromProps(props = {}) {
+  // Prefer explicit property names
+  const candidates = [
+    "ID code",
+    "ID Code",
+    "Id code",
+    "ID",
+    "Code",
+    "Component Code",
+    "Item Code",
+    "SKU",
+  ];
+
+  for (const name of candidates) {
+    const p = _propInsensitive(props, name) || props?.[name];
+    const t = _extractPropText(p);
+    if (t) return t;
+  }
+
+  // Fallback: first unique_id on the page
+  for (const v of Object.values(props || {})) {
+    if (v?.type === "unique_id") {
+      const t = _extractPropText(v);
+      if (t) return t;
+    }
+  }
+
+  return null;
+}
+
+// ===== Helpers: map Products(Name) -> Products(ID Code) =====
+// The user wants the ID Code coming specifically from the Products database column "ID Code".
+// We build a cached lookup table: normalized Product Name -> ID Code.
+function _normNameKey(s) {
+  return String(s || "")
+    .replace(/\u00A0/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/[–—−]/g, "-")
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s+/g, " ");
+}
+
+function _extractProductNameFromProps(props = {}) {
+  // In Products DB, "Name" is typically a rich_text (Aa) column (as per user's screenshot).
+  // We still support other possible names as fallback.
+  const candidates = ["Name", "Component", "Product", "Item", "Material"];
+  for (const name of candidates) {
+    const p = _propInsensitive(props, name) || props?.[name];
+    const t = _extractPropText(p);
+    if (t) return t;
+  }
+  return null;
+}
+
+const _PRODUCTS_IDCODE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+let _productsNameToIdCodeCache = {
+  ts: 0,
+  db: null,
+  map: new Map(),
+};
+
+const _PRODUCTS_PRICE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+let _productsNameToUnityPriceCache = {
+  ts: 0,
+  db: null,
+  map: new Map(),
+};
+
+async function _getProductsNameToIdCodeMap() {
+  try {
+    if (!componentsDatabaseId) return new Map();
+
+    const now = Date.now();
+    if (
+      _productsNameToIdCodeCache.map &&
+      _productsNameToIdCodeCache.map.size > 0 &&
+      _productsNameToIdCodeCache.db === componentsDatabaseId &&
+      now - _productsNameToIdCodeCache.ts < _PRODUCTS_IDCODE_CACHE_TTL_MS
+    ) {
+      return _productsNameToIdCodeCache.map;
+    }
+
+    const map = new Map();
+    let hasMore = true;
+    let startCursor = undefined;
+
+    while (hasMore) {
+      const resp = await notion.databases.query({
+        database_id: componentsDatabaseId,
+        start_cursor: startCursor,
+        page_size: 100,
+      });
+
+      for (const page of resp.results || []) {
+        const props = page.properties || {};
+        const productName = _extractProductNameFromProps(props);
+        if (!productName) continue;
+
+        // Prefer the explicit Products column "ID Code" (often it is the Title property)
+        const idProp =
+          _propInsensitive(props, "ID Code") ||
+          _propInsensitive(props, "ID code") ||
+          props?.["ID Code"] ||
+          props?.["ID code"];
+
+        let idCode = _extractPropText(idProp);
+
+        // Fallback to other variants only if "ID Code" is missing
+        if (!idCode) idCode = _extractIdCodeFromProps(props);
+
+        if (!idCode) continue;
+
+        const key = _normNameKey(productName);
+        // Keep the first non-empty
+        if (!map.has(key) || !map.get(key)) map.set(key, idCode);
+      }
+
+      hasMore = resp.has_more;
+      startCursor = resp.next_cursor;
+    }
+
+    _productsNameToIdCodeCache = { ts: now, db: componentsDatabaseId, map };
+    return map;
+  } catch (e) {
+    console.error("Failed to build Products Name->ID Code map:", e.body || e);
+    return new Map();
+  }
+}
+
+// ===== Helpers: map Products(Name) -> Products(Unity Price) =====
+// Used for Stocktaking Excel export only.
+async function _getProductsNameToUnityPriceMap() {
+  try {
+    if (!componentsDatabaseId) return new Map();
+
+    const now = Date.now();
+    if (
+      _productsNameToUnityPriceCache.map &&
+      _productsNameToUnityPriceCache.map.size > 0 &&
+      _productsNameToUnityPriceCache.db === componentsDatabaseId &&
+      now - _productsNameToUnityPriceCache.ts < _PRODUCTS_PRICE_CACHE_TTL_MS
+    ) {
+      return _productsNameToUnityPriceCache.map;
+    }
+
+    const map = new Map();
+    let hasMore = true;
+    let startCursor = undefined;
+
+    while (hasMore) {
+      const resp = await notion.databases.query({
+        database_id: componentsDatabaseId,
+        start_cursor: startCursor,
+        page_size: 100,
+      });
+
+      for (const page of resp.results || []) {
+        const props = page.properties || {};
+        const productName = _extractProductNameFromProps(props);
+        if (!productName) continue;
+
+        const priceProp =
+          _propInsensitive(props, "Unity Price") ||
+          _propInsensitive(props, "Unit price") ||
+          _propInsensitive(props, "Unit Price") ||
+          _propInsensitive(props, "Price") ||
+          props?.["Unity Price"] ||
+          props?.["Unit price"] ||
+          props?.["Unit Price"] ||
+          props?.Price;
+
+        const unityPrice = _extractPropNumber(priceProp);
+        if (unityPrice === null || typeof unityPrice === "undefined") continue;
+
+        const key = _normNameKey(productName);
+        if (!map.has(key) || map.get(key) === null || typeof map.get(key) === "undefined") {
+          map.set(key, unityPrice);
+        }
+      }
+
+      hasMore = resp.has_more;
+      startCursor = resp.next_cursor;
+    }
+
+    _productsNameToUnityPriceCache = { ts: now, db: componentsDatabaseId, map };
+    return map;
+  } catch (e) {
+    console.error("_getProductsNameToUnityPriceMap error:", e.body || e);
+    return new Map();
+  }
+}
+
 app.get(
   "/api/stock",
   requireAuth,
@@ -2204,6 +4496,7 @@ app.get(
               "Untitled";
 
             const quantity = firstDefinedNumber(props[schoolName]);
+
             const oneKitQuantity = firstDefinedNumber(
               props["One Kit Quantity"],
               props["One Kit Qty"],
@@ -2211,6 +4504,8 @@ app.get(
               props["Kit Qty"],
               props["OneKitQuantity"],
             );
+
+            const idCode = _extractIdCodeFromProps(props);
 
             let tag = null;
             if (props.Tag?.select) {
@@ -2237,6 +4532,7 @@ app.get(
               name: componentName,
               quantity: Number(quantity) || 0,
               oneKitQuantity: Number(oneKitQuantity) || 0,
+              idCode,
               tag,
             };
           })
@@ -2247,7 +4543,9 @@ app.get(
         startCursor = stockResponse.next_cursor;
       }
 
-      res.json(allStock);
+      // Filter: return only rows that have a positive In Stock value
+      const filteredStock = (allStock || []).filter((it) => Number(it.quantity) > 0);
+      res.json(filteredStock);
     } catch (error) {
       console.error("Error fetching stock data:", error.body || error);
       res
@@ -2258,12 +4556,17 @@ app.get(
 );
 
 // ===== Stocktaking PDF download — requires Stocktaking =====
-app.get(
+// Supports BOTH GET (empty inventory) and POST (inventory values from UI)
+app.all(
   "/api/stock/pdf",
   requireAuth,
   requirePage("Stocktaking"),
   async (req, res) => {
     try {
+      const inventoryMapRaw = req?.body?.inventory;
+      const inventoryMap =
+        inventoryMapRaw && typeof inventoryMapRaw === "object" ? inventoryMapRaw : {};
+
       const userResponse = await notion.databases.query({
         database_id: teamMembersDatabaseId,
         filter: { property: "Name", title: { equals: req.session.username } },
@@ -2284,6 +4587,13 @@ app.get(
         return res
           .status(404)
           .json({ error: "Could not determine school name for the user." });
+
+      const productsNameToIdCode = await _getProductsNameToIdCodeMap();
+
+      const lookupIdCode = (componentName, fallbackProps) => {
+        const fromProducts = productsNameToIdCode.get(_normNameKey(componentName));
+        return fromProducts || _extractIdCodeFromProps(fallbackProps || {}) || "";
+      };
 
       const allStock = [];
       let hasMore = true;
@@ -2320,13 +4630,15 @@ app.get(
               "Untitled";
 
             const quantity = firstDefinedNumber(props[schoolName]);
-            const oneKitQuantity = firstDefinedNumber(
-              props["One Kit Quantity"],
-              props["One Kit Qty"],
-              props["One kit qty"],
-              props["Kit Qty"],
-              props["OneKitQuantity"],
-            );
+
+            const idCode = lookupIdCode(componentName, props);
+
+            // Inventory values come from the UI (POST body). If the key exists, allow 0.
+            let inventory = null;
+            if (inventoryMap && Object.prototype.hasOwnProperty.call(inventoryMap, page.id)) {
+              const n = Number(inventoryMap[page.id]);
+              if (Number.isFinite(n) && n >= 0) inventory = n;
+            }
 
             let tag = null;
             if (props.Tag?.select) {
@@ -2352,7 +4664,8 @@ app.get(
               id: page.id,
               name: componentName,
               quantity: Number(quantity) || 0,
-              oneKitQuantity: Number(oneKitQuantity) || 0,
+              idCode,
+              inventory,
               tag,
             };
           })
@@ -2363,9 +4676,12 @@ app.get(
         startCursor = stockResponse.next_cursor;
       }
 
-      // Grouping + PDF layout (كما هو)
+      // Filter: include only items that have a positive In Stock value
+      const filteredStockForPdf = (allStock || []).filter((it) => Number(it.quantity) > 0);
+
+      // ===== Grouping =====
       const groupsMap = new Map();
-      (allStock || []).forEach((it) => {
+      (filteredStockForPdf || []).forEach((it) => {
         const name = it?.tag?.name || "Untagged";
         const color = it?.tag?.color || "default";
         const key = `${String(name).toLowerCase()}|${color}`;
@@ -2385,12 +4701,21 @@ app.get(
         )
         .concat(untagged);
 
+      // ===== PDF =====
       const fname = `Stocktaking-${new Date().toISOString().slice(0, 10)}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
 
       const doc = new PDFDocument({ size: "A4", margin: 36 });
       doc.pipe(res);
+
+      const COLORS = {
+        border: "#E5E7EB",
+        muted: "#6B7280",
+        text: "#111827",
+        danger: "#DC2626",
+        headerBg: "#F3F4F6",
+      };
 
       const palette = {
         default: { fill: "#F3F4F6", border: "#E5E7EB", text: "#111827" },
@@ -2406,26 +4731,253 @@ app.get(
       };
       const getPal = (c = "default") => palette[c] || palette.default;
 
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(18)
-        .fillColor("#111827")
-        .text("Stocktaking", { align: "left" });
-      doc.moveDown(0.2);
-      doc
-        .font("Helvetica")
-        .fontSize(10)
-        .fillColor("#6B7280")
-        .text(`School: ${schoolName}`, { continued: true })
-        .text(`   •   Generated: ${new Date().toLocaleString()}`);
-      doc.moveDown(0.6);
+      const createdAt = new Date();
+      const teamMember = String(req.session.username || "—");
+      const preparedBy = teamMember;
 
-      const pageInnerWidth =
-        doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      function formatDateTime(date) {
+        try {
+          const d = date instanceof Date ? date : new Date(date);
+          if (Number.isNaN(d.getTime())) return String(date || "-");
+          return d.toLocaleString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        } catch {
+          return String(date || "-");
+        }
+      }
+
+      const logoPath = path.join(
+        __dirname,
+        "..",
+        "public",
+        "images",
+        "Logo horizontal.png",
+      );
+
+      // ===== Signature footer sizing (draw on every page) =====
+      const sigTitleH = 22;
+      const sigBoxesH = 120;
+      const sigBlockH = sigTitleH + 14 + 6 + sigBoxesH + 10;
+
+      const drawPageHeader = ({ compact = false } = {}) => {
+        const pageW = doc.page.width;
+        const mL = doc.page.margins.left;
+        const mR = doc.page.margins.right;
+        const mT = doc.page.margins.top;
+        const contentW = pageW - mL - mR;
+
+        const headerTop = mT;
+        const headerH = compact ? 42 : 56;
+
+        // Logo (top-right)
+        try {
+          const logoW = compact ? 140 : 170;
+          const logoX = pageW - mR - logoW;
+          const logoY = headerTop - 4;
+          doc.image(logoPath, logoX, logoY, { width: logoW });
+        } catch {
+          // ignore
+        }
+
+        // Title (left)
+        const titleX = mL;
+        const titleY = headerTop + (compact ? 2 : 6);
+        const titleW = contentW - (compact ? 150 : 180);
+
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica-Bold")
+          .fontSize(compact ? 16 : 20)
+          .text("Stocktaking", titleX, titleY, {
+            width: Math.max(120, titleW),
+            align: "left",
+          });
+
+        doc
+          .fillColor(COLORS.muted)
+          .font("Helvetica")
+          .fontSize(10)
+          .text(
+            compact
+              ? `School: ${schoolName || "-"}`
+              : `School: ${schoolName || "-"}   •   Generated: ${formatDateTime(createdAt)}`,
+            titleX,
+            titleY + (compact ? 18 : 24),
+            {
+              width: Math.max(120, titleW),
+              align: "left",
+            },
+          );
+
+        // Divider
+        const lineY = headerTop + headerH;
+        doc
+          .moveTo(mL, lineY)
+          .lineTo(pageW - mR, lineY)
+          .lineWidth(1)
+          .strokeColor(COLORS.border)
+          .stroke();
+
+        doc.y = lineY + 14;
+      };
+
+      const drawSignatureFooter = () => {
+        const prevY = doc.y;
+
+        const pageW = doc.page.width;
+        const pageH = doc.page.height;
+        const mL = doc.page.margins.left;
+        const mR = doc.page.margins.right;
+        const mB = doc.page.margins.bottom;
+        const contentW = pageW - mL - mR;
+
+        const bottomY = pageH - mB;
+        const startY = bottomY - sigBlockH;
+
+        const gap = 16;
+        const boxW = (contentW - gap) / 2;
+        const boxH = sigBoxesH;
+        const boxY = startY + 14 + 6;
+        const leftX = mL;
+        const rightX = mL + boxW + gap;
+
+        const drawSignatureBox = (title, x, y) => {
+          doc.roundedRect(x, y, boxW, boxH, 10).lineWidth(1).strokeColor(COLORS.border).stroke();
+          doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(10);
+          doc.text(title, x + 12, y + 10, { width: boxW - 24, align: "left" });
+
+          const lineStartX = x + 12;
+          const lineEndX = x + boxW - 12;
+
+          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9);
+
+          doc.text("Name", lineStartX, y + 34);
+          doc
+            .moveTo(lineStartX + 40, y + 45)
+            .lineTo(lineEndX, y + 45)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+
+          doc.text("Signature", lineStartX, y + 58);
+          doc
+            .moveTo(lineStartX + 55, y + 69)
+            .lineTo(lineEndX, y + 69)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+
+          doc.text("Date", lineStartX, y + 82);
+          doc
+            .moveTo(lineStartX + 30, y + 93)
+            .lineTo(lineStartX + 95, y + 93)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 102, y + 84);
+          doc
+            .moveTo(lineStartX + 110, y + 93)
+            .lineTo(lineStartX + 175, y + 93)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 182, y + 84);
+          doc
+            .moveTo(lineStartX + 190, y + 93)
+            .lineTo(lineEndX, y + 93)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+        };
+
+        doc.save();
+        doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(12);
+        doc.text("Handover confirmation", mL, startY, { width: contentW, align: "left" });
+
+        drawSignatureBox("Delivered to", leftX, boxY);
+        drawSignatureBox("Received from", rightX, boxY);
+
+        doc.restore();
+        doc.y = prevY;
+      };
+
+      const contentBottomY = () =>
+        doc.page.height - doc.page.margins.bottom - sigBlockH;
+
+      const ensureSpace = (needH, onNewPage) => {
+        const bottom = contentBottomY();
+        if (doc.y + needH > bottom) {
+          doc.addPage();
+          drawPageHeader({ compact: true });
+          drawSignatureFooter();
+          onNewPage?.();
+        }
+      };
+
+      // ===== Page 1 header + footer =====
+      drawPageHeader({ compact: false });
+      drawSignatureFooter();
+
+      // ===== Meta small table (page 1) =====
+      const pageW1 = doc.page.width;
+      const mL1 = doc.page.margins.left;
+      const mR1 = doc.page.margins.right;
+      const contentW1 = pageW1 - mL1 - mR1;
+
+      const metaX = mL1;
+      const metaY = doc.y;
+      const metaW = contentW1;
+      const metaRowH = 30;
+      const metaH = metaRowH; // one-row header table
+      const metaColW = metaW / 2;
+
+      // If the footer is very close (rare), start a new page.
+      ensureSpace(metaH + 20, () => {
+        // Page 2+ doesn't have the meta table; if we ever hit this, just continue.
+      });
+
+      doc
+        .roundedRect(metaX, metaY, metaW, metaH, 8)
+        .lineWidth(1)
+        .strokeColor(COLORS.border)
+        .stroke();
+
+      doc
+        .moveTo(metaX + metaColW, metaY)
+        .lineTo(metaX + metaColW, metaY + metaH)
+        .strokeColor(COLORS.border)
+        .stroke();
+
+      const drawMetaCell = (label, value, x, y, w) => {
+        const padX = 10;
+        doc
+          .fillColor(COLORS.muted)
+          .font("Helvetica")
+          .fontSize(9)
+          .text(label, x + padX, y + 6, { width: w - padX * 2, align: "left" });
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica-Bold")
+          .fontSize(11)
+          .text(value || "—", x + padX, y + 16, { width: w - padX * 2, align: "left" });
+      };
+
+      drawMetaCell("School", String(schoolName || "—"), metaX, metaY, metaColW);
+      drawMetaCell("Date", formatDateTime(createdAt), metaX + metaColW, metaY, metaColW);
+      doc.y = metaY + metaH + 18;
+
+      // ===== Grouped table layout =====
+      const pageInnerWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
       const gap = 10;
-      const colKitW = 120;
-      const colQtyW = 90;
-      const colNameW = pageInnerWidth - colKitW - colQtyW - gap * 2;
+      const colCodeW = 90;
+      const colInStockW = 80;
+      const colInvW = 90;
+      const colNameW = pageInnerWidth - colCodeW - colInStockW - colInvW - gap * 3;
 
       const drawGroupHeader = (gName, pal, count, cont = false) => {
         const y = doc.y + 2;
@@ -2438,7 +4990,7 @@ app.get(
           .lineWidth(1)
           .fillAndStroke();
         doc
-          .fillColor("#6B7280")
+          .fillColor(COLORS.muted)
           .font("Helvetica-Bold")
           .fontSize(10)
           .text("Tag", doc.page.margins.left + 10, y + 6);
@@ -2465,7 +5017,7 @@ app.get(
           .text(pillText, pillX + pillPadX, pillY + 3);
         const countTxt = `${count} items`;
         doc
-          .fillColor("#111827")
+          .fillColor(COLORS.text)
           .font("Helvetica-Bold")
           .text(countTxt, doc.page.margins.left, y + 5, {
             width: pageInnerWidth - 10,
@@ -2487,18 +5039,21 @@ app.get(
           .fillAndStroke();
         doc.fillColor(pal.text).font("Helvetica-Bold").fontSize(10);
 
-        doc.text("Component", doc.page.margins.left + 10, y + 5, {
-          width: colNameW,
+        const baseX = doc.page.margins.left + 10;
+        doc.text("ID Code", baseX, y + 5, { width: colCodeW });
+
+        const compX = baseX + colCodeW + gap;
+        doc.text("Component", compX, y + 5, { width: colNameW });
+
+        const midX = compX + colNameW + gap;
+        doc.text("In Stock", midX, y + 5, {
+          width: colInStockW - 10,
+          align: "right",
         });
-        doc.text(
-          "One Kit Quantity",
-          doc.page.margins.left + 10 + colNameW + gap,
-          y + 5,
-          { width: colKitW - 10, align: "right" },
-        );
-        const lastX = doc.page.margins.left + colNameW + gap + colKitW + gap;
-        doc.text("In Stock", lastX, y + 5, {
-          width: colQtyW - 10,
+
+        const lastX = midX + colInStockW + gap;
+        doc.text("Inventory", lastX, y + 5, {
+          width: colInvW - 10,
           align: "right",
         });
 
@@ -2506,60 +5061,64 @@ app.get(
         doc.moveDown(1.2);
       };
 
-      const ensureSpace = (needH, onNewPage) => {
-        const bottom = doc.page.height - doc.page.margins.bottom;
-        if (doc.y + needH > bottom) {
-          doc.addPage();
-          onNewPage?.();
-        }
-      };
-
-      const drawRow = (item, pal) => {
-        const y = doc.y;
+      const drawRow = (item, pal, onNewPage) => {
+        const codeText = item?.idCode ? String(item.idCode) : "-";
+        const codeHeight = doc.heightOfString(codeText, { width: colCodeW });
         const nameHeight = doc.heightOfString(item.name || "-", {
           width: colNameW,
         });
-        const rowH = Math.max(18, nameHeight);
-        ensureSpace(rowH + 8);
+        const rowH = Math.max(18, codeHeight, nameHeight);
 
-        doc.font("Helvetica").fontSize(11).fillColor("#111827");
-        doc.text(item.name || "-", doc.page.margins.left + 2, doc.y, {
-          width: colNameW,
-        });
+        // Make sure the whole row fits above the signature footer
+        ensureSpace(rowH + 8, onNewPage);
 
-        const text = String(Number(item.oneKitQuantity ?? 0));
-        const pillPadX = 8,
-          pillH = 16;
-        const pillW = Math.max(
-          32,
-          doc.widthOfString(text, { font: "Helvetica-Bold", size: 10 }) +
-            pillPadX * 2,
-        );
-        const pillX =
-          doc.page.margins.left + colNameW + gap + (colKitW - pillW - 10);
-        const pillY = y + (rowH - pillH) / 2;
-        doc
-          .roundedRect(pillX, pillY, pillW, pillH, 8)
-          .fillColor(pal.fill)
-          .strokeColor(pal.border)
-          .lineWidth(1)
-          .fillAndStroke();
-        doc
-          .fillColor(pal.text)
-          .font("Helvetica-Bold")
-          .fontSize(10)
-          .text(text, pillX + pillPadX, pillY + 3);
+        const y = doc.y;
 
-        const lastX = doc.page.margins.left + colNameW + gap + colKitW + gap;
+        doc.font("Helvetica").fontSize(11).fillColor(COLORS.text);
+        const baseX = doc.page.margins.left + 10;
+        doc.text(codeText, baseX, y, { width: colCodeW });
+
+        const compX = baseX + colCodeW + gap;
+        doc.text(item.name || "-", compX, y, { width: colNameW });
+
+        const midX = compX + colNameW + gap;
         doc
-          .fillColor("#111827")
+          .fillColor(COLORS.text)
           .font("Helvetica")
           .fontSize(11)
-          .text(String(Number(item.quantity ?? 0)), lastX, y, {
-            width: colQtyW - 10,
+          .text(String(Number(item.quantity ?? 0)), midX, y, {
+            width: colInStockW - 10,
             align: "right",
           });
 
+        const lastX = midX + colInStockW + gap;
+
+        // Inventory: if there is a value from the UI, print it; otherwise draw an underline.
+        const invHasValue = item.inventory !== null && typeof item.inventory !== "undefined";
+        if (invHasValue) {
+          const invNum = Number(item.inventory);
+          const stockNum = Number(item.quantity ?? 0);
+          const mismatch = Number.isFinite(invNum) && Number.isFinite(stockNum) && invNum !== stockNum;
+
+          doc
+            .fillColor(mismatch ? COLORS.danger : COLORS.text)
+            .font("Helvetica")
+            .fontSize(11)
+            .text(String(Number(item.inventory)), lastX, y, {
+              width: colInvW - 10,
+              align: "right",
+            });
+        } else {
+          const lineY = y + rowH - 2;
+          doc
+            .moveTo(lastX + 12, lineY)
+            .lineTo(lastX + colInvW - 18, lineY)
+            .strokeColor(COLORS.border)
+            .lineWidth(1)
+            .stroke();
+        }
+
+        // Row separator
         doc
           .moveTo(doc.page.margins.left, y + rowH + 4)
           .lineTo(doc.page.margins.left + pageInnerWidth, y + rowH + 4)
@@ -2581,11 +5140,10 @@ app.get(
 
         g.items.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
         for (const item of g.items) {
-          ensureSpace(40, () => {
+          drawRow(item, pal, () => {
             drawGroupHeader(g.name, pal, g.items.length, true);
             drawTableHead(pal);
           });
-          drawRow(item, pal);
         }
       }
 
@@ -2596,6 +5154,316 @@ app.get(
     }
   },
 );
+
+// ===== Stocktaking Excel download — requires Stocktaking =====
+// Supports BOTH GET (empty inventory) and POST (inventory values from UI)
+app.all(
+  "/api/stock/excel",
+  requireAuth,
+  requirePage("Stocktaking"),
+  async (req, res) => {
+    try {
+      const inventoryMapRaw = req?.body?.inventory;
+      const inventoryMap =
+        inventoryMapRaw && typeof inventoryMapRaw === "object" ? inventoryMapRaw : {};
+
+      const userResponse = await notion.databases.query({
+        database_id: teamMembersDatabaseId,
+        filter: { property: "Name", title: { equals: req.session.username } },
+      });
+      if (userResponse.results.length === 0)
+        return res.status(404).json({ error: "User not found." });
+
+      const user = userResponse.results[0];
+      const schoolProp = user.properties.School || {};
+      const schoolName =
+        schoolProp?.select?.name ||
+        (Array.isArray(schoolProp?.rich_text) &&
+          schoolProp.rich_text[0]?.plain_text) ||
+        (Array.isArray(schoolProp?.title) && schoolProp.title[0]?.plain_text) ||
+        null;
+
+      if (!schoolName)
+        return res
+          .status(404)
+          .json({ error: "Could not determine school name for the user." });
+
+      const productsNameToIdCode = await _getProductsNameToIdCodeMap();
+      const productsNameToUnityPrice = await _getProductsNameToUnityPriceMap();
+
+      const lookupIdCode = (componentName, fallbackProps) => {
+        const fromProducts = productsNameToIdCode.get(_normNameKey(componentName));
+        return fromProducts || _extractIdCodeFromProps(fallbackProps || {}) || "";
+      };
+
+      const lookupUnityPrice = (componentName) => {
+        const n = productsNameToUnityPrice.get(_normNameKey(componentName));
+        return typeof n === "number" && Number.isFinite(n) ? n : null;
+      };
+
+      const createdAt = new Date();
+      const formatDateTime = (date) => {
+        try {
+          const d = date instanceof Date ? date : new Date(date);
+          if (Number.isNaN(d.getTime())) return String(date || "-");
+          return d.toLocaleString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        } catch {
+          return String(date || "-");
+        }
+      };
+
+      const numberFrom = (prop) => {
+        if (!prop) return undefined;
+        if (typeof prop.number === "number") return prop.number;
+        if (prop.formula && typeof prop.formula.number === "number")
+          return prop.formula.number;
+        return undefined;
+      };
+      const firstDefinedNumber = (...props) => {
+        for (const p of props) {
+          const n = numberFrom(p);
+          if (typeof n === "number") return n;
+        }
+        return 0;
+      };
+
+      // Fetch stock rows
+      const allStock = [];
+      let hasMore = true;
+      let startCursor = undefined;
+      while (hasMore) {
+        const stockResponse = await notion.databases.query({
+          database_id: stocktakingDatabaseId,
+          start_cursor: startCursor,
+          sorts: [{ property: "Name", direction: "ascending" }],
+        });
+
+        const rows = (stockResponse.results || [])
+          .map((page) => {
+            const props = page.properties || {};
+            const componentName =
+              props.Name?.title?.[0]?.plain_text ||
+              props.Component?.title?.[0]?.plain_text ||
+              "Untitled";
+
+            const quantity = firstDefinedNumber(props[schoolName]);
+            const idCode = lookupIdCode(componentName, props);
+
+            // Inventory values come from the UI (POST body). If the key exists, allow 0.
+            let inventory = null;
+            if (inventoryMap && Object.prototype.hasOwnProperty.call(inventoryMap, page.id)) {
+              const n = Number(inventoryMap[page.id]);
+              if (Number.isFinite(n) && n >= 0) inventory = n;
+            }
+
+            let tagName = "Untagged";
+            if (props.Tag?.select?.name) tagName = props.Tag.select.name;
+            else if (Array.isArray(props.Tag?.multi_select) && props.Tag.multi_select[0]?.name)
+              tagName = props.Tag.multi_select[0].name;
+            else if (Array.isArray(props.Tags?.multi_select) && props.Tags.multi_select[0]?.name)
+              tagName = props.Tags.multi_select[0].name;
+
+            return {
+              id: page.id,
+              tag: tagName,
+              idCode: idCode || "",
+              component: componentName,
+              inStock: Number(quantity) || 0,
+              inventory,
+              unityPrice: lookupUnityPrice(componentName),
+            };
+          })
+          .filter(Boolean);
+
+        allStock.push(...rows);
+        hasMore = stockResponse.has_more;
+        startCursor = stockResponse.next_cursor;
+      }
+
+      const visibleRows = (allStock || []).filter((r) => Number(r.inStock) > 0);
+
+      const ExcelJS = require("exceljs");
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Operations Hub";
+      const ws = wb.addWorksheet("Stocktaking");
+
+      // ---- Meta small table (one row) ----
+      // Make the Date cell full-width by merging across the remaining columns.
+      ws.addRow([
+        "School",
+        String(schoolName || "—"),
+        "Date",
+        formatDateTime(createdAt),
+        "",
+        "",
+      ]);
+      ws.mergeCells("D1:F1");
+      const metaRow = ws.getRow(1);
+      metaRow.height = 20;
+      // Style meta cells A1:F1
+      for (const col of [1, 2, 3, 4, 5, 6]) {
+        const cell = metaRow.getCell(col);
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFDDDDDD" } },
+          left: { style: "thin", color: { argb: "FFDDDDDD" } },
+          bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
+          right: { style: "thin", color: { argb: "FFDDDDDD" } },
+        };
+        cell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+      }
+      // Label cells
+      [1, 3].forEach((col) => {
+        const c = metaRow.getCell(col);
+        c.font = { bold: true };
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFEFEF" } };
+      });
+      // Value cells
+      // Date value is the merged cell starting at D1.
+      [2, 4].forEach((col) => {
+        const c = metaRow.getCell(col);
+        c.font = { bold: true };
+      });
+
+      ws.addRow([]);
+
+      // ---- Data table ----
+      const header = ws.addRow(["Tag", "ID Code", "Component", "In Stock", "Inventory", "Unity Price"]);
+      header.font = { bold: true };
+      header.alignment = { vertical: "middle" };
+      header.eachCell((cell) => {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF7E8F1" }, // light pink-ish to match UI accents
+        };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFDDDDDD" } },
+          left: { style: "thin", color: { argb: "FFDDDDDD" } },
+          bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
+          right: { style: "thin", color: { argb: "FFDDDDDD" } },
+        };
+      });
+
+// Sort by Tag (ascending) and put "Untagged" at the end.
+// Also: insert a blank row between different tag groups (as requested).
+const groupsMap = new Map();
+(visibleRows || []).forEach((r) => {
+  const tagName = String(r.tag || "Untagged").trim() || "Untagged";
+  const key = _normNameKey(tagName);
+  if (!groupsMap.has(key)) groupsMap.set(key, { name: tagName, items: [] });
+  groupsMap.get(key).items.push(r);
+});
+
+let groups = Array.from(groupsMap.values()).sort((a, b) =>
+  String(a.name).localeCompare(String(b.name)),
+);
+const untaggedGroups = groups.filter(
+  (g) => _normNameKey(g.name) === "untagged" || String(g.name).trim() === "-",
+);
+groups = groups
+  .filter(
+    (g) =>
+      !(_normNameKey(g.name) === "untagged" || String(g.name).trim() === "-"),
+  )
+  .concat(untaggedGroups);
+
+groups.forEach((g, gi) => {
+  const items = (g.items || []).slice().sort((a, b) =>
+    String(a.component || "").localeCompare(String(b.component || "")),
+  );
+
+  for (const r of items) {
+    const row = ws.addRow([
+      r.tag || "Untagged",
+      r.idCode || "",
+      r.component || "",
+      Number(r.inStock) || 0,
+      r.inventory === null || typeof r.inventory === "undefined"
+        ? ""
+        : Number(r.inventory),
+      r.unityPrice === null || typeof r.unityPrice === "undefined"
+        ? ""
+        : Number(r.unityPrice),
+    ]);
+    row.getCell(4).numFmt = "0";
+    row.getCell(5).numFmt = "0";
+    // Currency format (GBP) for Unity Price
+    row.getCell(6).numFmt = "£#,##0.00";
+    row.eachCell((cell) => {
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFEEEEEE" } },
+        left: { style: "thin", color: { argb: "FFEEEEEE" } },
+        bottom: { style: "thin", color: { argb: "FFEEEEEE" } },
+        right: { style: "thin", color: { argb: "FFEEEEEE" } },
+      };
+      cell.alignment = { vertical: "middle", wrapText: true };
+    });
+
+    // If Inventory differs from In Stock, make the Inventory number red (Excel only)
+    const invCell = row.getCell(5);
+    const invVal = invCell.value;
+    const invNum = typeof invVal === "number" ? invVal : Number(invVal);
+    const stockNum = Number(r.inStock) || 0;
+    if (
+      invVal !== "" &&
+      invVal !== null &&
+      typeof invVal !== "undefined" &&
+      Number.isFinite(invNum) &&
+      Number.isFinite(stockNum) &&
+      invNum !== stockNum
+    ) {
+      invCell.font = { ...(invCell.font || {}), color: { argb: "FFDC2626" } };
+    }
+  }
+
+  // blank row between tag groups (except after last)
+  if (gi !== groups.length - 1) {
+    ws.addRow([]);
+  }
+});
+
+      ws.columns = [
+        { width: 18 }, // Tag
+        { width: 14 }, // ID Code
+        { width: 44 }, // Component
+        { width: 12 }, // In Stock
+        { width: 12 }, // Inventory
+        { width: 14 }, // Unity Price
+      ];
+
+      // Freeze the meta rows + header row
+      ws.views = [{ state: "frozen", ySplit: 3 }];
+
+      const safeSchool = String(schoolName || "school")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "_")
+        .slice(0, 60);
+      const fileName = `stocktaking_${safeSchool}.xlsx`;
+
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      );
+      res.setHeader("Cache-Control", "no-store");
+      res.send(Buffer.from(buf));
+    } catch (e) {
+      console.error("Stocktaking Excel generation error:", e.body || e);
+      res.status(500).json({ error: "Failed to export Excel" });
+    }
+  },
+);
+
 
 
 // Verify current password (used by Account page before saving)
@@ -3669,6 +6537,43 @@ async function detectSVSchoolsPropName() {
     "S.V Schools"
   );
 }
+
+// Team Members DB: return the list of Team Member page IDs that the current
+// logged-in user (S.V) is allowed to review.
+//
+// Requirement: In S.V schools orders page, each user should see ONLY the orders
+// created by the Team Members listed in their "S.V Schools" column (relation)
+// inside the Team Members database.
+async function getVisibleTeamMemberIdsForSV(req) {
+  if (!teamMembersDatabaseId) return [];
+  const username = req.session?.username;
+  if (!username) return [];
+
+  try {
+    const userQuery = await notion.databases.query({
+      database_id: teamMembersDatabaseId,
+      filter: { property: "Name", title: { equals: username } },
+      page_size: 1,
+    });
+
+    if (!userQuery.results.length) return [];
+    const userPage = userQuery.results[0];
+    const p = userPage.properties || {};
+
+    const svSchoolsKey =
+      pickPropName(p, ["S.V Schools", "SV Schools", "S V Schools", "S.V schools"]) ||
+      "S.V Schools";
+
+    const rel = Array.isArray(p?.[svSchoolsKey]?.relation)
+      ? p[svSchoolsKey].relation
+      : [];
+
+    return rel.map((x) => x?.id).filter(Boolean);
+  } catch (err) {
+    console.error("getVisibleTeamMemberIdsForSV error:", err?.body || err);
+    return [];
+  }
+}
 async function detectSVApprovalPropName() {
   const props = await getOrdersDBProps();
   return (
@@ -3681,6 +6586,23 @@ async function detectRequestedQtyPropName() {
   return (
     pickPropName(props, ["Quantity Requested","Requested Qty","Req"]) ||
     "Quantity Requested"
+  );
+}
+
+// Quantity edited by supervisor (stores the new qty without overwriting the requested qty)
+async function detectSupervisorEditedQtyPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "Quantity Edited by supervisor",
+      "Quantity Edited by Supervisor",
+      "Qty Edited by supervisor",
+      "Qty Edited by Supervisor",
+      "Supervisor Qty",
+      "Quantity Edited",
+      "Edited Quantity",
+    ]) ||
+    "Quantity Edited by supervisor"
   );
 }
 
@@ -3716,55 +6638,263 @@ app.post("/api/sv-orders/:id/quantity", requireAuth, requirePage("S.V schools or
     if (!pageId) return res.status(400).json({ error: "Missing id" });
     if (!Number.isFinite(value) || value < 0) return res.status(400).json({ error: "Invalid quantity" });
 
+    // Security: allow editing ONLY for orders created by members listed in
+    // the current user's "S.V Schools" column.
+    const visibleIds = await getVisibleTeamMemberIdsForSV(req);
+    if (!visibleIds.length) {
+      return res.status(403).json({ error: "Not allowed" });
+    }
+
+    try {
+      const teamsProp = await detectOrderTeamsMembersPropName();
+      const pg = await notion.pages.retrieve({ page_id: pageId });
+      const rel = Array.isArray(pg?.properties?.[teamsProp]?.relation)
+        ? pg.properties[teamsProp].relation
+        : [];
+      const ownerIds = rel.map((x) => x?.id).filter(Boolean);
+      const allowed = ownerIds.some((id) => visibleIds.includes(id));
+      if (!allowed) {
+        return res.status(403).json({ error: "Not allowed" });
+      }
+    } catch (secErr) {
+      console.error("SV quantity security check error:", secErr?.body || secErr);
+      // If the security check fails unexpectedly, fail closed.
+      return res.status(403).json({ error: "Not allowed" });
+    }
+
     const reqQtyProp = await detectRequestedQtyPropName();
-    await notion.pages.update({ page_id: pageId, properties: { [reqQtyProp]: { number: Math.floor(value) } } });
-    return res.json({ ok: true });
+    const editedQtyProp = await detectSupervisorEditedQtyPropName();
+
+    // Keep the original "Quantity Requested" intact and store edits in
+    // "Quantity Edited by supervisor".
+    const pg = await notion.pages.retrieve({ page_id: pageId });
+    const requested = Number(pg?.properties?.[reqQtyProp]?.number ?? 0);
+    const newVal = Math.max(0, Math.floor(value));
+    const editedVal = (Number.isFinite(requested) && newVal === requested) ? null : newVal;
+
+    await notion.pages.update({
+      page_id: pageId,
+      properties: {
+        [editedQtyProp]: { number: editedVal },
+      },
+    });
+    return res.json({ ok: true, value: newVal, cleared: editedVal === null });
   } catch (e) {
     console.error("POST /api/sv-orders/:id/quantity error:", e?.body || e);
     return res.status(500).json({ error: "Failed to update quantity" });
   }
 });
 
-// ====== API: list S.V orders with tabs (Not Started / Approved / Rejected) ======
+// ====== API: list S.V orders (optionally filtered by tab) ======
 app.get("/api/sv-orders", requireAuth, requirePage("S.V schools orders"), async (req, res) => {
   try {
     // Map ?tab to S.V Approval label
+    // - tab=not-started | approved | rejected → server-side filter
+    // - tab=all → returns all items (client can group/filter)
     const tab = String(req.query.tab || "").toLowerCase();
     let label = "Not Started";
-    if (tab === "approved") label = "Approved";
+    if (tab === "all") label = null;
+    else if (tab === "approved") label = "Approved";
     else if (tab === "rejected") label = "Rejected";
+    else if (tab === "not-started" || tab === "not started") label = "Not Started";
+    else if (!tab) label = "Not Started"; // backward compatible default
 
-    // Identify current Team Member (by session username)
-    const userQuery = await notion.databases.query({
-      database_id: teamMembersDatabaseId,
-      filter: { property: "Name", title: { equals: req.session.username } },
-    });
-    if (!userQuery.results.length) return res.status(404).json({ error: "User not found" });
-    const userId = userQuery.results[0].id;
+    // Identify which Team Members this S.V user can see (from Team Members DB)
+    const visibleIds = await getVisibleTeamMemberIdsForSV(req);
+    if (!visibleIds.length) {
+      // No supervised users → show empty list
+      res.set("Cache-Control", "no-store");
+      return res.json([]);
+    }
 
     // Resolve property names on Orders DB
     const reqQtyProp    = await detectRequestedQtyPropName();
+    const editedQtyProp = await detectSupervisorEditedQtyPropName();
     const approvalProp  = await detectSVApprovalPropName();
     const teamsProp     = await detectOrderTeamsMembersPropName();
-    let   svRelProp     = await detectSVSchoolsPropName();
-
     const ordersProps   = await getOrdersDBProps();
     const approvalType  = ordersProps[approvalProp]?.type || "select";
-    if (!ordersProps[svRelProp] || ordersProps[svRelProp].type !== "relation") {
-      svRelProp = null; // if relation missing in schema, ignore
+
+    // Order process status (for tracking progress UI)
+    // Supports either a Notion "status" property or a "select".
+    const statusProp =
+      pickPropName(ordersProps, [
+        "Status",
+        "Order Status",
+        "Preparation Status",
+        "Prepared Status",
+        "state",
+      ]) || "Status";
+
+    // ----- Notion "ID" (unique_id) helpers (same as /api/orders) -----
+    const getPropInsensitive = (props, name) => {
+      if (!props || !name) return null;
+      const target = String(name).trim().toLowerCase();
+      for (const [k, v] of Object.entries(props)) {
+        if (String(k).trim().toLowerCase() === target) return v;
+      }
+      return null;
+    };
+
+    const extractUniqueIdDetails = (prop) => {
+      try {
+        if (!prop) return { text: null, prefix: null, number: null };
+
+        // Native Notion "ID" property
+        if (prop.type === 'unique_id') {
+          const u = prop.unique_id;
+          if (!u || typeof u.number !== 'number') {
+            return { text: null, prefix: null, number: null };
+          }
+          const prefix = u.prefix ? String(u.prefix).trim() : '';
+          const number = u.number;
+          const text = prefix ? `${prefix}-${number}` : String(number);
+          return { text, prefix: prefix || null, number };
+        }
+
+        // Best-effort fallback (if "ID" is stored in another type)
+        let text = null;
+        if (prop.type === 'number' && typeof prop.number === 'number') text = String(prop.number);
+        if (prop.type === 'formula') {
+          if (prop.formula?.type === 'string') text = String(prop.formula.string || '').trim() || null;
+          if (prop.formula?.type === 'number' && typeof prop.formula.number === 'number') text = String(prop.formula.number);
+        }
+        if (prop.type === 'rich_text') {
+          text = (prop.rich_text || []).map((x) => x?.plain_text || '').join('').trim() || null;
+        }
+        if (prop.type === 'title') {
+          text = (prop.title || []).map((x) => x?.plain_text || '').join('').trim() || null;
+        }
+        if (!text) return { text: null, prefix: null, number: null };
+
+        // Try to parse prefix/number from a string like "ORD-95"
+        const m = String(text).trim().match(/^(.*?)(\d+)\s*$/);
+        const prefix = m ? String(m[1] || '').replace(/[-\s]+$/, '').trim() : '';
+        const number = m ? Number(m[2]) : null;
+        return {
+          text: String(text).trim(),
+          prefix: prefix || null,
+          number: Number.isFinite(number) ? number : null,
+        };
+      } catch {
+        return { text: null, prefix: null, number: null };
+      }
+    };
+
+    const getOrderUniqueIdDetails = (props) => {
+      const direct = getPropInsensitive(props, 'ID');
+      const d = extractUniqueIdDetails(direct);
+      if (d.text) return d;
+
+      // fallback: first unique_id property in the page
+      for (const v of Object.values(props || {})) {
+        if (v?.type === 'unique_id') {
+          const x = extractUniqueIdDetails(v);
+          if (x.text) return x;
+        }
+      }
+      return { text: null, prefix: null, number: null };
+    };
+
+    // ----- Product helpers (name, unit price, image) -----
+    const parseNumberProp = (prop) => {
+      if (!prop) return null;
+      try {
+        if (prop.type === "number") return prop.number ?? null;
+
+        if (prop.type === "formula") {
+          if (prop.formula?.type === "number") return prop.formula.number ?? null;
+          if (prop.formula?.type === "string") {
+            const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+            return Number.isFinite(n) ? n : null;
+          }
+        }
+
+        if (prop.type === "rollup") {
+          if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+
+          if (prop.rollup?.type === "array") {
+            const arr = prop.rollup.array || [];
+            for (const x of arr) {
+              if (x.type === "number" && typeof x.number === "number") return x.number;
+              if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+              if (x.type === "formula" && x.formula?.type === "string") {
+                const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                if (Number.isFinite(n)) return n;
+              }
+              if (x.type === "rich_text") {
+                const t = (x.rich_text || []).map(r => r.plain_text).join("").trim();
+                const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+                if (Number.isFinite(n)) return n;
+              }
+            }
+          }
+        }
+
+        if (prop.type === "rich_text") {
+          const t = (prop.rich_text || []).map(r => r.plain_text).join("").trim();
+          const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+          return Number.isFinite(n) ? n : null;
+        }
+      } catch {}
+      return null;
+    };
+
+    const productCache = new Map();
+    async function getProductInfo(productPageId) {
+      if (!productPageId) return { name: null, unitPrice: null, image: null };
+      if (productCache.has(productPageId)) return productCache.get(productPageId);
+
+      try {
+        const productPage = await notion.pages.retrieve({ page_id: productPageId });
+        const name =
+          productPage.properties?.Name?.title?.[0]?.plain_text || null;
+
+        const unitPrice =
+          parseNumberProp(productPage.properties?.["Unity Price"]) ??
+          parseNumberProp(productPage.properties?.["Unit price"]) ??
+          parseNumberProp(productPage.properties?.["Unit Price"]) ??
+          parseNumberProp(productPage.properties?.["Price"]) ??
+          null;
+
+        let image = null;
+        if (productPage.cover?.type === "external") image = productPage.cover.external.url;
+        if (productPage.cover?.type === "file") image = productPage.cover.file.url;
+        if (!image && productPage.icon?.type === "external") image = productPage.icon.external.url;
+        if (!image && productPage.icon?.type === "file") image = productPage.icon.file.url;
+
+        const info = { name, unitPrice, image };
+        productCache.set(productPageId, info);
+        return info;
+      } catch {
+        const info = { name: null, unitPrice: null, image: null };
+        productCache.set(productPageId, info);
+        return info;
+      }
     }
 
-    // Build Notion filter
-    const andFilter = [
-  { property: teamsProp, relation: { contains: userId } },
-];
+    // Resolve Team Member page title (creator name) once per id
+    const svTeamMemberNameCache = new Map();
+    async function getSVTeamMemberName(teamMemberPageId) {
+      if (!teamMemberPageId) return null;
+      if (svTeamMemberNameCache.has(teamMemberPageId)) return svTeamMemberNameCache.get(teamMemberPageId);
+      const name = (await pageTitleById(teamMemberPageId)) || null;
+      svTeamMemberNameCache.set(teamMemberPageId, name);
+      return name;
+    }
 
-if (svRelProp) {
-  andFilter.push({
-    property: svRelProp,
-    relation: { contains: userId }
-  });
-}
+    // Build Notion filter:
+    // Show ONLY orders created by users listed in current user's "S.V Schools" column.
+    const orOwners = visibleIds.map((id) => ({
+      property: teamsProp,
+      relation: { contains: id },
+    }));
+
+    const andFilter = [
+      orOwners.length === 1 ? orOwners[0] : { or: orOwners },
+    ];
+
+    // Only apply approval filter if a label is provided (tab !== all)
     if (label) {
       if (approvalType === "status") {
         andFilter.push({ property: approvalProp, status: { equals: label } });
@@ -3788,24 +6918,56 @@ if (svRelProp) {
       for (const page of resp.results) {
         const props = page.properties || {};
 
-        // Product name from relation if present
-        let productName = "Item";
+        // Notion Unique ID ("ID" property)
+        const uid = getOrderUniqueIdDetails(props);
+
+        // Product info from relation if present
+        let productName = props.Name?.title?.[0]?.plain_text || "Item";
+        let unitPrice = null;
+        let productImage = null;
+
         const productRel = props.Product?.relation;
-        if (Array.isArray(productRel) && productRel.length) {
-          try {
-            const productPage = await notion.pages.retrieve({ page_id: productRel[0].id });
-            productName = productPage.properties?.Name?.title?.[0]?.plain_text || productName;
-          } catch {}
-        } else {
-          productName = props.Name?.title?.[0]?.plain_text || productName;
+        const productPageId =
+          Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
+
+        if (productPageId) {
+          const prod = await getProductInfo(productPageId);
+          if (prod?.name) productName = prod.name;
+          unitPrice = typeof prod?.unitPrice === "number" ? prod.unitPrice : null;
+          productImage = prod?.image || null;
         }
+
+        const teamMemberId = Array.isArray(props?.[teamsProp]?.relation) && props[teamsProp].relation.length
+          ? props[teamsProp].relation[0].id
+          : null;
+
+        const approvalObj = props[approvalProp]?.select || props[approvalProp]?.status || null;
+        const approvalName = approvalObj?.name || "";
+        const approvalColor = approvalObj?.color || null;
+
+        const createdByName = await getSVTeamMemberName(teamMemberId);
+
+        const qtyRequested = Number(props[reqQtyProp]?.number || 0);
+        const qtyEditedRaw = props?.[editedQtyProp]?.number;
+        const qtyEdited = (typeof qtyEditedRaw === 'number' && Number.isFinite(qtyEditedRaw)) ? qtyEditedRaw : null;
 
         items.push({
           id: page.id,
+          // Who created this order item (Team Member relation)
+          teamMemberId,
+          createdByName,
+          orderId: uid.text,
+          orderIdPrefix: uid.prefix,
+          orderIdNumber: uid.number,
           reason: props.Reason?.title?.[0]?.plain_text || "",
           productName,
-          quantity: Number(props[reqQtyProp]?.number || 0),
-          approval: props[approvalProp]?.select?.name || props[approvalProp]?.status?.name || "",
+          productImage,
+          unitPrice,
+          quantity: qtyRequested,
+          quantityEdited: qtyEdited,
+          status: props[statusProp]?.select?.name || props[statusProp]?.status?.name || "",
+          approval: approvalName,
+          approvalColor,
           createdTime: page.created_time,
         });
       }
@@ -3837,6 +6999,30 @@ app.post(
 
       if (!pageId || !decision) {
         return res.status(400).json({ ok:false, error: "Invalid id or decision" });
+      }
+
+      // Security: allow approval ONLY for orders created by members listed in
+      // the current user's "S.V Schools" column.
+      const visibleIds = await getVisibleTeamMemberIdsForSV(req);
+      if (!visibleIds.length) {
+        return res.status(403).json({ ok:false, error: "Not allowed" });
+      }
+
+      try {
+        const teamsProp = await detectOrderTeamsMembersPropName();
+        const pg = await notion.pages.retrieve({ page_id: pageId });
+        const rel = Array.isArray(pg?.properties?.[teamsProp]?.relation)
+          ? pg.properties[teamsProp].relation
+          : [];
+        const ownerIds = rel.map((x) => x?.id).filter(Boolean);
+        const allowed = ownerIds.some((id) => visibleIds.includes(id));
+        if (!allowed) {
+          return res.status(403).json({ ok:false, error: "Not allowed" });
+        }
+      } catch (secErr) {
+        console.error("SV approval security check error:", secErr?.body || secErr);
+        // Fail closed
+        return res.status(403).json({ ok:false, error: "Not allowed" });
       }
 
       const approvalProp = await detectSVApprovalPropName();
