@@ -5,6 +5,10 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Current Orders</title>
+<!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+<style>
+  body.permissions-loading .sidebar li { display: none !important; }
+</style>
 <link href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" rel="stylesheet"/>
 <link href="/css/style.css" rel="stylesheet"/>
 <script src="https://unpkg.com/feather-icons"></script>
@@ -39,7 +43,7 @@
 <li>
 <a class="nav-link" href="/orders/requested">
 <i data-feather="users"></i>
-<span class="nav-label">Schools Requested Orders</span>
+<span class="nav-label">Operations Orders</span>
 </a>
 </li>
 <li>
@@ -140,13 +144,57 @@
 <main class="container-full-width">
 <section class="card" id="current-orders">
 <div class="co-cards" id="orders-list">
-<p><i class="loading-icon" data-feather="loader"></i> Loading orders...</p>
+  <div class="modern-loading" role="status" aria-live="polite">
+    <div class="modern-loading__spinner" aria-hidden="true"></div>
+    <div class="modern-loading__text">
+      Loading orders
+      <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span>
+    </div>
+  </div>
 </div>
 </section>
 </main>
 </div>
 </div>
-<!-- Order modal removed (cards now navigate to Tracking page) -->
+
+<!-- ===================== ORDER DETAILS MODAL ===================== -->
+<div id="coOrderModal" class="co-modal-overlay" aria-hidden="true">
+  <div class="co-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="coModalReason">
+    <button type="button" class="co-modal-close" id="coModalClose" aria-label="Close order details">
+      <i data-feather="x"></i>
+    </button>
+
+    <div class="co-modal-header">
+      <div class="co-modal-head-left">
+        <div class="co-modal-status" id="coModalStatusTitle">—</div>
+        <div class="co-modal-status-sub" id="coModalStatusSub">—</div>
+      </div>
+    </div>
+
+    <div class="co-track-pill" id="coTrackPill" role="img" aria-label="Order progress">
+      <div class="co-track-step" id="coStep1" title="Order Placed"><i data-feather="package"></i></div>
+      <div class="co-track-conn" id="coConn1"></div>
+      <div class="co-track-step" id="coStep2" title="Under Supervision"><i data-feather="eye"></i></div>
+      <div class="co-track-conn" id="coConn2"></div>
+      <div class="co-track-step" id="coStep3" title="In progress"><i data-feather="activity"></i></div>
+      <div class="co-track-conn" id="coConn3"></div>
+      <div class="co-track-step" id="coStep4" title="Shipped"><i data-feather="truck"></i></div>
+      <div class="co-track-conn" id="coConn4"></div>
+      <div class="co-track-step" id="coStep5" title="Arrived"><i data-feather="home"></i></div>
+    </div>
+
+    <div class="co-modal-body">
+      <div class="co-modal-meta">
+        <div class="co-meta-row"><span>Date</span><strong id="coModalDate">—</strong></div>
+        <div class="co-meta-row"><span>Components</span><strong id="coModalComponents">—</strong></div>
+        <div class="co-meta-row"><span>Total quantity</span><strong id="coModalTotalQty">—</strong></div>
+        <div class="co-meta-row"><span>Estimate total</span><strong id="coModalTotalPrice">—</strong></div>
+      </div>
+
+      <div class="co-modal-items" id="coModalItems"></div>
+    </div>
+  </div>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
 <script>feather.replace();</script>
 <script src="/js/common-ui.js"></script>

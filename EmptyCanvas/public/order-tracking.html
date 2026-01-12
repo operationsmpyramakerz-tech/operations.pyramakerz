@@ -1,15 +1,18 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
   <title>Order Tracking</title>
+  <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+  <style>
+    body.permissions-loading .sidebar li { display: none !important; }
+  </style>
   <link href="/css/style.css" rel="stylesheet" />
   <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
-<body class="permissions-loading">
+<body class="permissions-loading tracking-page">
   <script>
     (function() {
       try {
@@ -24,7 +27,7 @@
     <aside class="sidebar">
       <div class="sidebar-header">
         <h2>Dashboard</h2>
-        <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true">
+        <button aria-expanded="true" aria-label="Toggle sidebar" class="sidebar-toggle" id="sidebar-toggle">
           <i data-feather="chevrons-left"></i>
         </button>
       </div>
@@ -32,7 +35,7 @@
       <nav class="sidebar-nav">
         <ul class="nav-list">
           <li>
-            <a class="nav-link" href="/orders">
+            <a class="nav-link active" href="/orders">
               <i data-feather="list"></i>
               <span class="nav-label">Current Orders</span>
             </a>
@@ -61,7 +64,12 @@
               <span class="nav-label">Stocktaking</span>
             </a>
           </li>
-          <li><a class="nav-link" href="/logistics"><i data-feather="truck"></i><span class="nav-label">Logistics</span></a></li>
+          <li>
+            <a class="nav-link" href="/logistics">
+              <i data-feather="truck"></i>
+              <span class="nav-label">Logistics</span>
+            </a>
+          </li>
           <li>
             <a class="nav-link" href="/funds">
               <i data-feather="dollar-sign"></i>
@@ -108,7 +116,9 @@
       </nav>
 
       <div class="sidebar-footer">
-        <button id="logoutBtn" class="logout-btn"><i data-feather="log-out"></i> Logout</button>
+        <button class="logout-btn" id="logoutBtn">
+          <i data-feather="log-out"></i> Logout
+        </button>
       </div>
     </aside>
 
@@ -116,9 +126,9 @@
       <header class="main-header">
         <div class="header-row1">
           <div class="left">
-            <div class="greeting-pill" aria-live="polite">
+            <div aria-live="polite" class="greeting-pill">
               <span class="greeting-avatar">
-                <img src="/images/greeting-icon.png" alt="Hi icon" />
+                <img alt="Hi icon" src="/images/greeting-icon.png" />
               </span>
               <div class="greet-text">
                 <div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
@@ -128,8 +138,8 @@
           </div>
 
           <div class="right topbar-right">
-            <a class="account-mini" href="/account" title="My account" aria-label="My account">
-              <span class="ico-circle"><img src="/images/logo.png" alt="Logo" /></span>
+            <a aria-label="My account" class="account-mini" href="/account" title="My account">
+              <span class="ico-circle"><img alt="Logo" src="/images/logo.png" /></span>
               <span class="label">My account</span>
             </a>
           </div>
@@ -142,34 +152,41 @@
 
       <main class="container-full-width">
         <div class="tracking-shell">
-          <a class="tracking-back" href="/orders"><i data-feather="arrow-left"></i> Back to Orders</a>
+          <a class="tracking-back" href="/orders">
+            <i data-feather="arrow-left"></i>
+            Back to Orders
+          </a>
 
-          <section class="tracking-card" id="trackingCard">
-            <h2 class="tracking-title" id="trackingTitle">Loading...</h2>
-            <p class="tracking-sub" id="trackingSubtitle">Fetching tracking info...</p>
+          <div class="trk-card" id="trackingPanel">
+            <h2 class="trk-title" id="trkTitle">Loading...</h2>
+            <div class="trk-sub" id="trkSubtitle">Fetching tracking info…</div>
 
-            <div class="track-pill" id="trackPill" aria-label="Order progress">
-              <div class="track-fill" id="trackFill"></div>
-              <div class="track-node" data-step="1"><i data-feather="package"></i></div>
-              <div class="track-node" data-step="2"><i data-feather="truck"></i></div>
-              <div class="track-node" data-step="3"><i data-feather="home"></i></div>
+            <div class="trk-pill" aria-label="Tracking progress" role="img">
+              <div class="trk-step active" id="trkStep1" title="Order placed">
+                <i data-feather="package"></i>
+              </div>
+              <div class="trk-connector active" id="trkConn1"></div>
+              <div class="trk-step" id="trkStep2" title="On the way">
+                <i data-feather="truck"></i>
+              </div>
+              <div class="trk-connector" id="trkConn2"></div>
+              <div class="trk-step" id="trkStep3" title="Delivered">
+                <i data-feather="home"></i>
+              </div>
             </div>
 
-            <div class="tracking-eta">
-              <div class="tracking-eta__label">Estimated delivery time</div>
-              <div class="tracking-eta__time" id="trackingEta">-- : --</div>
-            </div>
-          </section>
+            <div class="trk-eta-label" id="trkEtaLabel">Estimated delivery time</div>
+            <div class="trk-eta" id="trkEta">--:--</div>
 
-          <section class="tracking-items" id="trackingItems">
-            <div class="tracking-items__head">
-              <h3>Items</h3>
-              <div class="tracking-items__meta" id="trackingMeta">—</div>
+            <div class="trk-details" id="trkDetails">
+              <div class="trk-detail-row"><span>Order reason</span><strong id="trkReason">—</strong></div>
+              <div class="trk-detail-row"><span>Items</span><strong id="trkItemsCount">—</strong></div>
+              <div class="trk-detail-row"><span>Total quantity</span><strong id="trkTotalQty">—</strong></div>
+              <div class="trk-detail-row"><span>Estimate total</span><strong id="trkEstimateTotal">—</strong></div>
             </div>
-            <div class="tracking-items__list" id="trackingItemsList">
-              <!-- filled by JS -->
-            </div>
-          </section>
+
+            <div class="trk-items" id="trkItems"></div>
+          </div>
         </div>
       </main>
     </div>

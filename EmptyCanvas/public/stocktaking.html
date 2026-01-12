@@ -5,6 +5,10 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Stocktaking - Dashboard</title>
+<!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+<style>
+  body.permissions-loading .sidebar li { display: none !important; }
+</style>
 <link href="/css/style.css" rel="stylesheet"/>
 <script src="https://unpkg.com/feather-icons"></script>
 </head>
@@ -133,11 +137,20 @@
 <i data-feather="download"></i>
 <span>Download PDF</span>
 </button>
+
+<button class="btn btn--light" id="downloadExcelBtn" style="margin-left:10px;">
+<i data-feather="download"></i>
+<span>Download Excel</span>
+</button>
 </div>
 <div class="groups-grid" id="stock-groups">
-<div class="loading-block">
-<i class="loading-icon" data-feather="loader"></i> Loading stock data...
-            </div>
+  <div class="modern-loading" role="status" aria-live="polite">
+    <div class="modern-loading__spinner" aria-hidden="true"></div>
+    <div class="modern-loading__text">
+      Loading stock data
+      <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span>
+    </div>
+  </div>
 </div>
 </section>
 </main>

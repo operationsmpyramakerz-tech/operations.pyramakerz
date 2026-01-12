@@ -4,6 +4,10 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>S.V schools orders</title>
+  <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+  <style>
+    body.permissions-loading .sidebar li { display: none !important; }
+  </style>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css"/>
   <link rel="stylesheet" href="/css/style.css"/>
   <script src="https://unpkg.com/feather-icons"></script>
@@ -150,29 +154,57 @@
              href="/orders/sv-orders?tab=rejected">Rejected</a>
         </div>
 
-        <!-- Panel (wrap list of grouped cards) -->
-        <section class="portfolio-panel">
-          <div id="sv-list"></div>
-        </section>
+        <!-- Orders list (Current Orders card style) -->
+<section class="card" id="sv-orders">
+  <div class="co-cards" id="sv-list">
+    <p><i class="loading-icon" data-feather="loader"></i> Loading orders...</p>
+  </div>
+</section>
       </main>
     </div>
   </div>
 
-  <!-- Edit quantity modal -->
-  <div class="modal" id="svQtyModal" aria-hidden="true">
-    <div class="modal-content" role="dialog" aria-modal="true">
-      <button id="svQtyClose" class="close-btn" aria-label="Close"><i data-feather="x"></i></button>
-      <h3 style="margin-bottom:.75rem;">Edit quantity</h3>
-      <div class="form-group">
-        <label for="svQtyInput">Quantity</label>
-        <input id="svQtyInput" type="number" min="0" step="1" inputmode="numeric" />
-      </div>
-      <div class="form-actions">
-        <button id="svQtyCancel" class="nav-link" style="padding:.6rem 1rem; border:1px solid #D1D5DB; border-radius:8px; background:#fff; color:#374151;">Cancel</button>
-        <button id="svQtySave" class="submit-btn">Save</button>
+  <!-- ===================== S.V ORDER DETAILS MODAL ===================== -->
+<div id="svOrderModal" class="co-modal-overlay" aria-hidden="true">
+  <div class="co-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="svModalTitle">
+    <button type="button" class="co-modal-close" id="svModalClose" aria-label="Close order details">
+      <i data-feather="x"></i>
+    </button>
+
+    <div class="co-modal-header">
+      <div class="co-modal-head-left">
+        <div class="co-modal-status" id="svModalTitle">—</div>
+        <div class="co-modal-status-sub" id="svModalSub">—</div>
       </div>
     </div>
+
+    <!-- Tracking progress (same UI as Current Orders) -->
+    <div class="co-track-pill" id="svTrackPill" role="img" aria-label="Order progress">
+      <div class="co-track-step" id="svStep1" title="Order Placed"><i data-feather="package"></i></div>
+      <div class="co-track-conn" id="svConn1"></div>
+      <div class="co-track-step" id="svStep2" title="Under Supervision"><i data-feather="eye"></i></div>
+      <div class="co-track-conn" id="svConn2"></div>
+      <div class="co-track-step" id="svStep3" title="In progress"><i data-feather="activity"></i></div>
+      <div class="co-track-conn" id="svConn3"></div>
+      <div class="co-track-step" id="svStep4" title="Shipped"><i data-feather="truck"></i></div>
+      <div class="co-track-conn" id="svConn4"></div>
+      <div class="co-track-step" id="svStep5" title="Arrived"><i data-feather="home"></i></div>
+    </div>
+
+    <div class="co-modal-body">
+      <div class="co-modal-meta">
+        <div class="co-meta-row"><span>Order ID</span><strong id="svModalOrderId">—</strong></div>
+        <div class="co-meta-row"><span>Date</span><strong id="svModalDate">—</strong></div>
+                <div class="co-meta-row"><span>S.V Approval status</span><strong id="svModalApproval">—</strong></div>
+        <div class="co-meta-row"><span>Components</span><strong id="svModalComponents">—</strong></div>
+        <div class="co-meta-row"><span>Total quantity</span><strong id="svModalTotalQty">—</strong></div>
+        <div class="co-meta-row"><span>Estimate total</span><strong id="svModalTotalPrice">—</strong></div>
+      </div>
+
+      <div class="co-modal-items" id="svModalItems"></div>
+    </div>
   </div>
+</div>
 
   <script>feather.replace();</script>
   <script src="/js/common-ui.js"></script>
