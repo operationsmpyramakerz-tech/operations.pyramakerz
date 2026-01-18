@@ -7,9 +7,10 @@ const hasSecret = !!process.env.SESSION_SECRET;
 const hasUrl = !!process.env.UPSTASH_REDIS_URL;
 
 let store = null;
+let redisClient = null;
 if (hasSecret && hasUrl) {
   try {
-    const redisClient = createClient({
+    redisClient = createClient({
       url: process.env.UPSTASH_REDIS_URL, // must be rediss://
       socket: { tls: true, keepAlive: 30000 },
     });
@@ -46,4 +47,4 @@ const sessionMiddleware = session({
   },
 });
 
-module.exports = { sessionMiddleware };
+module.exports = { sessionMiddleware, redisClient };

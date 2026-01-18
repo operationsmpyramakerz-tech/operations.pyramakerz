@@ -38,7 +38,7 @@ app.get("/health", (req, res) => {
 });
 
 // Sessions (Redis/Upstash) — added after /health
-const { sessionMiddleware } = require("./session-redis");
+const { sessionMiddleware, redisClient } = require("./session-redis");
 app.use(sessionMiddleware);
 // Small trace to debug redirect loop
 app.use((req, res, next) => {
@@ -53,6 +53,264 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// ----------------------------------------------------------------------------
+// Performance: Shared cache (Redis + in-memory) to reduce repeated Notion calls
+// ----------------------------------------------------------------------------
+// NOTE:
+// - Memory cache helps within a warm lambda instance.
+// - Redis cache (Upstash) helps across instances / reloads.
+// - All caching is best-effort (falls back gracefully if Redis is unavailable).
+
+const _CACHE_MEM = new Map();
+const _CACHE_INFLIGHT = new Map();
+
+function _now() {
+  return Date.now();
+}
+
+function _memGet(key) {
+  const hit = _CACHE_MEM.get(key);
+  if (!hit) return null;
+  if (hit.exp && hit.exp > _now()) return hit.val;
+  _CACHE_MEM.delete(key);
+  return null;
+}
+
+function _memSet(key, val, ttlSeconds) {
+  const exp = _now() + Math.max(1, Number(ttlSeconds) || 1) * 1000;
+  _CACHE_MEM.set(key, { val, exp });
+}
+
+async function _redisGet(key) {
+  try {
+    if (!redisClient || !redisClient.isReady) return null;
+    const raw = await redisClient.get(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    // Don't break the request path on cache issues.
+    console.warn("[cache] redis get failed", key, e?.message || e);
+    return null;
+  }
+}
+
+async function _redisSet(key, val, ttlSeconds) {
+  try {
+    if (!redisClient || !redisClient.isReady) return;
+    const ttl = Math.max(1, Number(ttlSeconds) || 1);
+    await redisClient.set(key, JSON.stringify(val), { EX: ttl });
+  } catch (e) {
+    console.warn("[cache] redis set failed", key, e?.message || e);
+  }
+}
+
+async function cacheGetOrSet(key, ttlSeconds, factoryFn) {
+  const mem = _memGet(key);
+  if (mem !== null && mem !== undefined) return mem;
+
+  // De-dupe concurrent identical calls (avoid stampede)
+  if (_CACHE_INFLIGHT.has(key)) return await _CACHE_INFLIGHT.get(key);
+
+  const p = (async () => {
+    const fromRedis = await _redisGet(key);
+    if (fromRedis !== null && fromRedis !== undefined) {
+      _memSet(key, fromRedis, ttlSeconds);
+      return fromRedis;
+    }
+
+    const fresh = await factoryFn();
+    _memSet(key, fresh, ttlSeconds);
+    await _redisSet(key, fresh, ttlSeconds);
+    return fresh;
+  })();
+
+  _CACHE_INFLIGHT.set(key, p);
+  try {
+    return await p;
+  } finally {
+    _CACHE_INFLIGHT.delete(key);
+  }
+}
+
+async function cacheDel(key) {
+  if (!key) return;
+  try {
+    _CACHE_MEM.delete(key);
+    _CACHE_INFLIGHT.delete(key);
+  } catch {}
+  try {
+    if (redisClient && redisClient.isReady) {
+      await redisClient.del(key);
+    }
+  } catch (e) {
+    // don't fail the request because cache eviction failed
+    console.warn("cacheDel failed:", e?.message || e);
+  }
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const arr = Array.from(items || []);
+  const out = new Map();
+  if (arr.length === 0) return out;
+
+  const concurrency = Math.max(1, Number(limit) || 1);
+  let idx = 0;
+
+  const workers = new Array(Math.min(concurrency, arr.length)).fill(0).map(async () => {
+    while (idx < arr.length) {
+      const i = idx++;
+      const key = arr[i];
+      try {
+        const val = await mapper(key);
+        out.set(key, val);
+      } catch (e) {
+        out.set(key, null);
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return out;
+}
+
+async function getSessionUserNotionId(req) {
+  const cached = req.session?.userNotionId;
+  if (cached && looksLikeNotionId(cached)) return cached;
+
+  const username = req.session?.username;
+  if (!username || !teamMembersDatabaseId) return null;
+
+  try {
+    const q = await notion.databases.query({
+      database_id: teamMembersDatabaseId,
+      page_size: 1,
+      filter: { property: "Name", title: { equals: username } },
+    });
+    const id = q?.results?.[0]?.id || null;
+    if (id) req.session.userNotionId = id;
+    return id;
+  } catch (e) {
+    console.error("Error fetching user Notion ID:", e?.body || e);
+    return null;
+  }
+}
+
+const _TEAM_MEMBER_NAME_TTL_SEC = 24 * 60 * 60; // 24h
+async function getTeamMemberNameCached(pageId) {
+  if (!pageId) return "";
+  const key = `cache:notion:teamMemberName:${pageId}:v1`;
+  return await cacheGetOrSet(key, _TEAM_MEMBER_NAME_TTL_SEC, async () => {
+    try {
+      const page = await notion.pages.retrieve({ page_id: pageId });
+      return page.properties?.Name?.title?.[0]?.plain_text || "";
+    } catch {
+      return "";
+    }
+  });
+}
+
+const _PRODUCT_INFO_TTL_SEC = 6 * 60 * 60; // 6h
+async function getProductInfoCached(productPageId) {
+  if (!productPageId) {
+    return { name: "Unknown Product", idCode: null, unitPrice: null, image: null, url: null };
+  }
+
+  const key = `cache:notion:productInfo:${productPageId}:v2`;
+  return await cacheGetOrSet(key, _PRODUCT_INFO_TTL_SEC, async () => {
+    try {
+      const productPage = await notion.pages.retrieve({ page_id: productPageId });
+      const props = productPage.properties || {};
+
+      const name =
+        _extractPropText(props?.Name) ||
+        _extractPropText(_propInsensitive(props, "Name")) ||
+        "Unknown Product";
+
+      const idCode = _extractIdCodeFromProps(props) || null;
+
+      const unitPrice =
+        _extractPropNumber(_propInsensitive(props, "Unity Price")) ??
+        _extractPropNumber(_propInsensitive(props, "Unit price")) ??
+        _extractPropNumber(_propInsensitive(props, "Unit Price")) ??
+        _extractPropNumber(_propInsensitive(props, "Price")) ??
+        null;
+
+      let image = null;
+      if (productPage.cover?.type === "external") image = productPage.cover.external.url;
+      if (productPage.cover?.type === "file") image = productPage.cover.file.url;
+      if (!image && productPage.icon?.type === "external") image = productPage.icon.external.url;
+      if (!image && productPage.icon?.type === "file") image = productPage.icon.file.url;
+
+      // Prefer an explicit URL property, fall back to the Notion page URL.
+      const urlProp =
+        _propInsensitive(props, "URL") ||
+        _propInsensitive(props, "Url") ||
+        _propInsensitive(props, "Link") ||
+        _propInsensitive(props, "Website") ||
+        _propInsensitive(props, "Product URL") ||
+        _propInsensitive(props, "Product Link");
+
+      let url = null;
+      try {
+        if (urlProp?.type === "url") url = urlProp.url || null;
+        if (!url && urlProp?.type === "rich_text") {
+          const t = (urlProp.rich_text || []).map((x) => x?.plain_text || "").join("").trim();
+          url = t || null;
+        }
+        if (!url && urlProp?.type === "title") {
+          const t = (urlProp.title || []).map((x) => x?.plain_text || "").join("").trim();
+          url = t || null;
+        }
+      } catch {}
+      if (!url) url = productPage.url || null;
+
+      return { name, idCode, unitPrice, image, url };
+    } catch {
+      return { name: "Unknown Product", idCode: null, unitPrice: null, image: null, url: null };
+    }
+  });
+}
+
+// Extract an optional profile photo URL from a Notion page properties object.
+function _firstNotionFileUrl(prop) {
+  const files = prop?.files;
+  if (!Array.isArray(files) || files.length === 0) return "";
+  const f = files[0];
+  if (f?.type === "external") return f.external?.url || "";
+  if (f?.type === "file") return f.file?.url || "";
+  return "";
+}
+
+function extractProfilePhotoUrlFromProps(props) {
+  const preferred = [
+    "Photo",
+    "Personal Photo",
+    "Avatar",
+    "Profile Photo",
+    "Profile",
+    "Image",
+  ];
+  for (const key of preferred) {
+    const prop = props?.[key];
+    if (prop?.type === "files") {
+      const url = _firstNotionFileUrl(prop);
+      if (url) return url;
+    }
+  }
+
+  // Fallback: scan any files properties that look like photo/avatar
+  try {
+    for (const [key, prop] of Object.entries(props || {})) {
+      if (prop?.type !== "files") continue;
+      if (!/photo|avatar|profile|image/i.test(key)) continue;
+      const url = _firstNotionFileUrl(prop);
+      if (url) return url;
+    }
+  } catch {}
+
+  return "";
+}
 
 // Helpers: Allowed pages control
 const ALL_PAGES = [
@@ -232,8 +490,13 @@ async function getCurrentUserRelationPage(req) {
   }
 }
 async function getOrdersDBProps() {
-  const db = await notion.databases.retrieve({ database_id: ordersDatabaseId });
-  return db.properties || {};
+  if (!ordersDatabaseId) return {};
+  // DB schema doesn't change often; cache it to avoid repeated Notion calls.
+  const key = `cache:notion:dbProps:${normalizeNotionId(ordersDatabaseId)}:v1`;
+  return await cacheGetOrSet(key, 10 * 60, async () => {
+    const db = await notion.databases.retrieve({ database_id: ordersDatabaseId });
+    return db.properties || {};
+  });
 }
 
 // Expenses DB props helper
@@ -241,8 +504,11 @@ async function getExpensesDBProps() {
   const dbId = expensesDatabaseId || process.env.Expenses_Database;
   if (!dbId) return {};
   try {
-    const db = await notion.databases.retrieve({ database_id: dbId });
-    return db.properties || {};
+    const key = `cache:notion:dbProps:${normalizeNotionId(dbId)}:v1`;
+    return await cacheGetOrSet(key, 10 * 60, async () => {
+      const db = await notion.databases.retrieve({ database_id: dbId });
+      return db.properties || {};
+    });
   } catch (err) {
     console.error("Expenses DB props retrieve error:", err?.body || err);
     return {};
@@ -543,8 +809,29 @@ app.post("/api/login", async (req, res) => {
       req.session.authenticated = true;
       req.session.username = username;
       req.session.allowedPages = allowedNormalized;
+      // Cache user Notion page ID in session to avoid re-querying Team Members DB
+      req.session.userNotionId = user.id;
 
       const allowedUI = expandAllowedForUI(allowedNormalized);
+
+      // Cache account payload in session (used by /api/account on every page load)
+      // TTL is enforced inside /api/account.
+      try {
+        const p = user.properties || {};
+        req.session.accountCache = {
+          name: p?.Name?.title?.[0]?.plain_text || "",
+          username,
+          department: p?.Department?.select?.name || "",
+          position: p?.Position?.select?.name || "",
+          photoUrl: extractProfilePhotoUrlFromProps(p) || "",
+          phone: p?.Phone?.phone_number || "",
+          email: p?.Email?.email || "",
+          employeeCode: p?.["Employee Code"]?.number ?? null,
+          passwordSet: (p?.Password?.number ?? null) !== null,
+          allowedPages: allowedUI,
+        };
+        req.session.accountCacheTs = Date.now();
+      } catch {}
 
       req.session.save((err) => {
         if (err)
@@ -597,58 +884,25 @@ app.get("/api/account", requireAuth, async (req, res) => {
       .status(500)
       .json({ error: "Team_Members database ID is not configured." });
   }
+
+  // This endpoint is called on every page load (common-ui.js).
+  // Use a short session cache to avoid hitting Notion repeatedly.
+  res.set("Cache-Control", "no-store");
+  const ACCOUNT_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
   try {
-    const response = await notion.databases.query({
-      database_id: teamMembersDatabaseId,
-      filter: { property: "Name", title: { equals: req.session.username } },
-    });
-
-    if (response.results.length === 0) {
-      return res.status(404).json({ error: "User not found." });
+    const cached = req.session?.accountCache;
+    const ts = Number(req.session?.accountCacheTs || 0);
+    if (cached && ts && Date.now() - ts < ACCOUNT_CACHE_TTL_MS) {
+      return res.json(cached);
     }
+  } catch {}
 
-    const user = response.results[0];
-    const p = user.properties;
+  try {
+    const userId = await getSessionUserNotionId(req);
+    if (!userId) return res.status(404).json({ error: "User not found." });
 
-    // Try to extract an optional profile photo URL from Notion (files property).
-    // Supported property names (if they exist in your Team_Members DB):
-    // Photo / Personal Photo / Avatar / Profile Photo / Image
-    function firstFileUrl(prop){
-      const files = prop?.files;
-      if (!Array.isArray(files) || files.length === 0) return "";
-      const f = files[0];
-      if (f?.type === "external") return f.external?.url || "";
-      if (f?.type === "file") return f.file?.url || "";
-      return "";
-    }
-
-    function extractProfilePhotoUrl(props){
-      const preferred = [
-        "Photo",
-        "Personal Photo",
-        "Avatar",
-        "Profile Photo",
-        "Profile",
-        "Image",
-      ];
-      for (const key of preferred) {
-        const prop = props?.[key];
-        if (prop?.type === "files") {
-          const url = firstFileUrl(prop);
-          if (url) return url;
-        }
-      }
-      // Fallback: scan any files properties that look like photo/avatar
-      try {
-        for (const [key, prop] of Object.entries(props || {})) {
-          if (prop?.type !== "files") continue;
-          if (!/photo|avatar|profile|image/i.test(key)) continue;
-          const url = firstFileUrl(prop);
-          if (url) return url;
-        }
-      } catch {}
-      return "";
-    }
+    const userPage = await notion.pages.retrieve({ page_id: userId });
+    const p = userPage.properties || {};
 
     const freshAllowed = extractAllowedPages(p);
     req.session.allowedPages = freshAllowed;
@@ -659,7 +913,7 @@ app.get("/api/account", requireAuth, async (req, res) => {
       username: req.session.username || "",
       department: p?.Department?.select?.name || "",
       position: p?.Position?.select?.name || "",
-      photoUrl: extractProfilePhotoUrl(p) || "",
+      photoUrl: extractProfilePhotoUrlFromProps(p) || "",
       phone: p?.Phone?.phone_number || "",
       email: p?.Email?.email || "",
       employeeCode: p?.["Employee Code"]?.number ?? null,
@@ -667,7 +921,12 @@ app.get("/api/account", requireAuth, async (req, res) => {
       allowedPages: allowedUI,
     };
 
-    res.set("Cache-Control", "no-store");
+    // Update session cache
+    try {
+      req.session.accountCache = data;
+      req.session.accountCacheTs = Date.now();
+    } catch {}
+
     res.json(data);
   } catch (error) {
     console.error("Error fetching account from Notion:", error.body || error);
@@ -735,337 +994,193 @@ app.get(
 
     res.set("Cache-Control", "no-store");
 
+    // Keep recentOrders trimmed (used to show a just-created order before Notion catches up)
+    const RECENT_TTL_MS = 10 * 60 * 1000;
+    let recent = Array.isArray(req.session.recentOrders)
+      ? req.session.recentOrders
+      : [];
+    recent = recent.filter(
+      (r) => Date.now() - new Date(r.createdTime).getTime() < RECENT_TTL_MS,
+    );
+    req.session.recentOrders = recent;
+
     try {
-      const userQuery = await notion.databases.query({
-        database_id: teamMembersDatabaseId,
-        filter: { property: "Name", title: { equals: req.session.username } },
-      });
-      if (userQuery.results.length === 0) {
-        return res.status(404).json({ error: "User not found." });
-      }
-      const userId = userQuery.results[0].id;
+      const userId = await getSessionUserNotionId(req);
+      if (!userId) return res.status(404).json({ error: "User not found." });
 
-      const allOrders = [];
-      let hasMore = true;
-      let startCursor = undefined;
+      // Cache the Notion-derived list briefly to make reloads fast and reduce Notion load.
+      const listCacheKey = `cache:api:orders:list:${userId}:v2`;
+      const allOrders = await cacheGetOrSet(listCacheKey, 60, async () => {
+        const rows = [];
+        let hasMore = true;
+        let startCursor = undefined;
 
-      // ----- Notion "ID" (unique_id) helpers -----
-      // We support different property names by:
-      // 1) trying a property named "ID" (case-insensitive)
-      // 2) falling back to the first property of type "unique_id"
-      const getPropInsensitive = (props, name) => {
-        if (!props || !name) return null;
-        const target = String(name).trim().toLowerCase();
-        for (const [k, v] of Object.entries(props)) {
-          if (String(k).trim().toLowerCase() === target) return v;
-        }
-        return null;
-      };
+        // ----- Notion "ID" (unique_id) helpers -----
+        // We support different property names by:
+        // 1) trying a property named "ID" (case-insensitive)
+        // 2) falling back to the first property of type "unique_id"
+        const getPropInsensitive = (props, name) => {
+          if (!props || !name) return null;
+          const target = String(name).trim().toLowerCase();
+          for (const [k, v] of Object.entries(props)) {
+            if (String(k).trim().toLowerCase() === target) return v;
+          }
+          return null;
+        };
 
-      const extractUniqueIdDetails = (prop) => {
-        try {
-          if (!prop) return { text: null, prefix: null, number: null };
+        const extractUniqueIdDetails = (prop) => {
+          try {
+            if (!prop) return { text: null, prefix: null, number: null };
 
-          // Native Notion "ID" property
-          if (prop.type === 'unique_id') {
-            const u = prop.unique_id;
-            if (!u || typeof u.number !== 'number') {
-              return { text: null, prefix: null, number: null };
+            // Native Notion "ID" property
+            if (prop.type === "unique_id") {
+              const u = prop.unique_id;
+              if (!u || typeof u.number !== "number") {
+                return { text: null, prefix: null, number: null };
+              }
+              const prefix = u.prefix ? String(u.prefix).trim() : "";
+              const number = u.number;
+              const text = prefix ? `${prefix}-${number}` : String(number);
+              return { text, prefix: prefix || null, number };
             }
-            const prefix = u.prefix ? String(u.prefix).trim() : '';
-            const number = u.number;
-            const text = prefix ? `${prefix}-${number}` : String(number);
-            return { text, prefix: prefix || null, number };
-          }
 
-          // Best-effort fallback (if "ID" is stored in another type)
-          let text = null;
-          if (prop.type === 'number' && typeof prop.number === 'number') text = String(prop.number);
-          if (prop.type === 'formula') {
-            if (prop.formula?.type === 'string') text = String(prop.formula.string || '').trim() || null;
-            if (prop.formula?.type === 'number' && typeof prop.formula.number === 'number') text = String(prop.formula.number);
-          }
-          if (prop.type === 'rich_text') {
-            text = (prop.rich_text || []).map((x) => x?.plain_text || '').join('').trim() || null;
-          }
-          if (prop.type === 'title') {
-            text = (prop.title || []).map((x) => x?.plain_text || '').join('').trim() || null;
-          }
-          if (!text) return { text: null, prefix: null, number: null };
+            // Best-effort fallback (if "ID" is stored in another type)
+            let text = null;
+            if (prop.type === "number" && typeof prop.number === "number") text = String(prop.number);
+            if (prop.type === "formula") {
+              if (prop.formula?.type === "string") text = String(prop.formula.string || "").trim() || null;
+              if (prop.formula?.type === "number" && typeof prop.formula.number === "number") text = String(prop.formula.number);
+            }
+            if (prop.type === "rich_text") {
+              text = (prop.rich_text || []).map((x) => x?.plain_text || "").join("").trim() || null;
+            }
+            if (prop.type === "title") {
+              text = (prop.title || []).map((x) => x?.plain_text || "").join("").trim() || null;
+            }
+            if (!text) return { text: null, prefix: null, number: null };
 
-          // Try to parse prefix/number from a string like "ORD-95"
-          const m = String(text).trim().match(/^(.*?)(\d+)\s*$/);
-          const prefix = m ? String(m[1] || '').replace(/[-\s]+$/, '').trim() : '';
-          const number = m ? Number(m[2]) : null;
-          return {
-            text: String(text).trim(),
-            prefix: prefix || null,
-            number: Number.isFinite(number) ? number : null,
-          };
-        } catch {
+            // Try to parse prefix/number from a string like "ORD-95"
+            const m = String(text).trim().match(/^(.*?)(\d+)\s*$/);
+            const prefix = m ? String(m[1] || "").replace(/[-\s]+$/, "").trim() : "";
+            const number = m ? Number(m[2]) : null;
+            return {
+              text: String(text).trim(),
+              prefix: prefix || null,
+              number: Number.isFinite(number) ? number : null,
+            };
+          } catch {
+            return { text: null, prefix: null, number: null };
+          }
+        };
+
+        const getOrderUniqueIdDetails = (props) => {
+          const direct = getPropInsensitive(props, "ID");
+          const d = extractUniqueIdDetails(direct);
+          if (d.text) return d;
+
+          // fallback: first unique_id property in the page
+          for (const v of Object.values(props || {})) {
+            if (v?.type === "unique_id") {
+              const x = extractUniqueIdDetails(v);
+              if (x.text) return x;
+            }
+          }
           return { text: null, prefix: null, number: null };
-        }
-      };
+        };
 
-      const getOrderUniqueIdDetails = (props) => {
-        const direct = getPropInsensitive(props, 'ID');
-        const d = extractUniqueIdDetails(direct);
-        if (d.text) return d;
+        const receivedProp = await (async () => {
+          const props = await getOrdersDBProps();
+          if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+          return await detectReceivedQtyPropName();
+        })();
 
-        // fallback: first unique_id property in the page
-        for (const v of Object.values(props || {})) {
-          if (v?.type === 'unique_id') {
-            const x = extractUniqueIdDetails(v);
-            if (x.text) return x;
-          }
-        }
-        return { text: null, prefix: null, number: null };
-      };
+        const productIds = new Set();
+        const memberIds = new Set();
 
-      // ----- Helper: Team member names (Created By) -----
-      const nameCache = new Map();
-      async function memberName(id) {
-        if (!id) return "";
-        if (nameCache.has(id)) return nameCache.get(id);
-        try {
-          const page = await notion.pages.retrieve({ page_id: id });
-          const nm = page.properties?.Name?.title?.[0]?.plain_text || "";
-          nameCache.set(id, nm);
-          return nm;
-        } catch {
-          return "";
-        }
-      }
-
-      // ----- Helper: extract a URL from a Notion property (url + rich_text/title fallbacks) -----
-      const extractFirstFileUrl = (prop) => {
-        try {
-          if (!prop) return null;
-          if (prop.type === "files") {
-            const f = prop.files?.[0];
-            if (!f) return null;
-            if (f.type === "file") return f.file?.url || null;
-            if (f.type === "external") return f.external?.url || null;
-            return null;
-          }
-          if (prop.type === "url") return prop.url || null;
-          return null;
-        } catch {
-          return null;
-        }
-      };
-
-      const extractUrl = (prop) => {
-        try {
-          if (!prop) return null;
-          if (prop.type === "url") return prop.url || null;
-
-          const tryText = (text) => {
-            const s = String(text || "").trim();
-            if (!s) return null;
-            if (/^https?:\/\//i.test(s)) return s;
-            return null;
-          };
-
-          if (prop.type === "rich_text") {
-            for (const rt of prop.rich_text || []) {
-              const href = rt?.href;
-              if (href) return String(href);
-              const t = tryText(rt?.plain_text);
-              if (t) return t;
-            }
-            return null;
-          }
-
-          if (prop.type === "title") {
-            for (const t of prop.title || []) {
-              const href = t?.href;
-              if (href) return String(href);
-              const x = tryText(t?.plain_text);
-              if (x) return x;
-            }
-            return null;
-          }
-
-          return extractFirstFileUrl(prop);
-        } catch {
-          return null;
-        }
-      };
-
-      const receivedProp = (await (async () => {
-        const props = await getOrdersDBProps();
-        if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
-        return await detectReceivedQtyPropName();
-      })());
-
-      while (hasMore) {
-        const response = await notion.databases.query({
-          database_id: ordersDatabaseId,
-          start_cursor: startCursor,
-          filter: { property: "Teams Members", relation: { contains: userId } },
-          sorts: [{ timestamp: "created_time", direction: "descending" }],
-        });
-
-        for (const page of response.results) {
-                    const productRelation = page.properties.Product?.relation;
-          let productName = "Unknown Product";
-          let unitPrice = null;
-          let productImage = null;
-          let productUrl = null;
-
-          // Helper to safely extract numbers from Notion props (number / formula / rollup / rich_text)
-          const parseNumberProp = (prop) => {
-            if (!prop) return null;
-            try {
-              if (prop.type === "number") return prop.number ?? null;
-
-              if (prop.type === "formula") {
-                if (prop.formula?.type === "number") return prop.formula.number ?? null;
-                if (prop.formula?.type === "string") {
-                  const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
-                  return Number.isFinite(n) ? n : null;
-                }
-              }
-
-              if (prop.type === "rollup") {
-                if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
-
-                if (prop.rollup?.type === "array") {
-                  const arr = prop.rollup.array || [];
-                  for (const x of arr) {
-                    if (x.type === "number" && typeof x.number === "number") return x.number;
-                    if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
-                    if (x.type === "formula" && x.formula?.type === "string") {
-                      const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
-                      if (Number.isFinite(n)) return n;
-                    }
-                    if (x.type === "rich_text") {
-                      const t = (x.rich_text || []).map(r => r.plain_text).join("").trim();
-                      const n = parseFloat(t.replace(/[^0-9.]/g, ""));
-                      if (Number.isFinite(n)) return n;
-                    }
-                  }
-                }
-              }
-
-              if (prop.type === "rich_text") {
-                const t = (prop.rich_text || []).map(r => r.plain_text).join("").trim();
-                const n = parseFloat(t.replace(/[^0-9.]/g, ""));
-                return Number.isFinite(n) ? n : null;
-              }
-            } catch {}
-            return null;
-          };
-
-          if (productRelation && productRelation.length > 0) {
-            try {
-              const productPage = await notion.pages.retrieve({
-                page_id: productRelation[0].id,
-              });
-
-              productName =
-                productPage.properties?.Name?.title?.[0]?.plain_text ||
-                "Unknown Product";
-
-              // Price in Products_Database is a Number named "Unity Price"
-              unitPrice =
-                parseNumberProp(productPage.properties?.["Unity Price"]) ??
-                parseNumberProp(productPage.properties?.["Unit price"]) ??
-                parseNumberProp(productPage.properties?.["Unit Price"]) ??
-                parseNumberProp(productPage.properties?.["Price"]) ??
-                null;
-
-              // Use Notion cover/icon as a lightweight product image if present
-              if (productPage.cover?.type === "external") productImage = productPage.cover.external.url;
-              if (productPage.cover?.type === "file") productImage = productPage.cover.file.url;
-              if (!productImage && productPage.icon?.type === "external") productImage = productPage.icon.external.url;
-              if (!productImage && productPage.icon?.type === "file") productImage = productPage.icon.file.url;
-
-              // Product URL (if exists)
-              const urlProp =
-                getPropInsensitive(productPage.properties, "URL") ||
-                getPropInsensitive(productPage.properties, "Link") ||
-                getPropInsensitive(productPage.properties, "Website") ||
-                getPropInsensitive(productPage.properties, "Product URL") ||
-                getPropInsensitive(productPage.properties, "Product Link");
-              productUrl = extractUrl(urlProp);
-            } catch (e) {
-              console.error(
-                "Could not retrieve related product page:",
-                e.body || e.message,
-              );
-            }
-          }
-
-          const uid = getOrderUniqueIdDetails(page.properties || {});
-
-          // Created by (Teams Members relation)
-          let createdById = "";
-          let createdByName = "";
-          const teamRel = page.properties?.["Teams Members"]?.relation;
-          if (Array.isArray(teamRel) && teamRel.length) {
-            createdById = teamRel[0].id;
-            createdByName = await memberName(createdById);
-          }
-
-          // Status + color (select/status)
-          const statusProp = page.properties?.["Status"];
-          const statusName =
-            statusProp?.select?.name || statusProp?.status?.name || "Pending";
-          const statusColor =
-            statusProp?.select?.color || statusProp?.status?.color || "default";
-
-          const qtyRequested = page.properties?.["Quantity Requested"]?.number || 0;
-          const qtyReceived =
-            receivedProp && page.properties?.[receivedProp]
-              ? page.properties?.[receivedProp]?.number
-              : null;
-          const qtyForUI =
-            qtyReceived !== null && qtyReceived !== undefined && Number.isFinite(Number(qtyReceived))
-              ? Number(qtyReceived)
-              : Number(qtyRequested) || 0;
-
-          allOrders.push({
-            id: page.id,
-            // Human-readable order identifier from Notion "ID" (unique_id)
-            orderId: uid.text,
-            orderIdPrefix: uid.prefix,
-            orderIdNumber: uid.number,
-            reason:
-              page.properties?.Reason?.title?.[0]?.plain_text || "No Reason",
-            productName,
-            productImage,
-            productUrl,
-            unitPrice,
-            quantity: qtyForUI,
-            status: statusName,
-            statusColor,
-            createdById,
-            createdByName,
-            createdTime: page.created_time,
+        while (hasMore) {
+          const response = await notion.databases.query({
+            database_id: ordersDatabaseId,
+            start_cursor: startCursor,
+            page_size: 100,
+            filter: { property: "Teams Members", relation: { contains: userId } },
+            sorts: [{ timestamp: "created_time", direction: "descending" }],
           });
+
+          for (const page of response.results || []) {
+            const props = page.properties || {};
+            const uid = getOrderUniqueIdDetails(props);
+
+            const productPageId = props?.Product?.relation?.[0]?.id || null;
+            if (productPageId) productIds.add(productPageId);
+
+            const createdById = props?.["Teams Members"]?.relation?.[0]?.id || "";
+            if (createdById) memberIds.add(createdById);
+
+            const statusProp = props?.["Status"];
+            const statusName = statusProp?.select?.name || statusProp?.status?.name || "Pending";
+            const statusColor = statusProp?.select?.color || statusProp?.status?.color || "default";
+
+            const qtyRequested = props?.["Quantity Requested"]?.number || 0;
+            const qtyReceived =
+              receivedProp && props?.[receivedProp]
+                ? props?.[receivedProp]?.number
+                : null;
+            const qtyForUI =
+              qtyReceived !== null && qtyReceived !== undefined && Number.isFinite(Number(qtyReceived))
+                ? Number(qtyReceived)
+                : Number(qtyRequested) || 0;
+
+            rows.push({
+              id: page.id,
+              orderId: uid.text,
+              orderIdPrefix: uid.prefix,
+              orderIdNumber: uid.number,
+              reason: props?.Reason?.title?.[0]?.plain_text || "No Reason",
+              productPageId,
+              quantity: qtyForUI,
+              status: statusName,
+              statusColor,
+              createdById,
+              createdTime: page.created_time,
+            });
+          }
+
+          hasMore = response.has_more;
+          startCursor = response.next_cursor;
         }
 
-        hasMore = response.has_more;
-        startCursor = response.next_cursor;
-      }
+        const [productMap, memberMap] = await Promise.all([
+          mapWithConcurrency(productIds, 3, getProductInfoCached),
+          mapWithConcurrency(memberIds, 3, getTeamMemberNameCached),
+        ]);
 
-      const TTL_MS = 10 * 60 * 1000;
-      let recent = Array.isArray(req.session.recentOrders)
-        ? req.session.recentOrders
-        : [];
-      recent = recent.filter(
-        (r) => Date.now() - new Date(r.createdTime).getTime() < TTL_MS,
-      );
+        return rows.map((r) => {
+          const p = r.productPageId ? productMap.get(r.productPageId) : null;
+          return {
+            id: r.id,
+            orderId: r.orderId,
+            orderIdPrefix: r.orderIdPrefix,
+            orderIdNumber: r.orderIdNumber,
+            reason: r.reason,
+            productName: p?.name || "Unknown Product",
+            productImage: p?.image || null,
+            productUrl: p?.url || null,
+            unitPrice: (typeof p?.unitPrice === "number" ? p.unitPrice : null),
+            quantity: r.quantity,
+            status: r.status,
+            statusColor: r.statusColor,
+            createdById: r.createdById,
+            createdByName: r.createdById ? (memberMap.get(r.createdById) || "") : "",
+            createdTime: r.createdTime,
+          };
+        });
+      });
 
       const ids = new Set(allOrders.map((o) => o.id));
       const extras = recent.filter((r) => !ids.has(r.id));
       const merged = allOrders
         .concat(extras)
         .sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
-
-      req.session.recentOrders = recent;
 
       res.json(merged);
     } catch (error) {
@@ -1095,15 +1210,9 @@ app.get(
     res.set("Cache-Control", "no-store");
 
     try {
-      // Find current user
-      const userQuery = await notion.databases.query({
-        database_id: teamMembersDatabaseId,
-        filter: { property: "Name", title: { equals: req.session.username } },
-      });
-      if (userQuery.results.length === 0) {
-        return res.status(404).json({ error: "User not found." });
-      }
-      const userId = userQuery.results[0].id;
+      // Find current user (cached in session if available)
+      const userId = await getSessionUserNotionId(req);
+      if (!userId) return res.status(404).json({ error: "User not found." });
 
       // Retrieve a reference order page to extract the Reason/title
       let basePage;
@@ -1198,33 +1307,14 @@ app.get(
       async function getProductInfo(productPageId) {
         if (!productPageId) return { name: "Unknown Product", unitPrice: null, image: null };
         if (productCache.has(productPageId)) return productCache.get(productPageId);
-
-        try {
-          const productPage = await notion.pages.retrieve({ page_id: productPageId });
-          const name =
-            productPage.properties?.Name?.title?.[0]?.plain_text || "Unknown Product";
-
-          const unitPrice =
-            parseNumberProp(productPage.properties?.["Unity Price"]) ??
-            parseNumberProp(productPage.properties?.["Unit price"]) ??
-            parseNumberProp(productPage.properties?.["Unit Price"]) ??
-            parseNumberProp(productPage.properties?.["Price"]) ??
-            null;
-
-          let image = null;
-          if (productPage.cover?.type === "external") image = productPage.cover.external.url;
-          if (productPage.cover?.type === "file") image = productPage.cover.file.url;
-          if (!image && productPage.icon?.type === "external") image = productPage.icon.external.url;
-          if (!image && productPage.icon?.type === "file") image = productPage.icon.file.url;
-
-          const info = { name, unitPrice, image };
-          productCache.set(productPageId, info);
-          return info;
-        } catch (e) {
-          const info = { name: "Unknown Product", unitPrice: null, image: null };
-          productCache.set(productPageId, info);
-          return info;
-        }
+        const info = await getProductInfoCached(productPageId);
+        const out = {
+          name: info?.name || "Unknown Product",
+          unitPrice: typeof info?.unitPrice === "number" ? info.unitPrice : null,
+          image: info?.image || null,
+        };
+        productCache.set(productPageId, out);
+        return out;
       }
 
       while (hasMore) {
@@ -1338,7 +1428,11 @@ app.get(
   async (req, res) => {
     if (!ordersDatabaseId)
       return res.status(500).json({ error: "Orders DB not configured" });
+
+    res.set("Cache-Control", "no-store");
     try {
+      const cacheKey = "cache:api:orders:requested:v2";
+      const data = await cacheGetOrSet(cacheKey, 60, async () => {
       const all = [];
       let hasMore = true,
         startCursor;
@@ -1348,10 +1442,9 @@ app.get(
         if (!id) return "";
         if (nameCache.has(id)) return nameCache.get(id);
         try {
-          const page = await notion.pages.retrieve({ page_id: id });
-          const nm = page.properties?.Name?.title?.[0]?.plain_text || "";
-          nameCache.set(id, nm);
-          return nm;
+          const nm = await getTeamMemberNameCached(id);
+          nameCache.set(id, nm || "");
+          return nm || "";
         } catch {
           return "";
         }
@@ -1511,53 +1604,9 @@ app.get(
           return { name: "Unknown Product", unitPrice: null, image: null, url: null };
         }
         if (productCache.has(productPageId)) return productCache.get(productPageId);
-        try {
-          const productPage = await notion.pages.retrieve({ page_id: productPageId });
-          const name =
-            productPage.properties?.Name?.title?.[0]?.plain_text ||
-            "Unknown Product";
-
-          const unitPrice =
-            parseNumberProp(productPage.properties?.["Unity Price"]) ??
-            parseNumberProp(productPage.properties?.["Unit price"]) ??
-            parseNumberProp(productPage.properties?.["Unit Price"]) ??
-            parseNumberProp(productPage.properties?.["Price"]) ??
-            null;
-
-          let image = null;
-          if (productPage.cover?.type === "external") image = productPage.cover.external.url;
-          if (productPage.cover?.type === "file") image = productPage.cover.file.url;
-          if (!image && productPage.icon?.type === "external") image = productPage.icon.external.url;
-          if (!image && productPage.icon?.type === "file") image = productPage.icon.file.url;
-
-          // Prefer the external product URL property (Products DB column "URL")
-          // Fallback to Notion page URL if the property is missing.
-          let url = null;
-          try {
-            const urlProp =
-              getPropInsensitive(productPage.properties, "URL") ||
-              getPropInsensitive(productPage.properties, "Url") ||
-              getPropInsensitive(productPage.properties, "Link") ||
-              getPropInsensitive(productPage.properties, "Website");
-
-            if (urlProp?.type === "url") url = urlProp.url || null;
-            if (!url && urlProp?.type === "rich_text") {
-              const t = (urlProp.rich_text || [])
-                .map((x) => x?.plain_text || "")
-                .join("")
-                .trim();
-              url = t || null;
-            }
-          } catch {}
-          if (!url) url = productPage.url || null;
-          const info = { name, unitPrice, image, url };
-          productCache.set(productPageId, info);
-          return info;
-        } catch {
-          const info = { name: "Unknown Product", unitPrice: null, image: null, url: null };
-          productCache.set(productPageId, info);
-          return info;
-        }
+        const info = await getProductInfoCached(productPageId);
+        productCache.set(productPageId, info);
+        return info;
       }
 
       const receivedQtyPropName = await detectReceivedQtyPropName();
@@ -1728,7 +1777,10 @@ if (svApproval !== "Approved") continue;
         startCursor = resp.next_cursor;
       }
 
-      res.json(all);
+      return all;
+      });
+
+      return res.json(data);
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Failed to fetch requested orders" });
@@ -1776,6 +1828,16 @@ app.post(
             properties: { [assignedProp]: { relation: (memberIds || []).map(id => ({ id })) } },
           }),
         ),
+      );
+
+      // Invalidate caches so lists reflect the assignment immediately.
+      await cacheDel("cache:api:orders:requested:v2");
+      const memberIdsNorm = (memberIds || [])
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+      await Promise.all(
+        memberIdsNorm.map((mid) => cacheDel(`cache:api:orders:assigned:${mid}:v2`)),
       );
 
       res.json({ success: true });
@@ -1993,6 +2055,9 @@ app.post(
         }),
       );
 
+      // Invalidate cached lists (Operations view).
+      await cacheDel("cache:api:orders:requested:v2");
+
       res.json({
         success: true,
         status: shippedName,
@@ -2078,6 +2143,8 @@ app.post(
         ),
       );
 
+      await cacheDel("cache:api:orders:requested:v2");
+
       res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
     } catch (e) {
       console.error("mark-arrived error:", e.body || e);
@@ -2120,6 +2187,19 @@ app.post(
           [receivedProp]: { number: vNum },
         },
       });
+
+      // Invalidate caches so quantities update immediately.
+      await cacheDel("cache:api:orders:requested:v2");
+      try {
+        const page = await notion.pages.retrieve({ page_id: id });
+        const rel = page?.properties?.["Teams Members"]?.relation || [];
+        const memberIds = (Array.isArray(rel) ? rel : [])
+          .map((r) => r?.id)
+          .filter(Boolean);
+        await Promise.all(
+          memberIds.map((mid) => cacheDel(`cache:api:orders:list:${mid}:v2`)),
+        );
+      } catch {}
 
       return res.json({ success: true, value: vNum });
     } catch (e) {
@@ -2268,10 +2348,9 @@ app.post(
         if (!id) return "";
         if (nameCache.has(id)) return nameCache.get(id);
         try {
-          const p = await notion.pages.retrieve({ page_id: id });
-          const nm = p.properties?.Name?.title?.[0]?.plain_text || "";
-          nameCache.set(id, nm);
-          return nm;
+          const nm = await getTeamMemberNameCached(id);
+          nameCache.set(id, nm || "");
+          return nm || "";
         } catch {
           return "";
         }
@@ -2280,41 +2359,17 @@ app.post(
       // Product cache
       const productCache = new Map();
       async function productInfo(productPageId) {
-        if (!productPageId) return { name: "Unknown", unitPrice: null, url: null };
+        if (!productPageId) return { name: "Unknown", idCode: null, unitPrice: null, url: null };
         if (productCache.has(productPageId)) return productCache.get(productPageId);
-        try {
-          const p = await notion.pages.retrieve({ page_id: productPageId });
-          const name = p.properties?.Name?.title?.[0]?.plain_text || "Unknown";
-          const idCode = _extractIdCodeFromProps(p.properties || {});
-          const unitPrice =
-            parseNumberProp(p.properties?.["Unity Price"]) ??
-            parseNumberProp(p.properties?.["Unit price"]) ??
-            parseNumberProp(p.properties?.["Unit Price"]) ??
-            parseNumberProp(p.properties?.["Price"]) ??
-            null;
-          let url = null;
-          try {
-            const urlProp =
-              getPropInsensitive(p.properties, "URL") ||
-              getPropInsensitive(p.properties, "Url") ||
-              getPropInsensitive(p.properties, "Link") ||
-              getPropInsensitive(p.properties, "Website");
-
-            if (urlProp?.type === "url") url = urlProp.url || null;
-            if (!url && urlProp?.type === "rich_text") {
-              const t = (urlProp.rich_text || []).map((x) => x?.plain_text || "").join("").trim();
-              url = t || null;
-            }
-          } catch {}
-          if (!url) url = p.url || null;
-          const info = { name, idCode, unitPrice, url };
-          productCache.set(productPageId, info);
-          return info;
-        } catch {
-          const info = { name: "Unknown", idCode: null, unitPrice: null, url: null };
-          productCache.set(productPageId, info);
-          return info;
-        }
+        const info = await getProductInfoCached(productPageId);
+        const out = {
+          name: info?.name || "Unknown",
+          idCode: info?.idCode || null,
+          unitPrice: typeof info?.unitPrice === "number" ? info.unitPrice : null,
+          url: info?.url || null,
+        };
+        productCache.set(productPageId, out);
+        return out;
       }
 
       // Header info
@@ -2913,81 +2968,81 @@ app.get(
   requireAuth,
   requirePage("Assigned Schools Requested Orders"),
   async (req, res) => {
+    res.set("Cache-Control", "no-store");
     try {
-      const userId = await getCurrentUserPageId(req.session.username);
+      const userId = await getSessionUserNotionId(req);
       if (!userId) return res.status(404).json({ error: "User not found." });
 
-      const assignedProp = await detectAssignedPropName();
-      const availableProp = await detectAvailableQtyPropName(); // قد يكون null
-      const statusProp   = await detectStatusPropName();        // غالبًا "Status"
-      // Received Quantity property (Number)
-      const receivedProp = (await (async()=>{
-        const props = await getOrdersDBProps();
-        if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
-        return await detectReceivedQtyPropName();
-      })());
+      // Small TTL cache: this endpoint is hit often (reloads + polling)
+      const cacheKey = `cache:api:orders:assigned:${userId}:v2`;
+      const items = await cacheGetOrSet(cacheKey, 60, async () => {
+        const assignedProp = await detectAssignedPropName();
+        const availableProp = await detectAvailableQtyPropName(); // may be null
+        const statusProp = await detectStatusPropName(); // usually "Status"
+        const receivedProp = await (async () => {
+          const props = await getOrdersDBProps();
+          if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+          return await detectReceivedQtyPropName();
+        })();
 
-      const items = [];
-      let hasMore = true;
-      let startCursor = undefined;
+        const raw = [];
+        const productIds = new Set();
+        let hasMore = true;
+        let startCursor = undefined;
 
-      while (hasMore) {
-        const resp = await notion.databases.query({
-          database_id: ordersDatabaseId,
-          start_cursor: startCursor,
-          filter: { property: assignedProp, relation: { contains: userId } },
-          sorts: [{ timestamp: "created_time", direction: "descending" }],
-        });
+        while (hasMore) {
+          const resp = await notion.databases.query({
+            database_id: ordersDatabaseId,
+            start_cursor: startCursor,
+            filter: { property: assignedProp, relation: { contains: userId } },
+            sorts: [{ timestamp: "created_time", direction: "descending" }],
+            page_size: 100,
+          });
 
-        for (const page of resp.results) {
-          const props = page.properties || {};
+          for (const page of resp.results || []) {
+            const props = page.properties || {};
+            const productPageId = props.Product?.relation?.[0]?.id || null;
+            if (productPageId) productIds.add(productPageId);
 
-          // Product name
-          let productName = "Unknown Product";
-          const productRel = props.Product?.relation;
-          if (Array.isArray(productRel) && productRel.length) {
-            try {
-              const productPage = await notion.pages.retrieve({
-                page_id: productRel[0].id,
-              });
-              productName =
-                productPage.properties?.Name?.title?.[0]?.plain_text ||
-                productName;
-            } catch {}
+            raw.push({
+              id: page.id,
+              productPageId,
+              requested: Number(props["Quantity Requested"]?.number || 0),
+              available: availableProp ? Number(props[availableProp]?.number || 0) : 0,
+              reason: props.Reason?.title?.[0]?.plain_text || "No Reason",
+              status: statusProp ? (props[statusProp]?.select?.name || props[statusProp]?.status?.name || "") : "",
+              rec: receivedProp ? Number(props[receivedProp]?.number || 0) : 0,
+              createdTime: page.created_time,
+            });
           }
 
-          const requested = Number(props["Quantity Requested"]?.number || 0);
-          const available = availableProp
-            ? Number(props[availableProp]?.number || 0)
-            : 0;
-          const remaining = Math.max(0, requested - available);
-          const reason = props.Reason?.title?.[0]?.plain_text || "No Reason";
-          const status = statusProp ? (props[statusProp]?.select?.name || "") : "";
-          const recVal = receivedProp ? Number(props[receivedProp]?.number || 0) : 0;
-
-          items.push({
-            id: page.id,
-            productName,
-            requested,
-            available,
-            remaining,
-            quantityReceivedByOperations: recVal,
-            rec: recVal,
-            createdTime: page.created_time,
-            reason,
-            status,
-          });
+          hasMore = resp.has_more;
+          startCursor = resp.next_cursor;
         }
 
-        hasMore = resp.has_more;
-        startCursor = resp.next_cursor;
-      }
+        const productMap = await mapWithConcurrency(productIds, 3, getProductInfoCached);
+        return raw.map((r) => {
+          const productName = r.productPageId ? (productMap.get(r.productPageId)?.name || "Unknown Product") : "Unknown Product";
+          const remaining = Math.max(0, Number(r.requested) - Number(r.available));
+          return {
+            id: r.id,
+            productName,
+            requested: r.requested,
+            available: r.available,
+            remaining,
+            quantityReceivedByOperations: r.rec,
+            rec: r.rec,
+            createdTime: r.createdTime,
+            reason: r.reason,
+            status: r.status,
+          };
+        });
+      });
 
-      res.set("Cache-Control", "no-store");
-      res.json(items);
+      return res.json(items);
     } catch (e) {
       console.error(e);
-      res.status(500).json({ error: "Failed to fetch assigned orders" });
+      return res.status(500).json({ error: "Failed to fetch assigned orders" });
     }
   },
 );
@@ -3026,6 +3081,12 @@ app.post(
         page_id: orderPageId,
         properties: updates,
       });
+
+      // Invalidate the assigned list cache for the current user.
+      const userId = await getSessionUserNotionId(req);
+      if (userId) {
+        await cacheDel(`cache:api:orders:assigned:${userId}:v2`);
+      }
 
       res.json({
         success: true,
@@ -3079,6 +3140,11 @@ app.post(
         properties: updates,
       });
 
+      const userId = await getSessionUserNotionId(req);
+      if (userId) {
+        await cacheDel(`cache:api:orders:assigned:${userId}:v2`);
+      }
+
       res.json({ success: true, available: newAvailable, remaining });
     } catch (e) {
       console.error(e.body || e);
@@ -3111,6 +3177,11 @@ app.post(
           }),
         ),
       );
+
+      const userId = await getSessionUserNotionId(req);
+      if (userId) {
+        await cacheDel(`cache:api:orders:assigned:${userId}:v2`);
+      }
 
       res.json({ success: true, updated: orderIds.length });
     } catch (e) {
@@ -4093,6 +4164,12 @@ if (cleanedProducts.some(p => !p.reason)) {
 
       delete req.session.orderDraft;
 
+      // Invalidate cached Current Orders list for this user.
+      const currentUserId = await getSessionUserNotionId(req);
+      if (currentUserId) {
+        await cacheDel(`cache:api:orders:list:${currentUserId}:v2`);
+      }
+
       res.json({
         success: true,
         message: "Order submitted and saved to Notion successfully!",
@@ -4127,6 +4204,12 @@ app.post(
         page_id: orderPageId,
         properties: { "Status": { select: { name: "Received" } } },
       });
+
+      // Invalidate cached Current Orders list for this user (so UI updates instantly).
+      const userId = await getSessionUserNotionId(req);
+      if (userId) {
+        await cacheDel(`cache:api:orders:list:${userId}:v2`);
+      }
       res.json({ success: true });
     } catch (error) {
       console.error(
