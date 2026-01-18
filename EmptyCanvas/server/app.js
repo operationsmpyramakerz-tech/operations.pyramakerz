@@ -14,6 +14,12 @@ const stocktakingDatabaseId = process.env.School_Stocktaking_DB_ID;
 const fundsDatabaseId = process.env.Funds;
 const damagedAssetsDatabaseId = process.env.Damaged_Assets;
 const expensesDatabaseId = process.env.Expenses_Database;
+// B2B Schools DB (from ENV)
+const b2bDatabaseId =
+  process.env.B2B ||
+  process.env.B2B_Database ||
+  process.env.B2B_DB_ID ||
+  null;
 const NOTION_VER = process.env.NOTION_VERSION || '2022-06-28'; // المطلوب في أمثلة Notion 
 // Team Members DB (from ENV)
 const teamMembersDatabaseId =
@@ -319,6 +325,7 @@ const ALL_PAGES = [
   "Assigned Schools Requested Orders",
   "Create New Order",
   "Stocktaking",
+  "B2B",
   "Funds",
   "Expenses",
   "Expenses Users",
@@ -350,6 +357,7 @@ function normalizePages(names = []) {
   }
   if (set.has("create new order")) out.push("Create New Order");
   if (set.has("stocktaking")) out.push("Stocktaking");
+  if (set.has("b2b")) out.push("B2B");
   if (set.has("funds")) out.push("Funds");
   if (set.has("expenses")) out.push("Expenses");
   if (
@@ -431,6 +439,7 @@ function firstAllowedPath(allowed = []) {
   if (list.includes("S.V schools orders")) return "/orders/sv-orders";
   if (list.includes("Create New Order")) return "/orders/new";
   if (list.includes("Stocktaking")) return "/stocktaking";
+  if (list.includes("B2B")) return "/b2b";
   if (list.includes("Logistics")) return "/logistics";
   if (list.includes("Damaged Assets")) return "/damaged-assets";
   if (list.includes("S.V Schools Assets")) return "/sv-assets";
@@ -744,6 +753,16 @@ app.get("/stocktaking", requireAuth, requirePage("Stocktaking"), (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "stocktaking.html"));
 });
 
+// B2B page
+app.get("/b2b", requireAuth, requirePage("B2B"), (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "b2b.html"));
+});
+
+// B2B School detail page
+app.get("/b2b/school/:id", requireAuth, requirePage("B2B"), (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "b2b-school.html"));
+});
+
 // Account page
 app.get("/account", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "account.html"));
@@ -933,6 +952,361 @@ app.get("/api/account", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch account info." });
   }
 });
+
+
+
+// ===== B2B Schools APIs =====
+// Uses Notion database ID from process.env.B2B
+
+function _firstTitleFromProps(props, preferredNames = []) {
+  const p = props || {};
+  for (const name of preferredNames) {
+    const v = p[name];
+    if (v && v.type === "title" && Array.isArray(v.title) && v.title[0]?.plain_text) {
+      return v.title.map((t) => t.plain_text).join("");
+    }
+  }
+  for (const v of Object.values(p)) {
+    if (v && v.type === "title" && Array.isArray(v.title) && v.title[0]?.plain_text) {
+      return v.title.map((t) => t.plain_text).join("");
+    }
+  }
+  return "";
+}
+
+function _firstTextFromProp(prop) {
+  if (!prop) return "";
+  if (Array.isArray(prop.rich_text) && prop.rich_text[0]?.plain_text) {
+    return prop.rich_text.map((t) => t.plain_text).join("");
+  }
+  if (Array.isArray(prop.title) && prop.title[0]?.plain_text) {
+    return prop.title.map((t) => t.plain_text).join("");
+  }
+  if (typeof prop.url === "string") return prop.url;
+  if (prop.type === "select" && prop.select?.name) return prop.select.name;
+  return "";
+}
+
+function _selectNameColor(prop) {
+  if (!prop) return null;
+  if (prop.type === "select" && prop.select) {
+    return {
+      name: prop.select.name || "",
+      color: prop.select.color || "default",
+    };
+  }
+  if (prop.type === "multi_select" && Array.isArray(prop.multi_select) && prop.multi_select[0]) {
+    const s = prop.multi_select[0];
+    return { name: s.name || "", color: s.color || "default" };
+  }
+  return null;
+}
+
+function _multiSelectNames(prop) {
+  if (!prop) return [];
+  if (prop.type === "multi_select" && Array.isArray(prop.multi_select)) {
+    return prop.multi_select.map((x) => x?.name).filter(Boolean);
+  }
+  if (prop.type === "select" && prop.select?.name) return [prop.select.name];
+  return [];
+}
+
+async function _queryAllPages(database_id, { filter, sorts } = {}) {
+  const all = [];
+  let hasMore = true;
+  let startCursor = undefined;
+
+  while (hasMore) {
+    const resp = await notion.databases.query({
+      database_id,
+      start_cursor: startCursor,
+      filter,
+      sorts,
+    });
+    all.push(...(resp.results || []));
+    hasMore = !!resp.has_more;
+    startCursor = resp.next_cursor || undefined;
+  }
+
+  return all;
+}
+
+async function _getB2BSchoolsList() {
+  if (!b2bDatabaseId) return [];
+  const cacheKey = `cache:api:b2b:schools:list:${b2bDatabaseId}:v1`;
+  return await cacheGetOrSet(cacheKey, 60, async () => {
+    const pages = await _queryAllPages(b2bDatabaseId, {});
+
+    return (pages || []).map((page) => {
+      const props = page.properties || {};
+      const name = _firstTitleFromProps(props, ["School name", "Name", "School"]);
+      const governorate =
+        _selectNameColor(props.Governorate) ||
+        _selectNameColor(props.Governorates) ||
+        _selectNameColor(props.GovernorateName) ||
+        null;
+
+      return {
+        id: page.id,
+        name: name || "Untitled",
+        governorate,
+        educationSystem: _multiSelectNames(props["Education System"] || props["Education system"] || props.Education),
+        programType: (props["Program type"] && props["Program type"].select?.name) || (props["Program Type"] && props["Program Type"].select?.name) || (props.Program && props.Program.select?.name) || "",
+      };
+    });
+  });
+}
+
+async function _getB2BSchoolById(schoolId) {
+  if (!schoolId) return null;
+
+  // Try from cached list first
+  try {
+    const list = await _getB2BSchoolsList();
+    const hit = Array.isArray(list) ? list.find((x) => x && x.id === schoolId) : null;
+    if (hit) return hit;
+  } catch {}
+
+  // Fallback: retrieve the Notion page directly
+  try {
+    const page = await notion.pages.retrieve({ page_id: schoolId });
+    const props = page.properties || {};
+
+    const name = _firstTitleFromProps(props, ["School name", "Name", "School"]);
+    const governorate =
+      _selectNameColor(props.Governorate) ||
+      _selectNameColor(props.Governorates) ||
+      _selectNameColor(props.GovernorateName) ||
+      null;
+
+    return { id: page.id, name: name || "Untitled", governorate };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function _getStocktakingDBProps() {
+  if (!stocktakingDatabaseId) return {};
+  const cacheKey = `cache:notion:dbprops:stocktaking:${stocktakingDatabaseId}:v1`;
+  return await cacheGetOrSet(cacheKey, 10 * 60, async () => {
+    const db = await notion.databases.retrieve({ database_id: stocktakingDatabaseId });
+    return db.properties || {};
+  });
+}
+
+function _findPropNameByNorm(schemaProps, desired) {
+  if (!desired) return null;
+  const want = normKey(desired);
+  for (const key of Object.keys(schemaProps || {})) {
+    if (normKey(key) === want) return key;
+  }
+  return null;
+}
+
+function _boolFrom(prop) {
+  if (!prop) return false;
+  if (typeof prop.checkbox === "boolean") return prop.checkbox;
+  if (prop.formula && typeof prop.formula.boolean === "boolean") return prop.formula.boolean;
+  if (prop.rollup && typeof prop.rollup.boolean === "boolean") return prop.rollup.boolean;
+  return false;
+}
+
+app.get(
+  "/api/b2b/schools",
+  requireAuth,
+  requirePage("B2B"),
+  async (req, res) => {
+    if (!b2bDatabaseId) {
+      return res.status(500).json({ error: "B2B database ID is not configured." });
+    }
+    res.set("Cache-Control", "no-store");
+    try {
+      const list = await _getB2BSchoolsList();
+      return res.json(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error("Error fetching B2B schools:", e?.body || e);
+      return res.status(500).json({ error: "Failed to fetch B2B schools." });
+    }
+  },
+);
+
+app.get(
+  "/api/b2b/schools/:id",
+  requireAuth,
+  requirePage("B2B"),
+  async (req, res) => {
+    if (!b2bDatabaseId) {
+      return res.status(500).json({ error: "B2B database ID is not configured." });
+    }
+    res.set("Cache-Control", "no-store");
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "Missing school id." });
+
+    try {
+      const cacheKey = `cache:api:b2b:school:${id}:v1`;
+      const data = await cacheGetOrSet(cacheKey, 5 * 60, async () => {
+        const page = await notion.pages.retrieve({ page_id: id });
+        const props = page.properties || {};
+
+        const name = _firstTitleFromProps(props, ["School name", "Name", "School"]);
+        const location =
+          (props.Location && (props.Location.url || _firstTextFromProp(props.Location))) ||
+          (props["Google Maps"] && (props["Google Maps"].url || _firstTextFromProp(props["Google Maps"]))) ||
+          "";
+
+        const governorate =
+          _selectNameColor(props.Governorate) ||
+          _selectNameColor(props.Governorates) ||
+          _selectNameColor(props.GovernorateName) ||
+          null;
+
+        const educationSystem = (() => {
+          const a1 = _multiSelectNames(props["Education System"]);
+          if (Array.isArray(a1) && a1.length) return a1;
+          const a2 = _multiSelectNames(props["Education system"]);
+          if (Array.isArray(a2) && a2.length) return a2;
+          const a3 = _multiSelectNames(props.Education);
+          if (Array.isArray(a3) && a3.length) return a3;
+          return [];
+        })();
+
+        const programType =
+          (props["Program type"] && props["Program type"].select?.name) ||
+          (props["Program Type"] && props["Program Type"].select?.name) ||
+          (props.Program && props.Program.select?.name) ||
+          "";
+
+        return {
+          id: page.id,
+          name: name || "Untitled",
+          location,
+          governorate,
+          educationSystem,
+          programType,
+        };
+      });
+
+      return res.json(data);
+    } catch (e) {
+      console.error("Error fetching B2B school details:", e?.body || e);
+      return res.status(500).json({ error: "Failed to fetch school details." });
+    }
+  },
+);
+
+app.get(
+  "/api/b2b/schools/:id/stock",
+  requireAuth,
+  requirePage("B2B"),
+  async (req, res) => {
+    if (!stocktakingDatabaseId) {
+      return res.status(500).json({ error: "Stocktaking database ID is not configured." });
+    }
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "Missing school id." });
+
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const cacheKey = `cache:api:b2b:school-stock:${id}:v1`;
+      const payload = await cacheGetOrSet(cacheKey, 60, async () => {
+        const school = await _getB2BSchoolById(id);
+        if (!school) return [];
+        const schoolName = String(school.name || "").trim();
+
+        const schemaProps = await _getStocktakingDBProps();
+        const qtyPropName = _findPropNameByNorm(schemaProps, schoolName) || schoolName;
+        const donePropName =
+          _findPropNameByNorm(schemaProps, `${schoolName} Done`) || `${schoolName} Done`;
+
+        const allStock = [];
+        let hasMore = true;
+        let startCursor = undefined;
+
+        const numberFrom = (prop) => {
+          if (!prop) return undefined;
+          if (typeof prop.number === "number") return prop.number;
+          if (prop.formula && typeof prop.formula.number === "number") return prop.formula.number;
+          if (prop.rollup && typeof prop.rollup.number === "number") return prop.rollup.number;
+          return undefined;
+        };
+        const firstDefinedNumber = (...props) => {
+          for (const p of props) {
+            const n = numberFrom(p);
+            if (typeof n === "number") return n;
+          }
+          return 0;
+        };
+
+        while (hasMore) {
+          const resp = await notion.databases.query({
+            database_id: stocktakingDatabaseId,
+            start_cursor: startCursor,
+            sorts: [{ property: "Name", direction: "ascending" }],
+          });
+
+          const batch = (resp.results || [])
+            .map((page) => {
+              const props = page.properties || {};
+              const componentName =
+                props.Name?.title?.[0]?.plain_text ||
+                props.Component?.title?.[0]?.plain_text ||
+                "Untitled";
+
+              const qtyKey =
+                (qtyPropName in props && qtyPropName) ||
+                _findPropNameByNorm(props, schoolName) ||
+                schoolName;
+
+              const doneKey =
+                (donePropName in props && donePropName) ||
+                _findPropNameByNorm(props, `${schoolName} Done`) ||
+                `${schoolName} Done`;
+
+              const quantity = firstDefinedNumber(props[qtyKey]);
+              const done = _boolFrom(props[doneKey]);
+
+              let tag = null;
+              if (props.Tag?.select) {
+                tag = {
+                  name: props.Tag.select.name,
+                  color: props.Tag.select.color || "default",
+                };
+              } else if (Array.isArray(props.Tag?.multi_select) && props.Tag.multi_select.length > 0) {
+                const t = props.Tag.multi_select[0];
+                tag = { name: t.name, color: t.color || "default" };
+              } else if (Array.isArray(props.Tags?.multi_select) && props.Tags.multi_select.length > 0) {
+                const t = props.Tags.multi_select[0];
+                tag = { name: t.name, color: t.color || "default" };
+              }
+
+              return {
+                id: page.id,
+                name: componentName,
+                quantity: Number(quantity) || 0,
+                done: !!done,
+                tag,
+              };
+            })
+            .filter(Boolean);
+
+          allStock.push(...batch);
+          hasMore = !!resp.has_more;
+          startCursor = resp.next_cursor || undefined;
+        }
+
+        const filtered = (allStock || []).filter((it) => Number(it.quantity) > 0);
+        return filtered;
+      });
+
+      return res.json(Array.isArray(payload) ? payload : (payload?.items || []));
+    } catch (e) {
+      console.error("Error fetching B2B stocktaking:", e?.body || e);
+      return res.status(500).json({ error: "Failed to fetch stocktaking data." });
+    }
+  },
+);
 
 // Order Draft APIs — require Create New Order
 app.get(
