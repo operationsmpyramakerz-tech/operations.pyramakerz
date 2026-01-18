@@ -15,11 +15,21 @@ const fundsDatabaseId = process.env.Funds;
 const damagedAssetsDatabaseId = process.env.Damaged_Assets;
 const expensesDatabaseId = process.env.Expenses_Database;
 // B2B Schools DB (from ENV)
-const b2bDatabaseId =
-  process.env.B2B ||
-  process.env.B2B_Database ||
-  process.env.B2B_DB_ID ||
-  null;
+function _extractNotionIdFromEnv(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  // Accept raw 32-hex IDs, hyphenated IDs, and full Notion URLs.
+  const m = s.match(/[0-9a-f]{32}/i);
+  if (m && m[0]) return m[0];
+  // If it's already hyphenated, keep it.
+  const mh = s.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (mh && mh[0]) return mh[0];
+  return s || null;
+}
+
+const b2bDatabaseId = _extractNotionIdFromEnv(
+  process.env.B2B || process.env.B2B_Database || process.env.B2B_DB_ID || null,
+);
 const NOTION_VER = process.env.NOTION_VERSION || '2022-06-28'; // المطلوب في أمثلة Notion 
 // Team Members DB (from ENV)
 const teamMembersDatabaseId =
@@ -1019,6 +1029,7 @@ async function _queryAllPages(database_id, { filter, sorts } = {}) {
   while (hasMore) {
     const resp = await notion.databases.query({
       database_id,
+      page_size: 100,
       start_cursor: startCursor,
       filter,
       sorts,
@@ -1124,8 +1135,19 @@ app.get(
       const list = await _getB2BSchoolsList();
       return res.json(Array.isArray(list) ? list : []);
     } catch (e) {
-      console.error("Error fetching B2B schools:", e?.body || e);
-      return res.status(500).json({ error: "Failed to fetch B2B schools." });
+      const notionBody = e?.body || null;
+      console.error("Error fetching B2B schools:", notionBody || e);
+      // Common root causes:
+      // - B2B env contains a full Notion URL (handled by _extractNotionIdFromEnv)
+      // - Notion integration is not shared with the B2B database (returns 404)
+      const msg =
+        (notionBody && (notionBody.message || notionBody?.error)) ||
+        e?.message ||
+        "Failed to fetch B2B schools.";
+      return res.status(500).json({
+        error: "Failed to fetch B2B schools.",
+        details: msg,
+      });
     }
   },
 );
