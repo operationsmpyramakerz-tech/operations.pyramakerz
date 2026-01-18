@@ -297,6 +297,9 @@ if (document.querySelector('.sidebar')) {
 
     's.v schools orders': 'a[href="/orders/sv-orders"]',
 
+    // ===== B2B =====
+    'b2b': 'a[href="/b2b"]',
+
     // ===== Logistics =====
     'logistics': 'a[href="/logistics"]',
 
@@ -539,6 +542,7 @@ if (document.querySelector('.sidebar')) {
   ensureLink({ href: '/orders/sv-orders', label: 'S.V schools orders', icon: 'award' });
   ensureLink({ href: '/damaged-assets', label: 'Damaged Assets', icon: 'alert-octagon' });
   ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
+  ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
 
   ensureGreetingAndPages();
 
