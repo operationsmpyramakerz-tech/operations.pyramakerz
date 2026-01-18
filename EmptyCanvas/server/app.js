@@ -1231,7 +1231,7 @@ app.get(
     res.set("Cache-Control", "no-store");
 
     try {
-      const cacheKey = `cache:api:b2b:school-stock:${id}:v1`;
+      const cacheKey = `cache:api:b2b:school-stock:${id}:v3`;
       const payload = await cacheGetOrSet(cacheKey, 60, async () => {
         const school = await _getB2BSchoolById(id);
         if (!school) return [];
@@ -1287,7 +1287,11 @@ app.get(
                 `${schoolName} Done`;
 
               const quantity = firstDefinedNumber(props[qtyKey]);
-              const done = _boolFrom(props[doneKey]);
+              const doneQuantity = firstDefinedNumber(props[doneKey]);
+
+              // Some databases store "<School> Done" as a Number/Rollup/Formula (not a Checkbox).
+              // Keep a boolean too (best-effort) for UI states.
+              const done = _boolFrom(props[doneKey]) || (Number(doneQuantity) > 0);
 
               let tag = null;
               if (props.Tag?.select) {
@@ -1307,6 +1311,8 @@ app.get(
                 id: page.id,
                 name: componentName,
                 quantity: Number(quantity) || 0,
+                // value from "<School> Done" (Number/Rollup/Formula/Checkbox best-effort)
+                doneQuantity: Number(doneQuantity) || 0,
                 done: !!done,
                 tag,
               };
@@ -1318,7 +1324,9 @@ app.get(
           startCursor = resp.next_cursor || undefined;
         }
 
-        const filtered = (allStock || []).filter((it) => Number(it.quantity) > 0);
+        // Keep rows that have either a positive "In Stock" OR a positive "<School> Done" value.
+        // This prevents empty lists when the DB tracks the school only via the "Done" columns.
+        const filtered = (allStock || []).filter((it) => (Number(it.quantity) > 0) || (Number(it.doneQuantity) > 0));
         return filtered;
       });
 
