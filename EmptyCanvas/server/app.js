@@ -6182,17 +6182,28 @@ app.get("/api/expenses", async (req, res) => {
       return res.json({ success: true, items: [] });
     }
 
-    // Query only expenses that belong to THIS user
-    const list = await notion.databases.query({
-      database_id: process.env.Expenses_Database,
-      filter: {
-        property: "Team Member",
-        relation: {
-          contains: teamMemberPageId
-        }
-      },
-      sorts: [{ property: "Date", direction: "descending" }]
-    });
+        // Query only expenses that belong to THIS user (paginate to avoid Notion 100-item limit)
+    const results = [];
+    let cursor = undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+      const resp = await notion.databases.query({
+        database_id: expensesDatabaseId || process.env.Expenses_Database,
+        start_cursor: cursor,
+        filter: {
+          property: "Team Member",
+          relation: {
+            contains: teamMemberPageId,
+          },
+        },
+        sorts: [{ property: "Date", direction: "descending" }],
+      });
+
+      results.push(...(resp.results || []));
+      hasMore = resp.has_more;
+      cursor = resp.next_cursor;
+    }
 
     // Format results (support Reason as title OR rich_text)
     const expProps = await getExpensesDBProps();
@@ -6204,7 +6215,7 @@ app.get("/api/expenses", async (req, res) => {
     const cashInFromTitleMap = new Map();
     const cashInFromIds = new Set();
 
-    for (const page of list.results) {
+    for (const page of results) {
       const p = page.properties?.[cashInFromKey];
       if (p?.type === "relation") {
         (p.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
@@ -6216,7 +6227,7 @@ app.get("/api/expenses", async (req, res) => {
       cashInFromTitleMap.set(id, t);
     }
 
-    const formatted = list.results.map((page) => {
+    const formatted = results.map((page) => {
       const props = page.properties || {};
 
       const reasonProp = props["Reason"]; // property name in Notion DB
@@ -6304,22 +6315,28 @@ app.get(
           const rel = props["Team Member"]?.relation;
 
           if (!Array.isArray(rel) || rel.length === 0) continue;
-
-          const userId = rel[0].id;
           const cashIn = Number(props["Cash in"]?.number || 0);
           const cashOut = Number(props["Cash out"]?.number || 0);
           const delta = cashIn - cashOut;
 
-          if (!perUser.has(userId)) {
-            perUser.set(userId, {
-              userId,
-              total: 0,
-              count: 0,
-            });
+          // Team Member is a relation and may contain multiple members.
+          // Aggregate for EACH related member so totals match the user-specific endpoint
+          // (which uses relation.contains).
+          for (const r of rel) {
+            const userId = r?.id;
+            if (!userId) continue;
+
+            if (!perUser.has(userId)) {
+              perUser.set(userId, {
+                userId,
+                total: 0,
+                count: 0,
+              });
+            }
+            const agg = perUser.get(userId);
+            agg.total += delta;
+            agg.count += 1;
           }
-          const agg = perUser.get(userId);
-          agg.total += delta;
-          agg.count += 1;
         }
 
         hasMore = resp.has_more;
@@ -6377,15 +6394,27 @@ app.get(
           .status(400)
           .json({ success: false, error: "Missing memberId" });
       }
+      // Paginate to avoid Notion 100-item limit
+      const results = [];
+      let cursor = undefined;
+      let hasMore = true;
 
-      const list = await notion.databases.query({
-        database_id: expensesDatabaseId,
-        filter: {
-          property: "Team Member",
-          relation: { contains: memberId },
-        },
-        sorts: [{ property: "Date", direction: "descending" }],
-      });
+      while (hasMore) {
+        const resp = await notion.databases.query({
+          database_id: expensesDatabaseId,
+          start_cursor: cursor,
+          filter: {
+            property: "Team Member",
+            relation: { contains: memberId },
+          },
+          sorts: [{ property: "Date", direction: "descending" }],
+        });
+
+        results.push(...(resp.results || []));
+        hasMore = resp.has_more;
+        cursor = resp.next_cursor;
+      }
+
 
             // Resolve Cash in from (rich_text OR relation) + support Reason as title/rich_text
       const expProps = await getExpensesDBProps();
@@ -6397,7 +6426,7 @@ app.get(
       const cashInFromTitleMap = new Map();
       const cashInFromIds = new Set();
 
-      for (const page of list.results) {
+      for (const page of results) {
         const p = page.properties?.[cashInFromKey];
         if (p?.type === "relation") {
           (p.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
@@ -6409,7 +6438,7 @@ app.get(
         cashInFromTitleMap.set(id, t);
       }
 
-      const items = list.results.map((page) => {
+      const items = results.map((page) => {
         const props = page.properties || {};
 
         const reasonProp = props["Reason"]; // property name in Notion DB
