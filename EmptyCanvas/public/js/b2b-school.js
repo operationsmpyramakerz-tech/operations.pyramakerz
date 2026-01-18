@@ -125,15 +125,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const groups = groupByTag(rows);
     const frag = document.createDocumentFragment();
-
-    const doneCell = (done) => {
-      const span = document.createElement('span');
-      span.className = `done-pill ${done ? 'done' : 'notdone'}`;
-      span.innerHTML = done
-        ? `<i data-feather="check-circle"></i><span>Done</span>`
-        : `<i data-feather="circle"></i><span>Not yet</span>`;
-      return span;
-    };
+    // Note: '<School> Done' in Notion is usually a Number/Rollup/Formula (e.g., 2, 8, ...).
+    // We display that numeric value directly (item.doneQuantity).
 
     groups.forEach((group) => {
       const card = document.createElement('section');
@@ -188,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           const tdDone = document.createElement('td');
           tdDone.className = 'col-num';
-          tdDone.appendChild(doneCell(!!item.done));
+          tdDone.textContent = String(item.doneQuantity ?? 0);
 
           tr.appendChild(tdName);
           tr.appendChild(tdQty);
