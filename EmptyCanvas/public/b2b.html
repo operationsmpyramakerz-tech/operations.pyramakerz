@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>B2B - Dashboard</title>
+  <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+  <style>
+    body.permissions-loading .sidebar li { display: none !important; }
+  </style>
+  <link rel="stylesheet" href="/css/style.css"/>
+  <script src="https://unpkg.com/feather-icons"></script>
+
+  <style>
+    .b2b-wrap{ max-width: 1100px; margin: 0 auto; }
+
+    /* Grid of "files" (Notion-like cards) */
+    .b2b-grid{
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 18px;
+      padding: 10px;
+    }
+
+    .school-file{
+      display:block;
+      text-decoration:none;
+      border-radius: 18px;
+      border: 2px solid #e5e7eb;
+      background: linear-gradient(145deg, #ffffff, #f7f7fb);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.06);
+      overflow:hidden;
+      padding: 14px;
+      min-height: 140px;
+      transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+
+      /* accent vars (set from JS) */
+      --school-accent-bg: #f3f4f6;
+      --school-accent-text: #111827;
+      --school-accent-border: #e5e7eb;
+    }
+    .school-file:hover{
+      transform: translateY(-3px);
+      box-shadow: 0 18px 38px rgba(0,0,0,0.10);
+      border-color: var(--school-accent-border);
+    }
+
+    .school-file__top{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .school-file__icon{
+      width: 44px; height: 44px;
+      border-radius: 14px;
+      display:grid; place-items:center;
+      background: var(--school-accent-bg);
+      border: 1px solid var(--school-accent-border);
+      color: var(--school-accent-text);
+      flex: 0 0 auto;
+    }
+
+    .school-file__badge{
+      display:inline-flex;
+      align-items:center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--school-accent-bg);
+      border: 1px solid var(--school-accent-border);
+      color: var(--school-accent-text);
+      font-weight: 800;
+      font-size: 0.82rem;
+      white-space: nowrap;
+      max-width: 140px;
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+
+    .school-file__name{
+      font-size: 1.02rem;
+      font-weight: 850;
+      color: #111827;
+      line-height: 1.25;
+      margin-bottom: 8px;
+    }
+
+    .school-file__meta{
+      font-size: 0.88rem;
+      color: #64748b;
+      display:flex;
+      flex-direction:column;
+      gap: 4px;
+    }
+
+    .b2b-loading{
+      padding: 30px 10px;
+      text-align:center;
+      color:#64748b;
+    }
+
+    .b2b-empty{
+      padding: 24px 10px;
+      text-align:center;
+      color:#64748b;
+    }
+  </style>
+</head>
+<body class="permissions-loading">
+<script>
+  (function() {
+    try {
+      if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+        document.body.classList.add('sidebar-mini');
+      }
+    } catch(e) {}
+  })();
+</script>
+
+<div class="app-container">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Dashboard</h2>
+      <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true">
+        <i data-feather="chevrons-left"></i>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <ul class="nav-list">
+        <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+        <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+        <li><a class="nav-link active" href="/b2b"><i data-feather="folder"></i><span class="nav-label">B2B</span></a></li>
+        <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+        <li><a class="nav-link" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
+        <li><a class="nav-link" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses by User</span></a></li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="logout-btn" id="logoutBtn"><i data-feather="log-out"></i> Logout</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="main-header">
+      <div class="header-row1">
+        <div class="left">
+          <div class="greeting-pill" aria-live="polite">
+            <span class="greeting-avatar"><img src="/images/greeting-icon.png" alt="Hi icon"/></span>
+            <div class="greet-text">
+              <div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
+              <div class="greet-sub">Browse B2B schools</div>
+            </div>
+          </div>
+
+          <div class="searchbar" role="search" style="margin-left:8px;">
+            <i data-feather="search"></i>
+            <input id="b2bSearch" type="search" placeholder="Search schools..." aria-label="Search schools" />
+          </div>
+        </div>
+
+        <div class="right topbar-right">
+          <a class="account-mini" href="/account" aria-label="My account" title="My account">
+            <span class="ico-circle"><img src="/images/logo.png" alt="Logo"/></span>
+            <span class="label">My account</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="header-row2">
+        <h1 class="page-title">B2B</h1>
+      </div>
+    </header>
+
+    <main class="container-full-width">
+      <div class="b2b-wrap">
+        <section class="card">
+          <div id="b2b-schools" class="b2b-grid" aria-live="polite">
+            <div class="b2b-loading">Loading schools…</div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>feather.replace();</script>
+<script src="/js/common-ui.js"></script>
+<script src="/js/b2b.js"></script>
+</body>
+</html>

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>B2B School - Dashboard</title>
+  <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+  <style>
+    body.permissions-loading .sidebar li { display: none !important; }
+  </style>
+  <link rel="stylesheet" href="/css/style.css"/>
+  <script src="https://unpkg.com/feather-icons"></script>
+
+  <style>
+    .b2b-school-layout {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 1.25rem 1rem;
+    }
+
+    .b2b-school-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .b2b-school-title {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .b2b-school-title h1 {
+      margin: 0;
+      font-size: 1.55rem;
+      font-weight: 800;
+      color: #111827;
+    }
+
+    .b2b-school-title p {
+      margin: 0;
+      color: #6b7280;
+      font-size: 0.95rem;
+    }
+
+    .b2b-two-cols {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+
+    @media (min-width: 980px) {
+      .b2b-two-cols { grid-template-columns: 420px 1fr; }
+    }
+
+    .details-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+    }
+
+    .detail-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      padding: 0.75rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    .detail-row .label {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #374151;
+    }
+
+    .detail-row .value {
+      font-size: 0.95rem;
+      color: #111827;
+      word-break: break-word;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid var(--pill-border, #e5e7eb);
+      background: var(--pill-bg, #f3f4f6);
+      color: var(--pill-text, #111827);
+      font-size: 0.85rem;
+      font-weight: 700;
+      width: fit-content;
+      max-width: 100%;
+    }
+
+    .pill .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: 0.6;
+    }
+
+    .stock-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.5rem;
+    }
+
+    .stock-search {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 0.75rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      background: #fff;
+      min-width: min(420px, 100%);
+    }
+
+    .stock-search input {
+      border: none;
+      outline: none;
+      width: 100%;
+      font-size: 0.95rem;
+    }
+
+    /* Reuse stocktaking cards style; keep tables comfortable */
+    .group-table th.col-done,
+    .group-table td.col-done {
+      width: 160px;
+      text-align: center;
+    }
+
+    .done-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0.28rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 800;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+      color: #111827;
+    }
+
+    .done-pill.done {
+      border-color: #a7f3d0;
+      background: #ecfdf5;
+      color: #065f46;
+    }
+
+    .done-pill.notdone {
+      border-color: #e5e7eb;
+      background: #f3f4f6;
+      color: #6b7280;
+    }
+
+    .error-block, .empty-block {
+      padding: 1rem;
+      border-radius: 14px;
+      border: 1px solid #e5e7eb;
+      background: #fff;
+      color: #111827;
+    }
+  </style>
+</head>
+<body class="permissions-loading">
+<script>
+  (function() {
+    try {
+      if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+        document.body.classList.add('sidebar-mini');
+      }
+    } catch(e) {}
+  })();
+</script>
+
+<div class="app-container">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Dashboard</h2>
+      <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true">
+        <i data-feather="chevrons-left"></i>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <ul class="nav-list">
+        <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+        <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+        <li><a class="nav-link active" href="/b2b"><i data-feather="folder"></i><span class="nav-label">B2B</span></a></li>
+        <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+        <li><a class="nav-link" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
+        <li><a class="nav-link" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses by User</span></a></li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="logout-btn" id="logoutBtn"><i data-feather="log-out"></i> Logout</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="main-header">
+      <div class="header-row1">
+        <div class="left">
+          <div class="greeting-pill" aria-live="polite">
+            <span class="greeting-avatar"><img src="/images/greeting-icon.png" alt="Hi icon"/></span>
+            <div class="greet-text">
+              <div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
+              <div class="greet-sub">B2B schools</div>
+            </div>
+          </div>
+        </div>
+        <div class="right topbar-right">
+          <a class="account-mini" href="/account" title="My account" aria-label="My account">
+            <span class="ico-circle"><img src="/images/logo.png" alt="Logo"/></span>
+            <span class="label">My account</span>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container-full-width">
+      <div class="b2b-school-layout">
+        <div class="b2b-school-top">
+          <a href="/b2b" class="btn btn--light" style="display:inline-flex; align-items:center; gap:8px;">
+            <i data-feather="arrow-left"></i>
+            <span>Back to schools</span>
+          </a>
+
+          <div class="b2b-school-title">
+            <h1 id="schoolName">School</h1>
+            <p>School details &amp; stocktaking</p>
+          </div>
+        </div>
+
+        <div class="b2b-two-cols">
+          <!-- Details -->
+          <section class="card">
+            <h2 style="margin:0; font-size:1.05rem; font-weight:800;">School Details</h2>
+            <div id="schoolDetails" class="details-list">
+              <div class="modern-loading" role="status" aria-live="polite">
+                <div class="modern-loading__spinner" aria-hidden="true"></div>
+                <div class="modern-loading__text">
+                  Loading details
+                  <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Stocktaking -->
+          <section class="card">
+            <div class="stock-head">
+              <h2 style="margin:0; font-size:1.05rem; font-weight:800;">Stocktaking</h2>
+              <div class="stock-search" role="search">
+                <i data-feather="search"></i>
+                <input id="schoolStockSearch" type="search" placeholder="Search components or tags..." aria-label="Search stocktaking" />
+              </div>
+            </div>
+            <div class="groups-grid" id="school-stock-groups">
+              <div class="modern-loading" role="status" aria-live="polite">
+                <div class="modern-loading__spinner" aria-hidden="true"></div>
+                <div class="modern-loading__text">
+                  Loading stock data
+                  <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>feather.replace();</script>
+<script src="/js/common-ui.js"></script>
+<script src="/js/b2b-school.js"></script>
+</body>
+</html>
