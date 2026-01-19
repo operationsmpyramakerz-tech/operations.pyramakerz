@@ -1122,6 +1122,113 @@ function _boolFrom(prop) {
   return false;
 }
 
+async function _getB2BSchoolStocktakingPayload(schoolId) {
+  const id = String(schoolId || "").trim();
+  if (!id) return [];
+
+  const cacheKey = `cache:api:b2b:school-stock:${id}:v3`;
+  return await cacheGetOrSet(cacheKey, 60, async () => {
+    const school = await _getB2BSchoolById(id);
+    if (!school) return [];
+    const schoolName = String(school.name || "").trim();
+    if (!schoolName) return [];
+
+    const schemaProps = await _getStocktakingDBProps();
+    const qtyPropName = _findPropNameByNorm(schemaProps, schoolName) || schoolName;
+    const donePropName =
+      _findPropNameByNorm(schemaProps, `${schoolName} Done`) || `${schoolName} Done`;
+
+    const allStock = [];
+    let hasMore = true;
+    let startCursor = undefined;
+
+    const numberFrom = (prop) => {
+      if (!prop) return undefined;
+      if (typeof prop.number === "number") return prop.number;
+      if (prop.formula && typeof prop.formula.number === "number") return prop.formula.number;
+      if (prop.rollup && typeof prop.rollup.number === "number") return prop.rollup.number;
+      return undefined;
+    };
+
+    const firstDefinedNumber = (...props) => {
+      for (const p of props) {
+        const n = numberFrom(p);
+        if (typeof n === "number") return n;
+      }
+      return 0;
+    };
+
+    while (hasMore) {
+      const resp = await notion.databases.query({
+        database_id: stocktakingDatabaseId,
+        start_cursor: startCursor,
+        sorts: [{ property: "Name", direction: "ascending" }],
+      });
+
+      const batch = (resp.results || [])
+        .map((page) => {
+          const props = page.properties || {};
+          const componentName =
+            props.Name?.title?.[0]?.plain_text ||
+            props.Component?.title?.[0]?.plain_text ||
+            "Untitled";
+
+          const qtyKey =
+            (qtyPropName in props && qtyPropName) ||
+            _findPropNameByNorm(props, schoolName) ||
+            schoolName;
+
+          const doneKey =
+            (donePropName in props && donePropName) ||
+            _findPropNameByNorm(props, `${schoolName} Done`) ||
+            `${schoolName} Done`;
+
+          const quantity = firstDefinedNumber(props[qtyKey]);
+          const doneQuantity = firstDefinedNumber(props[doneKey]);
+
+          // Some databases store "<School> Done" as a Number/Rollup/Formula (not a Checkbox).
+          // Keep a boolean too (best-effort) for UI states.
+          const done = _boolFrom(props[doneKey]) || Number(doneQuantity) > 0;
+
+          let tag = null;
+          if (props.Tag?.select) {
+            tag = {
+              name: props.Tag.select.name,
+              color: props.Tag.select.color || "default",
+            };
+          } else if (Array.isArray(props.Tag?.multi_select) && props.Tag.multi_select.length > 0) {
+            const t = props.Tag.multi_select[0];
+            tag = { name: t.name, color: t.color || "default" };
+          } else if (Array.isArray(props.Tags?.multi_select) && props.Tags.multi_select.length > 0) {
+            const t = props.Tags.multi_select[0];
+            tag = { name: t.name, color: t.color || "default" };
+          }
+
+          return {
+            id: page.id,
+            name: componentName,
+            quantity: Number(quantity) || 0,
+            doneQuantity: Number(doneQuantity) || 0,
+            done: !!done,
+            tag,
+          };
+        })
+        .filter(Boolean);
+
+      allStock.push(...batch);
+      hasMore = !!resp.has_more;
+      startCursor = resp.next_cursor || undefined;
+    }
+
+    // Keep rows that have either a positive "In Stock" OR a positive "<School> Done" value.
+    // This prevents empty lists when the DB tracks the school only via the "Done" columns.
+    const filtered = (allStock || []).filter(
+      (it) => Number(it.quantity) > 0 || Number(it.doneQuantity) > 0,
+    );
+    return filtered;
+  });
+}
+
 app.get(
   "/api/b2b/schools",
   requireAuth,
@@ -1231,106 +1338,8 @@ app.get(
     res.set("Cache-Control", "no-store");
 
     try {
-      const cacheKey = `cache:api:b2b:school-stock:${id}:v3`;
-      const payload = await cacheGetOrSet(cacheKey, 60, async () => {
-        const school = await _getB2BSchoolById(id);
-        if (!school) return [];
-        const schoolName = String(school.name || "").trim();
-
-        const schemaProps = await _getStocktakingDBProps();
-        const qtyPropName = _findPropNameByNorm(schemaProps, schoolName) || schoolName;
-        const donePropName =
-          _findPropNameByNorm(schemaProps, `${schoolName} Done`) || `${schoolName} Done`;
-
-        const allStock = [];
-        let hasMore = true;
-        let startCursor = undefined;
-
-        const numberFrom = (prop) => {
-          if (!prop) return undefined;
-          if (typeof prop.number === "number") return prop.number;
-          if (prop.formula && typeof prop.formula.number === "number") return prop.formula.number;
-          if (prop.rollup && typeof prop.rollup.number === "number") return prop.rollup.number;
-          return undefined;
-        };
-        const firstDefinedNumber = (...props) => {
-          for (const p of props) {
-            const n = numberFrom(p);
-            if (typeof n === "number") return n;
-          }
-          return 0;
-        };
-
-        while (hasMore) {
-          const resp = await notion.databases.query({
-            database_id: stocktakingDatabaseId,
-            start_cursor: startCursor,
-            sorts: [{ property: "Name", direction: "ascending" }],
-          });
-
-          const batch = (resp.results || [])
-            .map((page) => {
-              const props = page.properties || {};
-              const componentName =
-                props.Name?.title?.[0]?.plain_text ||
-                props.Component?.title?.[0]?.plain_text ||
-                "Untitled";
-
-              const qtyKey =
-                (qtyPropName in props && qtyPropName) ||
-                _findPropNameByNorm(props, schoolName) ||
-                schoolName;
-
-              const doneKey =
-                (donePropName in props && donePropName) ||
-                _findPropNameByNorm(props, `${schoolName} Done`) ||
-                `${schoolName} Done`;
-
-              const quantity = firstDefinedNumber(props[qtyKey]);
-              const doneQuantity = firstDefinedNumber(props[doneKey]);
-
-              // Some databases store "<School> Done" as a Number/Rollup/Formula (not a Checkbox).
-              // Keep a boolean too (best-effort) for UI states.
-              const done = _boolFrom(props[doneKey]) || (Number(doneQuantity) > 0);
-
-              let tag = null;
-              if (props.Tag?.select) {
-                tag = {
-                  name: props.Tag.select.name,
-                  color: props.Tag.select.color || "default",
-                };
-              } else if (Array.isArray(props.Tag?.multi_select) && props.Tag.multi_select.length > 0) {
-                const t = props.Tag.multi_select[0];
-                tag = { name: t.name, color: t.color || "default" };
-              } else if (Array.isArray(props.Tags?.multi_select) && props.Tags.multi_select.length > 0) {
-                const t = props.Tags.multi_select[0];
-                tag = { name: t.name, color: t.color || "default" };
-              }
-
-              return {
-                id: page.id,
-                name: componentName,
-                quantity: Number(quantity) || 0,
-                // value from "<School> Done" (Number/Rollup/Formula/Checkbox best-effort)
-                doneQuantity: Number(doneQuantity) || 0,
-                done: !!done,
-                tag,
-              };
-            })
-            .filter(Boolean);
-
-          allStock.push(...batch);
-          hasMore = !!resp.has_more;
-          startCursor = resp.next_cursor || undefined;
-        }
-
-        // Keep rows that have either a positive "In Stock" OR a positive "<School> Done" value.
-        // This prevents empty lists when the DB tracks the school only via the "Done" columns.
-        const filtered = (allStock || []).filter((it) => (Number(it.quantity) > 0) || (Number(it.doneQuantity) > 0));
-        return filtered;
-      });
-
-      return res.json(Array.isArray(payload) ? payload : (payload?.items || []));
+      const payload = await _getB2BSchoolStocktakingPayload(id);
+      return res.json(Array.isArray(payload) ? payload : []);
     } catch (e) {
       console.error("Error fetching B2B stocktaking:", e?.body || e);
       return res.status(500).json({ error: "Failed to fetch stocktaking data." });
@@ -1338,6 +1347,291 @@ app.get(
   },
 );
 
+
+
+// ===== B2B School Stocktaking — PDF download (Done column only) =====
+app.get(
+  "/api/b2b/schools/:id/stock/pdf",
+  requireAuth,
+  requirePage("B2B"),
+  async (req, res) => {
+    if (!stocktakingDatabaseId) {
+      return res
+        .status(500)
+        .json({ error: "Stocktaking database ID is not configured." });
+    }
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "Missing school id." });
+
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const school = await _getB2BSchoolById(id);
+      if (!school) return res.status(404).json({ error: "School not found." });
+
+      const schoolName = String(school.name || "School").trim() || "School";
+      const doneLabel = `${schoolName} Done`;
+
+      const rows = await _getB2BSchoolStocktakingPayload(id);
+
+      // Group by tag
+      const groupsMap = new Map();
+      (rows || []).forEach((it) => {
+        const name = it?.tag?.name || "Untagged";
+        const color = it?.tag?.color || "default";
+        const key = `${String(name).toLowerCase()}|${color}`;
+        if (!groupsMap.has(key)) groupsMap.set(key, { name, color, items: [] });
+        groupsMap.get(key).items.push(it);
+      });
+
+      let groups = Array.from(groupsMap.values()).sort((a, b) =>
+        String(a.name).localeCompare(String(b.name)),
+      );
+      const untagged = groups.filter(
+        (g) => String(g.name).toLowerCase() === "untagged" || g.name === "-",
+      );
+      groups = groups
+        .filter(
+          (g) => !(String(g.name).toLowerCase() === "untagged" || g.name === "-"),
+        )
+        .concat(untagged);
+
+      const safeName = schoolName
+        .replace(/[<>:"/\|?*]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const fname = `B2B-Stocktaking-${safeName}-${dateStr}.pdf`;
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
+
+      const doc = new PDFDocument({ size: "A4", margin: 36 });
+      doc.pipe(res);
+
+      const COLORS = {
+        text: "#111827",
+        muted: "#6B7280",
+        border: "#E5E7EB",
+        headBg: "#F3F4F6",
+      };
+
+      const pageW = doc.page.width;
+      const mL = doc.page.margins.left;
+      const mR = doc.page.margins.right;
+      const mB = doc.page.margins.bottom;
+      const tableW = pageW - mL - mR;
+      const doneColW = 120;
+      const nameColW = tableW - doneColW;
+
+      const ensureSpace = (needed) => {
+        if (doc.y + needed > doc.page.height - mB) {
+          doc.addPage();
+        }
+      };
+
+      // Header
+      doc
+        .fillColor(COLORS.text)
+        .font("Helvetica-Bold")
+        .fontSize(20)
+        .text("Stocktaking", mL, doc.y);
+
+      doc
+        .fillColor(COLORS.muted)
+        .font("Helvetica")
+        .fontSize(11)
+        .text(`School: ${schoolName}`, mL, doc.y + 6);
+
+      doc
+        .fillColor(COLORS.muted)
+        .font("Helvetica")
+        .fontSize(10)
+        .text(`Generated: ${new Date().toLocaleString("en-GB")}`, mL, doc.y + 4);
+
+      doc.moveDown(1.2);
+      doc
+        .moveTo(mL, doc.y)
+        .lineTo(pageW - mR, doc.y)
+        .lineWidth(1)
+        .strokeColor(COLORS.border)
+        .stroke();
+      doc.moveDown(1);
+
+      if (!groups.length) {
+        doc
+          .fillColor(COLORS.muted)
+          .font("Helvetica")
+          .fontSize(12)
+          .text("No stock data found.", mL, doc.y);
+        doc.end();
+        return;
+      }
+
+      const drawTableHeader = () => {
+        ensureSpace(28);
+        const y = doc.y;
+        doc
+          .rect(mL, y, tableW, 22)
+          .fill(COLORS.headBg)
+          .strokeColor(COLORS.border)
+          .stroke();
+
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica-Bold")
+          .fontSize(10)
+          .text("Component", mL + 8, y + 6, { width: nameColW - 16 });
+
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica-Bold")
+          .fontSize(10)
+          .text(doneLabel, mL + nameColW + 8, y + 6, {
+            width: doneColW - 16,
+            align: "right",
+          });
+
+        doc.y = y + 26;
+      };
+
+      const drawRow = (item) => {
+        ensureSpace(22);
+        const y = doc.y;
+
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica")
+          .fontSize(10)
+          .text(String(item?.name || "-"), mL + 8, y + 4, {
+            width: nameColW - 16,
+          });
+
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica")
+          .fontSize(10)
+          .text(String(item?.doneQuantity ?? 0), mL + nameColW + 8, y + 4, {
+            width: doneColW - 16,
+            align: "right",
+          });
+
+        // Row separator
+        doc
+          .moveTo(mL, y + 18)
+          .lineTo(mL + tableW, y + 18)
+          .lineWidth(1)
+          .strokeColor("#F3F4F6")
+          .stroke();
+
+        doc.y = y + 22;
+      };
+
+      for (const g of groups) {
+        ensureSpace(30);
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica-Bold")
+          .fontSize(13)
+          .text(String(g.name || "Untagged"), mL, doc.y);
+        doc.moveDown(0.6);
+
+        drawTableHeader();
+
+        (g.items || [])
+          .slice()
+          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+          .forEach(drawRow);
+
+        doc.moveDown(0.8);
+      }
+
+      doc.end();
+    } catch (e) {
+      console.error("B2B PDF generation error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to generate PDF" });
+    }
+  },
+);
+
+// ===== B2B School Stocktaking — Excel download (Done column only) =====
+app.get(
+  "/api/b2b/schools/:id/stock/excel",
+  requireAuth,
+  requirePage("B2B"),
+  async (req, res) => {
+    if (!stocktakingDatabaseId) {
+      return res
+        .status(500)
+        .json({ error: "Stocktaking database ID is not configured." });
+    }
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "Missing school id." });
+
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const school = await _getB2BSchoolById(id);
+      if (!school) return res.status(404).json({ error: "School not found." });
+
+      const schoolName = String(school.name || "School").trim() || "School";
+      const doneLabel = `${schoolName} Done`;
+
+      const rows = await _getB2BSchoolStocktakingPayload(id);
+
+      const safeName = schoolName
+        .replace(/[<>:"/\|?*]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const fname = `B2B-Stocktaking-${safeName}-${dateStr}.xlsx`;
+
+      const ExcelJS = require("exceljs");
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Operations Hub";
+      const ws = wb.addWorksheet("Stocktaking");
+
+      ws.columns = [
+        { header: "Tag", key: "tag", width: 28 },
+        { header: "Component", key: "component", width: 48 },
+        { header: doneLabel, key: "done", width: 14 },
+      ];
+
+      ws.getRow(1).font = { bold: true };
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+
+      (rows || [])
+        .slice()
+        .sort((a, b) => {
+          const ta = String(a?.tag?.name || "Untagged");
+          const tb = String(b?.tag?.name || "Untagged");
+          if (ta !== tb) return ta.localeCompare(tb);
+          return String(a?.name || "").localeCompare(String(b?.name || ""));
+        })
+        .forEach((it) => {
+          ws.addRow({
+            tag: it?.tag?.name || "Untagged",
+            component: it?.name || "-",
+            done: Number(it?.doneQuantity ?? 0),
+          });
+        });
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
+
+      await wb.xlsx.write(res);
+      res.end();
+    } catch (e) {
+      console.error("B2B Excel generation error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to generate Excel" });
+    }
+  },
+);
 // Order Draft APIs — require Create New Order
 app.get(
   "/api/order-draft",
