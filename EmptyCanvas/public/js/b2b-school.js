@@ -5,13 +5,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const searchInput = document.getElementById('schoolStockSearch');
   const downloadPdfBtn = document.getElementById('downloadPdfBtn');
   const downloadExcelBtn = document.getElementById('downloadExcelBtn');
+  const makeInventoryBtn = document.getElementById('makeInventoryBtn');
 
   let school = null;
   let allStock = [];
+  let stockMeta = { donePropName: null, inventoryPropName: null, inventoryDate: null };
 
   // Disable export buttons until we know the school
   if (downloadPdfBtn) downloadPdfBtn.disabled = true;
   if (downloadExcelBtn) downloadExcelBtn.disabled = true;
+  if (makeInventoryBtn) makeInventoryBtn.disabled = true;
 
   const norm = (s) => String(s || '').toLowerCase().trim();
 
@@ -118,6 +121,52 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.feather) feather.replace();
   };
 
+  // Inventory save (B2B) — debounce updates per row
+  const inventorySaveTimers = new Map();
+
+  const saveInventoryValue = async (schoolId, stockPageId, value) => {
+    const res = await fetch(
+      `/api/b2b/schools/${encodeURIComponent(schoolId)}/stock/${encodeURIComponent(stockPageId)}/inventory`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          value,
+          inventoryPropName: stockMeta?.inventoryPropName || null,
+          inventoryDate: stockMeta?.inventoryDate || null,
+        }),
+      },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data?.details || data?.error || 'Failed to save inventory.';
+      throw new Error(msg);
+    }
+    // Keep meta in sync (server may create the column on-demand)
+    if (data?.inventoryPropName) stockMeta.inventoryPropName = data.inventoryPropName;
+    if (data?.inventoryDate) stockMeta.inventoryDate = data.inventoryDate;
+    return data;
+  };
+
+  const scheduleInventorySave = (schoolId, stockPageId, value) => {
+    const key = String(stockPageId || '');
+    if (!key) return;
+    const prev = inventorySaveTimers.get(key);
+    if (prev) clearTimeout(prev);
+    const t = setTimeout(async () => {
+      try {
+        await saveInventoryValue(schoolId, stockPageId, value);
+      } catch (e) {
+        console.error(e);
+        if (window.UI && UI.toast) {
+          UI.toast({ type: 'error', title: 'Inventory', message: e.message || 'Failed to save inventory.' });
+        }
+      }
+    }, 550);
+    inventorySaveTimers.set(key, t);
+  };
+
   const renderGroups = (rows) => {
     if (!groupsEl) return;
     groupsEl.innerHTML = '';
@@ -127,7 +176,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const doneLabel = school?.name ? `${school.name} Done` : 'Done';
+    const doneLabel = stockMeta?.donePropName || (school?.name ? `${school.name} Done` : 'Done');
+    const hasInventory = !!stockMeta?.inventoryPropName;
+    const inventoryLabel = hasInventory
+      ? (stockMeta?.inventoryDate ? `Inventory (${stockMeta.inventoryDate})` : 'Inventory')
+      : null;
 
     const groups = groupByTag(rows);
     const frag = document.createDocumentFragment();
@@ -166,6 +219,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <tr>
           <th>Component</th>
           <th class="col-num col-done">${doneLabel}</th>
+          ${hasInventory ? `<th class="col-inventory col-inv">${inventoryLabel}</th>` : ''}
         </tr>
       `;
 
@@ -186,6 +240,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
           tr.appendChild(tdName);
           tr.appendChild(tdDone);
+
+          if (hasInventory) {
+            const tdInv = document.createElement('td');
+            tdInv.className = 'col-inventory col-inv';
+
+            const invInput = document.createElement('input');
+            invInput.type = 'number';
+            invInput.min = '0';
+            invInput.step = '1';
+            invInput.inputMode = 'numeric';
+            invInput.className = 'inventory-input';
+            invInput.placeholder = '—';
+            invInput.value = item.inventory === null || typeof item.inventory === 'undefined' ? '' : String(item.inventory);
+            invInput.setAttribute('data-stock-id', item.id || '');
+
+            invInput.addEventListener('input', () => {
+              const raw = invInput.value;
+              const v = raw === '' ? null : Number(raw);
+              // Update local state immediately for filter/re-render
+              item.inventory = v;
+              const currentSchoolId = school?.id || getSchoolIdFromPath();
+              scheduleInventorySave(currentSchoolId, item.id, v);
+
+              // Live mismatch highlight vs Done
+              const doneNow = Number(item.doneQuantity ?? 0);
+              if (v !== null && typeof v !== 'undefined' && Number(v) !== doneNow) {
+                tdInv.style.fontWeight = '800';
+                tdInv.style.color = '#B91C1C';
+              } else {
+                tdInv.style.fontWeight = '';
+                tdInv.style.color = '';
+              }
+            });
+
+            // Small UX: highlight mismatch vs Done
+            const doneV = Number(item.doneQuantity ?? 0);
+            const invV = item.inventory;
+            if (invV !== null && typeof invV !== 'undefined' && Number(invV) !== doneV) {
+              tdInv.style.fontWeight = '800';
+              tdInv.style.color = '#B91C1C';
+            }
+
+            tdInv.appendChild(invInput);
+            tr.appendChild(tdInv);
+          }
           tbody.appendChild(tr);
         });
 
@@ -242,7 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const fetchStock = async (id) => {
-    if (!groupsEl) return [];
+    if (!groupsEl) return { meta: {}, items: [] };
     groupsEl.innerHTML = `
       <div class="modern-loading" role="status" aria-live="polite">
         <div class="modern-loading__spinner" aria-hidden="true"></div>
@@ -256,14 +355,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const res = await fetch(`/api/b2b/schools/${encodeURIComponent(id)}/stock`, { credentials: 'include' });
     if (res.status === 401 || res.redirected) {
       window.location.href = '/login';
-      return [];
+      return { meta: {}, items: [] };
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to load stock');
     }
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    if (Array.isArray(data)) return { meta: {}, items: data };
+    if (data && typeof data === 'object') {
+      return { meta: data.meta || {}, items: Array.isArray(data.items) ? data.items : [] };
+    }
+    return { meta: {}, items: [] };
   };
 
 
@@ -359,8 +462,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
       renderDetails();
 
-      allStock = await fetchStock(id);
+      const stockRes = await fetchStock(id);
+      allStock = stockRes.items;
+      stockMeta = { ...stockMeta, ...(stockRes.meta || {}) };
       renderGroups(allStock);
+
+      // Make inventory (creates "<School> Inventory YYYY-MM-DD" column in Notion)
+      if (makeInventoryBtn) {
+        makeInventoryBtn.disabled = false;
+        makeInventoryBtn.onclick = async (e) => {
+          e.preventDefault();
+          try {
+            const r = await fetch(`/api/b2b/schools/${encodeURIComponent(id)}/inventory`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({}),
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(j.details || j.error || 'Failed to create inventory column.');
+
+            // Refresh stock data to show the new column + values
+            const refreshed = await fetchStock(id);
+            allStock = refreshed.items;
+            stockMeta = { ...stockMeta, ...(refreshed.meta || {}) };
+            applyFilter();
+
+            if (window.UI && UI.toast) {
+              const label = j?.inventoryPropName || 'Inventory column';
+              UI.toast({ type: 'success', title: 'Inventory', message: `${label} is ready.` });
+            }
+          } catch (err) {
+            console.error(err);
+            if (window.UI && UI.toast) {
+              UI.toast({ type: 'error', title: 'Inventory', message: err.message || 'Failed to create inventory column.' });
+            }
+          }
+        };
+      }
 
       if (searchInput) {
         searchInput.addEventListener('input', applyFilter);
