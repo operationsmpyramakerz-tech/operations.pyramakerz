@@ -1114,6 +1114,84 @@ function _findPropNameByNorm(schemaProps, desired) {
   return null;
 }
 
+function _escapeRegExp(s) {
+  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function _cairoDateISO(date = new Date()) {
+  // YYYY-MM-DD in Africa/Cairo (stable for Notion property names)
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Cairo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const get = (t) => parts.find((p) => p.type === t)?.value;
+    const y = get('year');
+    const m = get('month');
+    const d = get('day');
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch {}
+  return new Date(date).toISOString().slice(0, 10);
+}
+
+function _makeInventoryPropName(schoolName, dateISO) {
+  const base = String(schoolName || '').trim();
+  const d = String(dateISO || '').trim();
+  return `${base} Inventory ${d}`.trim();
+}
+
+function _findLatestInventoryProp(schemaProps, schoolName) {
+  const name = String(schoolName || '').trim();
+  if (!name) return null;
+
+  // Match: "<School> Inventory YYYY-MM-DD" (case-insensitive)
+  const re = new RegExp(`^\\s*${_escapeRegExp(name)}\\s+inventory\\s+(\\d{4}-\\d{2}-\\d{2})\\s*$`, 'i');
+
+  let best = null;
+  for (const key of Object.keys(schemaProps || {})) {
+    const m = String(key || '').match(re);
+    if (!m) continue;
+    const dateStr = m[1];
+    if (!best || String(dateStr) > String(best.date)) {
+      best = { name: key, date: dateStr };
+    }
+  }
+  return best;
+}
+
+async function _ensureInventoryPropExists({ schoolName, dateISO }) {
+  if (!stocktakingDatabaseId) return null;
+  const name = String(schoolName || '').trim();
+  const d = String(dateISO || '').trim();
+  if (!name || !d) return null;
+
+  const desired = _makeInventoryPropName(name, d);
+
+  const schemaPropsBefore = await _getStocktakingDBProps();
+  const existing = _findPropNameByNorm(schemaPropsBefore, desired);
+  if (existing) return existing;
+
+  // Create a new Number property in the School Stocktaking DB
+  await notion.databases.update({
+    database_id: stocktakingDatabaseId,
+    properties: {
+      [desired]: { number: { format: 'number' } },
+    },
+  });
+
+  // Invalidate schema cache so subsequent requests see the new property.
+  try {
+    const cacheKey = `cache:notion:dbprops:stocktaking:${stocktakingDatabaseId}:v1`;
+    await cacheDel(cacheKey);
+  } catch {}
+
+  // Return canonical name (as stored by Notion)
+  const schemaPropsAfter = await _getStocktakingDBProps();
+  return _findPropNameByNorm(schemaPropsAfter, desired) || desired;
+}
+
 function _boolFrom(prop) {
   if (!prop) return false;
   if (typeof prop.checkbox === "boolean") return prop.checkbox;
@@ -1124,19 +1202,32 @@ function _boolFrom(prop) {
 
 async function _getB2BSchoolStocktakingPayload(schoolId) {
   const id = String(schoolId || "").trim();
-  if (!id) return [];
+  if (!id) return { meta: {}, items: [] };
 
-  const cacheKey = `cache:api:b2b:school-stock:${id}:v3`;
+  const cacheKey = `cache:api:b2b:school-stock:${id}:v4`;
   return await cacheGetOrSet(cacheKey, 60, async () => {
     const school = await _getB2BSchoolById(id);
-    if (!school) return [];
+    if (!school) return { meta: {}, items: [] };
     const schoolName = String(school.name || "").trim();
-    if (!schoolName) return [];
+    if (!schoolName) return { meta: {}, items: [] };
 
     const schemaProps = await _getStocktakingDBProps();
-    const qtyPropName = _findPropNameByNorm(schemaProps, schoolName) || schoolName;
+
+    // Done column is the expected quantity for the school (as in Notion: "<School> Done")
     const donePropName =
       _findPropNameByNorm(schemaProps, `${schoolName} Done`) || `${schoolName} Done`;
+
+    // Inventory column is created per school + date:
+    // "<School> Inventory YYYY-MM-DD" (latest one wins)
+    const latestInv = _findLatestInventoryProp(schemaProps, schoolName);
+    const inventoryPropName = latestInv?.name || null;
+    const inventoryDate = latestInv?.date || null;
+
+    const productsNameToIdCode = await _getProductsNameToIdCodeMap();
+    const lookupIdCode = (componentName, fallbackProps) => {
+      const fromProducts = productsNameToIdCode.get(_normNameKey(componentName));
+      return fromProducts || _extractIdCodeFromProps(fallbackProps || {}) || "";
+    };
 
     const allStock = [];
     let hasMore = true;
@@ -1150,12 +1241,9 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
       return undefined;
     };
 
-    const firstDefinedNumber = (...props) => {
-      for (const p of props) {
-        const n = numberFrom(p);
-        if (typeof n === "number") return n;
-      }
-      return 0;
+    const numberOrNull = (prop) => {
+      const n = numberFrom(prop);
+      return typeof n === "number" ? n : null;
     };
 
     while (hasMore) {
@@ -1173,22 +1261,24 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
             props.Component?.title?.[0]?.plain_text ||
             "Untitled";
 
-          const qtyKey =
-            (qtyPropName in props && qtyPropName) ||
-            _findPropNameByNorm(props, schoolName) ||
-            schoolName;
-
           const doneKey =
             (donePropName in props && donePropName) ||
             _findPropNameByNorm(props, `${schoolName} Done`) ||
             `${schoolName} Done`;
 
-          const quantity = firstDefinedNumber(props[qtyKey]);
-          const doneQuantity = firstDefinedNumber(props[doneKey]);
+          const doneQuantity = numberOrNull(props[doneKey]);
+          const doneBool = _boolFrom(props[doneKey]) || Number(doneQuantity || 0) > 0;
 
-          // Some databases store "<School> Done" as a Number/Rollup/Formula (not a Checkbox).
-          // Keep a boolean too (best-effort) for UI states.
-          const done = _boolFrom(props[doneKey]) || Number(doneQuantity) > 0;
+          let inventory = null;
+          if (inventoryPropName) {
+            const invKey =
+              (inventoryPropName in props && inventoryPropName) ||
+              _findPropNameByNorm(props, inventoryPropName) ||
+              inventoryPropName;
+            inventory = numberOrNull(props[invKey]);
+          }
+
+          const idCode = lookupIdCode(componentName, props);
 
           let tag = null;
           if (props.Tag?.select) {
@@ -1207,9 +1297,10 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
           return {
             id: page.id,
             name: componentName,
-            quantity: Number(quantity) || 0,
-            doneQuantity: Number(doneQuantity) || 0,
-            done: !!done,
+            idCode: idCode || "",
+            doneQuantity: doneQuantity === null ? 0 : Number(doneQuantity) || 0,
+            done: !!doneBool,
+            inventory,
             tag,
           };
         })
@@ -1220,12 +1311,20 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
       startCursor = resp.next_cursor || undefined;
     }
 
-    // Keep rows that have either a positive "In Stock" OR a positive "<School> Done" value.
-    // This prevents empty lists when the DB tracks the school only via the "Done" columns.
+    // Keep rows that have either a positive "<School> Done" value OR any inventory value.
     const filtered = (allStock || []).filter(
-      (it) => Number(it.quantity) > 0 || Number(it.doneQuantity) > 0,
+      (it) => Number(it.doneQuantity) > 0 || (it.inventory !== null && Number(it.inventory) >= 0),
     );
-    return filtered;
+
+    return {
+      meta: {
+        schoolName,
+        donePropName,
+        inventoryPropName,
+        inventoryDate,
+      },
+      items: filtered,
+    };
   });
 }
 
@@ -1339,7 +1438,7 @@ app.get(
 
     try {
       const payload = await _getB2BSchoolStocktakingPayload(id);
-      return res.json(Array.isArray(payload) ? payload : []);
+      return res.json(payload && typeof payload === 'object' ? payload : { meta: {}, items: [] });
     } catch (e) {
       console.error("Error fetching B2B stocktaking:", e?.body || e);
       return res.status(500).json({ error: "Failed to fetch stocktaking data." });
@@ -1347,18 +1446,16 @@ app.get(
   },
 );
 
-
-
-// ===== B2B School Stocktaking — PDF download (Done column only) =====
-app.get(
-  "/api/b2b/schools/:id/stock/pdf",
+// ===== B2B — Create (or get) today's inventory column for a school =====
+// Creates a new Number property in the School Stocktaking database:
+//   "<School> Inventory YYYY-MM-DD"
+app.post(
+  "/api/b2b/schools/:id/inventory",
   requireAuth,
   requirePage("B2B"),
   async (req, res) => {
     if (!stocktakingDatabaseId) {
-      return res
-        .status(500)
-        .json({ error: "Stocktaking database ID is not configured." });
+      return res.status(500).json({ error: "Stocktaking database ID is not configured." });
     }
 
     const id = String(req.params.id || "").trim();
@@ -1370,85 +1467,253 @@ app.get(
       const school = await _getB2BSchoolById(id);
       if (!school) return res.status(404).json({ error: "School not found." });
 
-      const schoolName = String(school.name || "School").trim() || "School";
-      const doneLabel = `${schoolName} Done`;
+      const schoolName = String(school.name || "").trim();
+      if (!schoolName) return res.status(400).json({ error: "Invalid school name." });
 
-      const rows = await _getB2BSchoolStocktakingPayload(id);
-
-      // Group by tag
-      const groupsMap = new Map();
-      (rows || []).forEach((it) => {
-        const name = it?.tag?.name || "Untagged";
-        const color = it?.tag?.color || "default";
-        const key = `${String(name).toLowerCase()}|${color}`;
-        if (!groupsMap.has(key)) groupsMap.set(key, { name, color, items: [] });
-        groupsMap.get(key).items.push(it);
+      const dateISO = _cairoDateISO(new Date());
+      const inventoryPropName = await _ensureInventoryPropExists({
+        schoolName,
+        dateISO,
       });
 
-      let groups = Array.from(groupsMap.values()).sort((a, b) =>
-        String(a.name).localeCompare(String(b.name)),
-      );
-      const untagged = groups.filter(
-        (g) => String(g.name).toLowerCase() === "untagged" || g.name === "-",
-      );
-      groups = groups
-        .filter(
-          (g) => !(String(g.name).toLowerCase() === "untagged" || g.name === "-"),
-        )
-        .concat(untagged);
+      // Invalidate school stock cache so UI shows the new column immediately.
+      try {
+        await cacheDel(`cache:api:b2b:school-stock:${id}:v4`);
+      } catch {}
 
-      const safeName = schoolName
-        .replace(/[<>:"/\|?*]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const fname = `B2B-Stocktaking-${safeName}-${dateStr}.pdf`;
+      return res.json({ ok: true, inventoryPropName, inventoryDate: dateISO });
+    } catch (e) {
+      console.error("Error creating B2B inventory column:", e?.body || e);
+      const msg = e?.body?.message || e?.message || "Failed to create inventory column.";
+      return res.status(500).json({ error: "Failed to create inventory column.", details: msg });
+    }
+  },
+);
 
+// ===== B2B — Update inventory value for a single stock item (row) =====
+// Writes the number into the latest inventory column for the school.
+app.patch(
+  "/api/b2b/schools/:id/stock/:stockId/inventory",
+  requireAuth,
+  requirePage("B2B"),
+  async (req, res) => {
+    if (!stocktakingDatabaseId) {
+      return res.status(500).json({ error: "Stocktaking database ID is not configured." });
+    }
+
+    const schoolId = String(req.params.id || "").trim();
+    const stockId = String(req.params.stockId || "").trim();
+    if (!schoolId) return res.status(400).json({ error: "Missing school id." });
+    if (!stockId) return res.status(400).json({ error: "Missing stock item id." });
+
+    const raw = req?.body?.value;
+    const value = raw === null || typeof raw === "undefined" || raw === "" ? null : Number(raw);
+    if (value !== null && (!Number.isFinite(value) || value < 0)) {
+      return res.status(400).json({ error: "Invalid inventory value." });
+    }
+
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const school = await _getB2BSchoolById(schoolId);
+      if (!school) return res.status(404).json({ error: "School not found." });
+      const schoolName = String(school.name || "").trim();
+      if (!schoolName) return res.status(400).json({ error: "Invalid school name." });
+
+      // Prefer the inventory column requested by the client (if provided),
+      // then fall back to the latest existing inventory column; if none exists, create today's.
+      const schemaProps = await _getStocktakingDBProps();
+      const requestedInvProp = typeof req?.body?.inventoryPropName === "string" ? String(req.body.inventoryPropName).trim() : "";
+      const requestedInvDate = typeof req?.body?.inventoryDate === "string" ? String(req.body.inventoryDate).trim() : "";
+
+      let inventoryPropName = null;
+      let inventoryDate = null;
+
+      if (requestedInvProp) {
+        inventoryPropName = _findPropNameByNorm(schemaProps, requestedInvProp) || (schemaProps?.[requestedInvProp] ? requestedInvProp : null);
+        if (inventoryPropName) {
+          const m = String(inventoryPropName).match(/\b(\d{4}-\d{2}-\d{2})\b/);
+          inventoryDate = m ? m[1] : null;
+        }
+      }
+
+      if (!inventoryPropName && requestedInvDate) {
+        const candidate = _makeInventoryPropName({ schoolName, dateISO: requestedInvDate });
+        inventoryPropName = _findPropNameByNorm(schemaProps, candidate) || (schemaProps?.[candidate] ? candidate : null);
+        inventoryDate = inventoryPropName ? requestedInvDate : null;
+      }
+
+      if (!inventoryPropName) {
+        const latestInv = _findLatestInventoryProp(schemaProps, schoolName);
+        inventoryPropName = latestInv?.name || null;
+        inventoryDate = latestInv?.date || null;
+      }
+
+      if (!inventoryPropName) {
+        const dateISO = _cairoDateISO(new Date());
+        inventoryPropName = await _ensureInventoryPropExists({ schoolName, dateISO });
+        inventoryDate = dateISO;
+      }
+
+      await notion.pages.update({
+        page_id: stockId,
+        properties: {
+          [inventoryPropName]: { number: value },
+        },
+      });
+
+      // Invalidate school stock cache so UI reflects updates.
+      try {
+        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v4`);
+      } catch {}
+
+      return res.json({ ok: true, inventoryPropName, inventoryDate, value });
+    } catch (e) {
+      console.error("Error updating B2B inventory value:", e?.body || e);
+      const msg = e?.body?.message || e?.message || "Failed to update inventory.";
+      return res.status(500).json({ error: "Failed to update inventory.", details: msg });
+    }
+  },
+);
+
+
+
+// ===== B2B School Stocktaking — PDF download (same template as /stocktaking) =====
+app.get(
+  "/api/b2b/schools/:id/stock/pdf",
+  requireAuth,
+  requirePage("B2B"),
+  async (req, res) => {
+    if (!stocktakingDatabaseId) {
+      return res.status(500).json({ error: "Stocktaking database ID is not configured." });
+    }
+
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "Missing school id." });
+
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const { meta, items } = await _getB2BSchoolStocktakingPayload(id);
+      const schoolName = String(meta?.donePropName || meta?.schoolName || "School").trim() || "School";
+
+      // Build rows in the same shape as /api/stock/pdf
+      const filteredStockForPdf = (items || [])
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          idCode: r.idCode,
+          quantity: Number(r.doneQuantity) || 0,
+          inventory:
+            r.inventory === null || typeof r.inventory === "undefined" ? null : Number(r.inventory),
+          tag: r.tag,
+        }))
+        .filter((r) => Number(r.quantity) > 0 || (r.inventory !== null && Number(r.inventory) >= 0));
+
+      const createdAt = new Date();
+      const dateStr = createdAt.toISOString().slice(0, 10);
+      const fileName = `Stocktaking-${dateStr}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
       const doc = new PDFDocument({ size: "A4", margin: 36 });
       doc.pipe(res);
 
+      const logoPath = path.join(__dirname, "../public/images/logo.png");
       const COLORS = {
         text: "#111827",
         muted: "#6B7280",
         border: "#E5E7EB",
-        headBg: "#F3F4F6",
+        headerBg: "#F9FAFB",
+        tableHeadBg: "#ECFDF5",
+        tagPillBg: "#D1FAE5",
+        accent: "#065F46",
+        mismatch: "#DC2626",
+        mismatchBg: "#FEF2F2",
       };
 
+      const normalizeTagName = (name) => {
+        const n = String(name || "").trim();
+        if (!n) return "Untagged";
+        if (n.toLowerCase() === "untagged" || n === "-") return "Untagged";
+        return n;
+      };
+
+      const notionToHex = (color = "default") => {
+        switch (color) {
+          case "gray":
+            return { bg: "#F3F4F6", text: "#374151" };
+          case "brown":
+            return { bg: "#EFEBE9", text: "#4E342E" };
+          case "orange":
+            return { bg: "#FFF7ED", text: "#9A3412" };
+          case "yellow":
+            return { bg: "#FEFCE8", text: "#854D0E" };
+          case "green":
+            return { bg: "#ECFDF5", text: "#065F46" };
+          case "blue":
+            return { bg: "#EFF6FF", text: "#1E40AF" };
+          case "purple":
+            return { bg: "#F5F3FF", text: "#5B21B6" };
+          case "pink":
+            return { bg: "#FDF2F8", text: "#9D174D" };
+          case "red":
+            return { bg: "#FEF2F2", text: "#991B1B" };
+          default:
+            return { bg: COLORS.tagPillBg, text: COLORS.accent };
+        }
+      };
+
+      // Group items by tag
+      const groupMap = new Map();
+      for (const it of filteredStockForPdf) {
+        const tagName = normalizeTagName(it?.tag?.name);
+        const tagColor = it?.tag?.color || "default";
+        const key = `${tagName.toLowerCase()}|${tagColor}`;
+        if (!groupMap.has(key)) groupMap.set(key, { name: tagName, color: tagColor, items: [] });
+        groupMap.get(key).items.push(it);
+      }
+      let groups = Array.from(groupMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+      const untagged = groups.filter((g) => g.name === "Untagged");
+      groups = groups.filter((g) => g.name !== "Untagged").concat(untagged);
+
+      // Layout
       const pageW = doc.page.width;
       const mL = doc.page.margins.left;
       const mR = doc.page.margins.right;
       const mB = doc.page.margins.bottom;
-      const tableW = pageW - mL - mR;
-      const doneColW = 120;
-      const nameColW = tableW - doneColW;
+      const contentW = pageW - mL - mR;
+
+      const colIdW = 70;
+      const colQtyW = 60;
+      const colInvW = 70;
+      const colCompW = contentW - colIdW - colQtyW - colInvW;
 
       const ensureSpace = (needed) => {
-        if (doc.y + needed > doc.page.height - mB) {
-          doc.addPage();
-        }
+        if (doc.y + needed > doc.page.height - mB) doc.addPage();
       };
 
       // Header
+      try {
+        if (fs.existsSync(logoPath)) {
+          doc.image(logoPath, mL, doc.y, { width: 42 });
+        }
+      } catch {}
+
+      const headerX = mL + 52;
+      const headerTopY = doc.y;
+
       doc
         .fillColor(COLORS.text)
         .font("Helvetica-Bold")
-        .fontSize(20)
-        .text("Stocktaking", mL, doc.y);
-
-      doc
-        .fillColor(COLORS.muted)
-        .font("Helvetica")
-        .fontSize(11)
-        .text(`School: ${schoolName}`, mL, doc.y + 6);
+        .fontSize(18)
+        .text("Stocktaking", headerX, headerTopY);
 
       doc
         .fillColor(COLORS.muted)
         .font("Helvetica")
         .fontSize(10)
-        .text(`Generated: ${new Date().toLocaleString("en-GB")}`, mL, doc.y + 4);
+        .text(`School: ${schoolName}  •  Generated: ${formatDateTime(createdAt)}`, headerX, headerTopY + 22);
 
       doc.moveDown(1.2);
       doc
@@ -1457,94 +1722,237 @@ app.get(
         .lineWidth(1)
         .strokeColor(COLORS.border)
         .stroke();
-      doc.moveDown(1);
+      doc.moveDown(0.8);
+
+      // Handover confirmation title
+      doc
+        .fillColor(COLORS.text)
+        .font("Helvetica-Bold")
+        .fontSize(14)
+        .text("Handover Confirmation", mL, doc.y);
+
+      doc
+        .fillColor(COLORS.muted)
+        .font("Helvetica")
+        .fontSize(9)
+        .text(
+          "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.",
+          mL,
+          doc.y + 4,
+          { width: contentW },
+        );
+
+      doc.moveDown(1.1);
+
+      // Meta info boxes
+      const boxH = 32;
+      const boxGap = 12;
+      const boxW = (contentW - boxGap) / 2;
+      const boxY = doc.y;
+      const drawInfoBox = (x, title, value) => {
+        doc
+          .roundedRect(x, boxY, boxW, boxH, 8)
+          .fillColor(COLORS.headerBg)
+          .fill();
+        doc
+          .roundedRect(x, boxY, boxW, boxH, 8)
+          .strokeColor(COLORS.border)
+          .stroke();
+        doc
+          .fillColor(COLORS.muted)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text(title, x + 10, boxY + 6);
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica")
+          .fontSize(10)
+          .text(String(value || "-"), x + 10, boxY + 18, { width: boxW - 20 });
+      };
+      drawInfoBox(mL, "School", schoolName);
+      drawInfoBox(mL + boxW + boxGap, "Date", formatDateTime(createdAt));
+      doc.y = boxY + boxH + 16;
+
+      // Signature boxes
+      const sigBoxH = 44;
+      const sigY = doc.y;
+      const drawSigBox = (x, title) => {
+        doc
+          .roundedRect(x, sigY, boxW, sigBoxH, 8)
+          .strokeColor(COLORS.border)
+          .stroke();
+        doc
+          .fillColor(COLORS.muted)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text(title, x + 10, sigY + 8);
+        // signature line
+        doc
+          .moveTo(x + 10, sigY + 30)
+          .lineTo(x + boxW - 10, sigY + 30)
+          .lineWidth(1)
+          .strokeColor(COLORS.border)
+          .stroke();
+      };
+      drawSigBox(mL, "Deliverer Name / Signature");
+      drawSigBox(mL + boxW + boxGap, "Receiver Name / Signature");
+      doc.y = sigY + sigBoxH + 18;
 
       if (!groups.length) {
         doc
           .fillColor(COLORS.muted)
           .font("Helvetica")
-          .fontSize(12)
+          .fontSize(11)
           .text("No stock data found.", mL, doc.y);
         doc.end();
         return;
       }
 
+      const drawGroupHeader = (tagName, tagColor, count) => {
+        const y = doc.y;
+        const pill = notionToHex(tagColor);
+        const pillText = `Tag   ${tagName}`;
+
+        // light section background
+        doc
+          .roundedRect(mL, y, contentW, 28, 10)
+          .fillColor(COLORS.tableHeadBg)
+          .fill();
+
+        // tag pill
+        doc
+          .roundedRect(mL + 10, y + 6, Math.min(280, doc.widthOfString(pillText) + 18), 16, 8)
+          .fillColor(pill.bg)
+          .fill();
+        doc
+          .fillColor(pill.text)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text(pillText, mL + 18, y + 9);
+
+        // count pill
+        const countText = `${count} items`;
+        const countW = doc.widthOfString(countText) + 18;
+        doc
+          .roundedRect(mL + contentW - countW - 10, y + 6, countW, 16, 8)
+          .fillColor("#F3F4F6")
+          .fill();
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text(countText, mL + contentW - countW - 10 + 9, y + 9);
+
+        doc.y = y + 34;
+      };
+
       const drawTableHeader = () => {
-        ensureSpace(28);
         const y = doc.y;
         doc
-          .rect(mL, y, tableW, 22)
-          .fill(COLORS.headBg)
-          .strokeColor(COLORS.border)
-          .stroke();
+          .rect(mL, y, contentW, 20)
+          .fillColor(COLORS.tableHeadBg)
+          .fill();
 
         doc
-          .fillColor(COLORS.text)
+          .fillColor(COLORS.accent)
           .font("Helvetica-Bold")
-          .fontSize(10)
-          .text("Component", mL + 8, y + 6, { width: nameColW - 16 });
-
+          .fontSize(9)
+          .text("ID Code", mL + 8, y + 6, { width: colIdW - 10 });
         doc
-          .fillColor(COLORS.text)
+          .fillColor(COLORS.accent)
           .font("Helvetica-Bold")
-          .fontSize(10)
-          .text(doneLabel, mL + nameColW + 8, y + 6, {
-            width: doneColW - 16,
-            align: "right",
-          });
+          .fontSize(9)
+          .text("Component", mL + colIdW, y + 6, { width: colCompW - 10 });
+        doc
+          .fillColor(COLORS.accent)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text("In Stock", mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
+        doc
+          .fillColor(COLORS.accent)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text("Inventory", mL + colIdW + colCompW + colQtyW, y + 6, { width: colInvW - 10, align: "right" });
 
-        doc.y = y + 26;
+        doc.y = y + 24;
       };
 
       const drawRow = (item) => {
-        ensureSpace(22);
         const y = doc.y;
+        const rowH = 20;
 
+        // Mismatch highlight background
+        const invHasValue = item.inventory !== null && typeof item.inventory !== "undefined";
+        const mismatch = invHasValue && Number(item.inventory) !== Number(item.quantity);
+        if (mismatch) {
+          doc
+            .rect(mL, y, contentW, rowH)
+            .fillColor(COLORS.mismatchBg)
+            .fill();
+        }
+
+        // Text
         doc
           .fillColor(COLORS.text)
           .font("Helvetica")
-          .fontSize(10)
-          .text(String(item?.name || "-"), mL + 8, y + 4, {
-            width: nameColW - 16,
-          });
-
+          .fontSize(9)
+          .text(String(item.idCode || ""), mL + 8, y + 6, { width: colIdW - 10 });
         doc
           .fillColor(COLORS.text)
           .font("Helvetica")
-          .fontSize(10)
-          .text(String(item?.doneQuantity ?? 0), mL + nameColW + 8, y + 4, {
-            width: doneColW - 16,
-            align: "right",
-          });
-
-        // Row separator
+          .fontSize(9)
+          .text(String(item.name || "-"), mL + colIdW, y + 6, { width: colCompW - 10 });
         doc
-          .moveTo(mL, y + 18)
-          .lineTo(mL + tableW, y + 18)
+          .fillColor(COLORS.text)
+          .font("Helvetica")
+          .fontSize(9)
+          .text(String(item.quantity ?? 0), mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
+
+        if (invHasValue) {
+          doc
+            .fillColor(mismatch ? COLORS.mismatch : COLORS.text)
+            .font("Helvetica")
+            .fontSize(9)
+            .text(String(Number(item.inventory)), mL + colIdW + colCompW + colQtyW, y + 6, {
+              width: colInvW - 10,
+              align: "right",
+            });
+        } else {
+          // underline for handwritten inventory
+          const lineY = y + 14;
+          doc
+            .moveTo(mL + colIdW + colCompW + colQtyW + 8, lineY)
+            .lineTo(mL + colIdW + colCompW + colQtyW + colInvW - 8, lineY)
+            .lineWidth(0.8)
+            .strokeColor(COLORS.border)
+            .stroke();
+        }
+
+        // separator
+        doc
+          .moveTo(mL, y + rowH)
+          .lineTo(mL + contentW, y + rowH)
           .lineWidth(1)
           .strokeColor("#F3F4F6")
           .stroke();
 
-        doc.y = y + 22;
+        doc.y = y + rowH + 2;
       };
 
-      for (const g of groups) {
-        ensureSpace(30);
-        doc
-          .fillColor(COLORS.text)
-          .font("Helvetica-Bold")
-          .fontSize(13)
-          .text(String(g.name || "Untagged"), mL, doc.y);
-        doc.moveDown(0.6);
-
+      for (const group of groups) {
+        ensureSpace(60);
+        drawGroupHeader(group.name, group.color, group.items.length);
         drawTableHeader();
 
-        (g.items || [])
+        (group.items || [])
           .slice()
           .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
-          .forEach(drawRow);
+          .forEach((it) => {
+            ensureSpace(28);
+            drawRow(it);
+          });
 
-        doc.moveDown(0.8);
+        doc.moveDown(0.5);
       }
 
       doc.end();
@@ -1555,16 +1963,14 @@ app.get(
   },
 );
 
-// ===== B2B School Stocktaking — Excel download (Done column only) =====
+// ===== B2B School Stocktaking — Excel download (same template as /stocktaking) =====
 app.get(
   "/api/b2b/schools/:id/stock/excel",
   requireAuth,
   requirePage("B2B"),
   async (req, res) => {
     if (!stocktakingDatabaseId) {
-      return res
-        .status(500)
-        .json({ error: "Stocktaking database ID is not configured." });
+      return res.status(500).json({ error: "Stocktaking database ID is not configured." });
     }
 
     const id = String(req.params.id || "").trim();
@@ -1573,56 +1979,229 @@ app.get(
     res.set("Cache-Control", "no-store");
 
     try {
-      const school = await _getB2BSchoolById(id);
-      if (!school) return res.status(404).json({ error: "School not found." });
+      const { meta, items } = await _getB2BSchoolStocktakingPayload(id);
+      const schoolName = String(meta?.donePropName || meta?.schoolName || "School").trim() || "School";
 
-      const schoolName = String(school.name || "School").trim() || "School";
-      const doneLabel = `${schoolName} Done`;
-
-      const rows = await _getB2BSchoolStocktakingPayload(id);
-
-      const safeName = schoolName
-        .replace(/[<>:"/\|?*]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const fname = `B2B-Stocktaking-${safeName}-${dateStr}.xlsx`;
-
-      const ExcelJS = require("exceljs");
-      const wb = new ExcelJS.Workbook();
-      wb.creator = "Operations Hub";
-      const ws = wb.addWorksheet("Stocktaking");
-
-      ws.columns = [
-        { header: "Tag", key: "tag", width: 28 },
-        { header: "Component", key: "component", width: 48 },
-        { header: doneLabel, key: "done", width: 14 },
-      ];
-
-      ws.getRow(1).font = { bold: true };
-      ws.views = [{ state: "frozen", ySplit: 1 }];
-
-      (rows || [])
+      // Sort by tag then component name (same as /api/stock/excel)
+      const rows = (items || [])
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          idCode: r.idCode,
+          tag: r.tag,
+          quantity: Number(r.doneQuantity) || 0,
+          inventory:
+            r.inventory === null || typeof r.inventory === "undefined" ? null : Number(r.inventory),
+        }))
+        .filter((r) => Number(r.quantity) > 0 || (r.inventory !== null && Number(r.inventory) >= 0))
         .slice()
         .sort((a, b) => {
           const ta = String(a?.tag?.name || "Untagged");
           const tb = String(b?.tag?.name || "Untagged");
           if (ta !== tb) return ta.localeCompare(tb);
           return String(a?.name || "").localeCompare(String(b?.name || ""));
-        })
-        .forEach((it) => {
-          ws.addRow({
-            tag: it?.tag?.name || "Untagged",
-            component: it?.name || "-",
-            done: Number(it?.doneQuantity ?? 0),
-          });
         });
+
+      const ExcelJS = require("exceljs");
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Operations Hub";
+      const ws = wb.addWorksheet("Stocktaking");
+
+      const createdAt = new Date();
+      const formattedDate = formatDateTime(createdAt);
+
+      const safeSchool = String(schoolName)
+        .replace(/[<>:"/\\|?*]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\s/g, "_")
+        .slice(0, 50);
+      const fileName = `stocktaking_${safeSchool || "School"}.xlsx`;
+
+      // Title row
+      ws.mergeCells("A1:F1");
+      ws.getCell("A1").value = "Stocktaking";
+      ws.getCell("A1").font = { size: 18, bold: true };
+      ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
+      ws.getRow(1).height = 28;
+
+      // Subtitle row
+      ws.mergeCells("A2:F2");
+      ws.getCell("A2").value = `School: ${schoolName}  •  Generated: ${formattedDate}`;
+      ws.getCell("A2").font = { size: 10, color: { argb: "FF6B7280" } };
+      ws.getCell("A2").alignment = { vertical: "middle", horizontal: "center" };
+      ws.getRow(2).height = 18;
+
+      // Spacer
+      ws.addRow([]);
+
+      // Handover confirmation section
+      ws.mergeCells("A4:F4");
+      ws.getCell("A4").value = "Handover Confirmation";
+      ws.getCell("A4").font = { size: 14, bold: true };
+      ws.getCell("A4").alignment = { vertical: "middle", horizontal: "left" };
+
+      ws.mergeCells("A5:F5");
+      ws.getCell("A5").value =
+        "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.";
+      ws.getCell("A5").font = { size: 9, color: { argb: "FF6B7280" } };
+      ws.getCell("A5").alignment = { wrapText: true, vertical: "top" };
+      ws.getRow(5).height = 28;
+
+      // Info boxes (School / Date)
+      ws.getRow(6).height = 22;
+      ws.mergeCells("A6:C6");
+      ws.mergeCells("D6:F6");
+      ws.getCell("A6").value = `School: ${schoolName}`;
+      ws.getCell("D6").value = `Date: ${formattedDate}`;
+      ["A6", "D6"].forEach((addr) => {
+        const c = ws.getCell(addr);
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
+        c.border = {
+          top: { style: "thin", color: { argb: "FFE5E7EB" } },
+          left: { style: "thin", color: { argb: "FFE5E7EB" } },
+          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+          right: { style: "thin", color: { argb: "FFE5E7EB" } },
+        };
+        c.font = { size: 10, bold: true };
+        c.alignment = { vertical: "middle", horizontal: "left" };
+      });
+
+      // Signature boxes
+      ws.getRow(7).height = 26;
+      ws.mergeCells("A7:C7");
+      ws.mergeCells("D7:F7");
+      ws.getCell("A7").value = "Deliverer Name / Signature";
+      ws.getCell("D7").value = "Receiver Name / Signature";
+      ["A7", "D7"].forEach((addr) => {
+        const c = ws.getCell(addr);
+        c.border = {
+          top: { style: "thin", color: { argb: "FFE5E7EB" } },
+          left: { style: "thin", color: { argb: "FFE5E7EB" } },
+          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+          right: { style: "thin", color: { argb: "FFE5E7EB" } },
+        };
+        c.font = { size: 9, bold: true, color: { argb: "FF6B7280" } };
+        c.alignment = { vertical: "middle", horizontal: "left" };
+      });
+      // Signature line row
+      ws.getRow(8).height = 18;
+      ws.mergeCells("A8:C8");
+      ws.mergeCells("D8:F8");
+      ["A8", "D8"].forEach((addr) => {
+        const c = ws.getCell(addr);
+        c.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
+      });
+
+      // Spacer
+      ws.addRow([]);
+
+      // Table header
+      const headerRowIndex = ws.lastRow.number + 1;
+      ws.addRow(["Tag", "ID Code", "Component", "In Stock", "Inventory", "Unity Price"]);
+      const headerRow = ws.getRow(headerRowIndex);
+      headerRow.font = { bold: true, color: { argb: "FF065F46" } };
+      headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
+      headerRow.alignment = { vertical: "middle", horizontal: "left" };
+      headerRow.height = 20;
+      headerRow.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFE5E7EB" } },
+          left: { style: "thin", color: { argb: "FFE5E7EB" } },
+          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+          right: { style: "thin", color: { argb: "FFE5E7EB" } },
+        };
+      });
+
+      // Column widths
+      ws.getColumn(1).width = 32; // Tag
+      ws.getColumn(2).width = 14; // ID Code
+      ws.getColumn(3).width = 52; // Component
+      ws.getColumn(4).width = 12; // In Stock
+      ws.getColumn(5).width = 12; // Inventory
+      ws.getColumn(6).width = 14; // Unity Price
+
+      // Unit price map (same as /api/stock/excel)
+      const unitPriceMap = await _getProductsNameToUnitPriceMap();
+      const unitPriceOf = (componentName) => {
+        const n = unitPriceMap.get(_normNameKey(componentName));
+        if (typeof n === "number" && Number.isFinite(n)) return n;
+        return null;
+      };
+
+      // Notion tag color map for Excel
+      const notionColorToARGB = (color = "default") => {
+        switch (color) {
+          case "gray":
+            return { fg: "FFF3F4F6", text: "FF374151" };
+          case "brown":
+            return { fg: "FFEFEBE9", text: "FF4E342E" };
+          case "orange":
+            return { fg: "FFFFF7ED", text: "FF9A3412" };
+          case "yellow":
+            return { fg: "FFFEFCE8", text: "FF854D0E" };
+          case "green":
+            return { fg: "FFECFDF5", text: "FF065F46" };
+          case "blue":
+            return { fg: "FFEFF6FF", text: "FF1E40AF" };
+          case "purple":
+            return { fg: "FFF5F3FF", text: "FF5B21B6" };
+          case "pink":
+            return { fg: "FFFDF2F8", text: "FF9D174D" };
+          case "red":
+            return { fg: "FFFEF2F2", text: "FF991B1B" };
+          default:
+            return { fg: "FFD1FAE5", text: "FF065F46" };
+        }
+      };
+
+      // Data rows
+      for (const r of rows) {
+        const tagName = r?.tag?.name || "Untagged";
+        const tagColor = r?.tag?.color || "default";
+        const price = unitPriceOf(r.name);
+        const row = ws.addRow([
+          tagName,
+          r.idCode || "",
+          r.name || "-",
+          Number(r.quantity) || 0,
+          r.inventory === null || typeof r.inventory === "undefined" ? "" : Number(r.inventory),
+          price === null ? "" : price,
+        ]);
+
+        // Tag pill style
+        const tagCell = row.getCell(1);
+        const c = notionColorToARGB(tagColor);
+        tagCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: c.fg } };
+        tagCell.font = { bold: true, color: { argb: c.text } };
+        tagCell.alignment = { vertical: "middle", horizontal: "left" };
+
+        // Borders
+        row.eachCell((cell) => {
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFF3F4F6" } },
+            left: { style: "thin", color: { argb: "FFF3F4F6" } },
+            bottom: { style: "thin", color: { argb: "FFF3F4F6" } },
+            right: { style: "thin", color: { argb: "FFF3F4F6" } },
+          };
+        });
+
+        // Numeric alignment
+        row.getCell(4).alignment = { vertical: "middle", horizontal: "right" };
+        row.getCell(5).alignment = { vertical: "middle", horizontal: "right" };
+        row.getCell(6).alignment = { vertical: "middle", horizontal: "right" };
+
+        // Unity price format
+        if (price !== null) {
+          row.getCell(6).numFmt = '"EGP" #,##0.00';
+        }
+      }
 
       res.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       );
-      res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
       await wb.xlsx.write(res);
       res.end();
