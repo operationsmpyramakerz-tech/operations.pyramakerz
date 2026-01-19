@@ -12,99 +12,106 @@
   <script src="https://unpkg.com/feather-icons"></script>
 
   <style>
-    .b2b-wrap{ max-width: 1100px; margin: 0 auto; }
+    .b2b-wrap{ max-width: 1180px; margin: 0 auto; }
 
-    /* Grid of "files" (Notion-like cards) */
     .b2b-grid{
-      display:grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 18px;
-      padding: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 22px;
+      padding: 14px;
     }
 
+    /* Notion-like "file" cards (matching the reference screenshot) */
     .school-file{
-      display:block;
-      text-decoration:none;
-      border-radius: 18px;
-      border: 2px solid #e5e7eb;
-      background: linear-gradient(145deg, #ffffff, #f7f7fb);
-      box-shadow: 0 10px 24px rgba(0,0,0,0.06);
-      overflow:hidden;
-      padding: 14px;
-      min-height: 140px;
-      transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
-
-      /* accent vars (set from JS) */
-      --school-accent-bg: #f3f4f6;
-      --school-accent-text: #111827;
-      --school-accent-border: #e5e7eb;
+      position: relative;
+      display: block;
+      text-decoration: none;
+      border-radius: 24px;
+      padding: 18px 18px 16px;
+      min-height: 155px;
+      background: var(--school-accent-bg, #F3F4F6);
+      border: 1px solid rgba(17,24,39,0.06);
+      box-shadow: 0 12px 30px rgba(15,23,42,0.08);
+      overflow: hidden;
+      transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
     }
     .school-file:hover{
       transform: translateY(-3px);
-      box-shadow: 0 18px 38px rgba(0,0,0,0.10);
-      border-color: var(--school-accent-border);
+      box-shadow: 0 18px 40px rgba(15,23,42,0.14);
+      filter: saturate(1.02);
     }
 
-    .school-file__top{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap: 10px;
-      margin-bottom: 10px;
+    /* Soft folder silhouette */
+    .school-file::before{
+      content: '';
+      position: absolute;
+      left: 16px;
+      top: 18px;
+      width: 72%;
+      height: 54px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.55);
+      border: 1px solid rgba(255,255,255,0.35);
     }
-
-    .school-file__icon{
-      width: 44px; height: 44px;
+    .school-file::after{
+      content: '';
+      position: absolute;
+      left: 34px;
+      top: 10px;
+      width: 38%;
+      height: 22px;
       border-radius: 14px;
-      display:grid; place-items:center;
-      background: var(--school-accent-bg);
-      border: 1px solid var(--school-accent-border);
-      color: var(--school-accent-text);
-      flex: 0 0 auto;
-    }
-
-    .school-file__badge{
-      display:inline-flex;
-      align-items:center;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: var(--school-accent-bg);
-      border: 1px solid var(--school-accent-border);
-      color: var(--school-accent-text);
-      font-weight: 800;
-      font-size: 0.82rem;
-      white-space: nowrap;
-      max-width: 140px;
-      overflow:hidden;
-      text-overflow: ellipsis;
+      background: rgba(255,255,255,0.55);
+      border: 1px solid rgba(255,255,255,0.35);
     }
 
     .school-file__name{
-      font-size: 1.02rem;
-      font-weight: 850;
+      position: relative;
+      margin-top: 62px;
+      font-size: 1.06rem;
+      font-weight: 900;
       color: #111827;
-      line-height: 1.25;
-      margin-bottom: 8px;
+      line-height: 1.2;
     }
 
     .school-file__meta{
-      font-size: 0.88rem;
-      color: #64748b;
-      display:flex;
-      flex-direction:column;
-      gap: 4px;
+      position: relative;
+      margin-top: 10px;
+      font-size: 0.9rem;
+      color: rgba(17,24,39,0.65);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .school-file__meta .line{
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .school-file__meta .dot{
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--school-accent-text, #111827);
+      opacity: .35;
+      flex: 0 0 auto;
     }
 
     .b2b-loading{
       padding: 30px 10px;
-      text-align:center;
-      color:#64748b;
+      text-align: center;
+      color: #64748b;
     }
 
     .b2b-empty{
       padding: 24px 10px;
-      text-align:center;
-      color:#64748b;
+      text-align: center;
+      color: #64748b;
     }
   </style>
 </head>
