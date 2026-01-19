@@ -3,9 +3,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const detailsEl = document.getElementById('schoolDetails');
   const groupsEl = document.getElementById('school-stock-groups');
   const searchInput = document.getElementById('schoolStockSearch');
+  const downloadPdfBtn = document.getElementById('downloadPdfBtn');
+  const downloadExcelBtn = document.getElementById('downloadExcelBtn');
 
   let school = null;
   let allStock = [];
+
+  // Disable export buttons until we know the school
+  if (downloadPdfBtn) downloadPdfBtn.disabled = true;
+  if (downloadExcelBtn) downloadExcelBtn.disabled = true;
 
   const norm = (s) => String(s || '').toLowerCase().trim();
 
@@ -159,8 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
       thead.innerHTML = `
         <tr>
           <th>Component</th>
-          <th class="col-num">In Stock</th>
-          <th class="col-num">${doneLabel}</th>
+          <th class="col-num col-done">${doneLabel}</th>
         </tr>
       `;
 
@@ -175,16 +180,11 @@ document.addEventListener('DOMContentLoaded', () => {
           tdName.textContent = item.name || '-';
           tdName.style.fontWeight = '600';
 
-          const tdQty = document.createElement('td');
-          tdQty.className = 'col-num';
-          tdQty.textContent = String(item.quantity ?? 0);
-
           const tdDone = document.createElement('td');
-          tdDone.className = 'col-num';
+          tdDone.className = 'col-num col-done';
           tdDone.textContent = String(item.doneQuantity ?? 0);
 
           tr.appendChild(tdName);
-          tr.appendChild(tdQty);
           tr.appendChild(tdDone);
           tbody.appendChild(tr);
         });
@@ -266,6 +266,57 @@ document.addEventListener('DOMContentLoaded', () => {
     return Array.isArray(data) ? data : [];
   };
 
+
+
+  // ---------- Export helpers (PDF / Excel) ----------
+  const safeFileName = (s) => {
+    const cleaned = String(s || '')
+      .replace(/[<>:"/\|?*]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned || 'School';
+  };
+
+  const downloadBlobResponse = async (res, fallbackName) => {
+    const blob = await res.blob();
+    const cd = res.headers.get('content-disposition') || '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+    const filename = decodeURIComponent((m && (m[1] || m[2])) || fallbackName);
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportFile = async (btn, endpoint, fallbackName) => {
+    if (!btn) return;
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+
+    try {
+      const res = await fetch(endpoint, { method: 'GET', credentials: 'include' });
+      if (res.status === 401 || res.redirected) {
+        window.location.href = '/login';
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.message || 'Export failed');
+      }
+      await downloadBlobResponse(res, fallbackName);
+    } catch (e) {
+      console.error(e);
+      alert(e.message || 'Export failed');
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('is-busy');
+    }
+  };
   const init = async () => {
     const id = getSchoolIdFromPath();
     if (!id) {
@@ -280,6 +331,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (schoolNameEl) schoolNameEl.textContent = school.name || 'School';
       document.title = `B2B — ${school.name || 'School'}`;
+
+      // Enable & wire exports
+      const safeName = safeFileName(school.name || 'School');
+      if (downloadPdfBtn) {
+        downloadPdfBtn.disabled = false;
+        downloadPdfBtn.onclick = (e) => {
+          e.preventDefault();
+          exportFile(
+            downloadPdfBtn,
+            `/api/b2b/schools/${encodeURIComponent(id)}/stock/pdf`,
+            `Stocktaking-${safeName}.pdf`,
+          );
+        };
+      }
+      if (downloadExcelBtn) {
+        downloadExcelBtn.disabled = false;
+        downloadExcelBtn.onclick = (e) => {
+          e.preventDefault();
+          exportFile(
+            downloadExcelBtn,
+            `/api/b2b/schools/${encodeURIComponent(id)}/stock/excel`,
+            `Stocktaking-${safeName}.xlsx`,
+          );
+        };
+      }
 
       renderDetails();
 

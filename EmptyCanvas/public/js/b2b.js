@@ -51,19 +51,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const edu = Array.isArray(s.educationSystem) ? s.educationSystem.filter(Boolean) : [];
         const program = s.programType || '';
 
+        const line1 = govName || '';
+        const line2 = program || (edu.length ? edu.join(' · ') : '');
+
         a.innerHTML = `
-          <div class="school-file__top">
-            <div class="school-file__icon" aria-hidden="true">
-              <i data-feather="file"></i>
-            </div>
-            <div class="school-file__badge" title="${govName}">
-              ${govName || '—'}
-            </div>
-          </div>
           <div class="school-file__name" title="${String(s.name || '').replace(/"/g, '&quot;')}">${s.name || 'Untitled'}</div>
           <div class="school-file__meta">
-            ${edu.length ? `<span>${edu.join(' · ')}</span>` : ''}
-            ${program ? `<span>${program}</span>` : ''}
+            ${line1 ? `<div class="line"><span class="dot" aria-hidden="true"></span><span>${line1}</span></div>` : ''}
+            ${line2 ? `<div class="line"><span class="dot" aria-hidden="true"></span><span>${line2}</span></div>` : ''}
           </div>
         `;
 
