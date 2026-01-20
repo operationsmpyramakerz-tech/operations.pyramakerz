@@ -6,10 +6,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
   let allStock = [];
 
-  // Keep inventory inputs persistent even when the table re-renders (search/filter)
-  // { [notionPageId]: string }
-  const inventoryValues = {};
-
   const norm = (s) => String(s || '').toLowerCase().trim();
 
   const isPositiveQty = (item) => {
@@ -118,7 +114,6 @@ document.addEventListener('DOMContentLoaded', function() {
         <tr>
           <th>Component</th>
           <th class="col-num">In Stock</th>
-          <th class="col-num col-inventory">Inventory</th>
         </tr>
       `;
 
@@ -137,27 +132,8 @@ document.addEventListener('DOMContentLoaded', function() {
           tdInStock.className = 'col-num';
           tdInStock.textContent = (item.quantity ?? 0).toString();
 
-          const tdInventory = document.createElement('td');
-          tdInventory.className = 'col-num col-inventory';
-
-          // Editable input for manual inventory counting
-          const invInput = document.createElement('input');
-          invInput.type = 'number';
-          invInput.min = '0';
-          invInput.step = '1';
-          invInput.className = 'inventory-input';
-          invInput.setAttribute('inputmode', 'numeric');
-          invInput.setAttribute('aria-label', `Inventory for ${item.name || 'item'}`);
-          invInput.dataset.itemId = item.id;
-          invInput.value = (inventoryValues[item.id] ?? '');
-          invInput.addEventListener('input', () => {
-            inventoryValues[item.id] = invInput.value;
-          });
-          tdInventory.appendChild(invInput);
-
           tr.appendChild(tdName);
           tr.appendChild(tdInStock);
-          tr.appendChild(tdInventory);
           tbody.appendChild(tr);
         });
 
@@ -230,16 +206,6 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // ---------- Export helpers (PDF / Excel) ----------
-  const buildInventoryPayload = () => {
-    const out = {};
-    for (const [id, raw] of Object.entries(inventoryValues)) {
-      if (raw === '' || raw === null || typeof raw === 'undefined') continue;
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0) continue;
-      out[id] = n;
-    }
-    return out;
-  };
 
   const downloadBlobResponse = async (res, fallbackName) => {
     const blob = await res.blob();
@@ -263,12 +229,7 @@ document.addEventListener('DOMContentLoaded', function() {
     btn.classList.add('is-busy');
 
     try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ inventory: buildInventoryPayload() }),
-      });
+      const res = await fetch(endpoint, { method: 'GET', credentials: 'include' });
 
       if (res.status === 401) {
         window.location.href = '/login';
