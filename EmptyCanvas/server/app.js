@@ -63,7 +63,15 @@ function formatDateTime(date) {
 // Middleware
 app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "..", "public")));
+app.use(
+  express.static(path.join(__dirname, "..", "public"), {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith("service-worker.js") || filePath.endsWith("manifest.webmanifest")) {
+        res.setHeader("Cache-Control", "no-cache");
+      }
+    },
+  })
+);
 
 
 // --- Health FIRST (before session) so it works even if env is missing ---
