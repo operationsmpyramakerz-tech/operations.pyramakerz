@@ -288,6 +288,7 @@ if (document.querySelector('.sidebar')) {
     'current orders': 'a[href="/orders"]',
     'create new order': 'a[href="/orders/new"]',
     'stocktaking': 'a[href="/stocktaking"]',
+    'tasks': 'a[href="/tasks"]',
 
     'requested orders': 'a[href="/orders/requested"]',
     'schools requested orders': 'a[href="/orders/requested"]',
@@ -543,6 +544,7 @@ if (document.querySelector('.sidebar')) {
   ensureLink({ href: '/damaged-assets', label: 'Damaged Assets', icon: 'alert-octagon' });
   ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
   ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
+  ensureLink({ href: '/tasks', label: 'Tasks', icon: 'check-square' });
 
   ensureGreetingAndPages();
 
