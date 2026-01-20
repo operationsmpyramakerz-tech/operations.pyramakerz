@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#ffffff" />
+
+  <link rel="icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <script src="/pwa-register.js" defer></script>
+
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>Tasks - Dashboard</title>
+
+  <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+  <style>
+    body.permissions-loading .sidebar li { display: none !important; }
+  </style>
+
+  <link href="/css/style.css" rel="stylesheet"/>
+  <link href="/css/tasks.css" rel="stylesheet"/>
+  <script src="https://unpkg.com/feather-icons"></script>
+</head>
+
+<body class="permissions-loading">
+  <script>
+    (function() {
+      try {
+        if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+          document.body.classList.add('sidebar-mini');
+        }
+      } catch(e) {}
+    })();
+  </script>
+
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Dashboard</h2>
+        <button aria-expanded="true" aria-label="Toggle sidebar" class="sidebar-toggle" id="sidebar-toggle">
+          <i data-feather="chevrons-left"></i>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav">
+        <ul class="nav-list">
+          <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+          <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
+          <li><a class="nav-link" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+          <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+          <li><a class="nav-link active" href="/tasks"><i data-feather="check-square"></i><span class="nav-label">Tasks</span></a></li>
+          <li><a class="nav-link" href="/b2b"><i data-feather="folder"></i><span class="nav-label">B2B</span></a></li>
+          <li><a class="nav-link" href="/logistics"><i data-feather="truck"></i><span class="nav-label">Logistics</span></a></li>
+          <li><a class="nav-link" href="/damaged-assets"><i data-feather="alert-triangle"></i><span class="nav-label">Damaged Assets</span></a></li>
+          <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+          <li><a class="nav-link" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
+          <li><a class="nav-link" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses by User</span></a></li>
+        </ul>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="logout-btn" id="logoutBtn"><i data-feather="log-out"></i> Logout</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="main-header">
+        <div class="header-row1">
+          <div class="left">
+            <div aria-live="polite" class="greeting-pill">
+              <span class="greeting-avatar">
+                <img alt="Hi icon" src="/images/greeting-icon.png"/>
+              </span>
+              <div class="greet-text">
+                <div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
+                <div class="greet-sub">Start your day with operations</div>
+              </div>
+            </div>
+
+            <div class="tasks-searchbar" role="search" style="margin-left:8px;">
+              <i data-feather="search"></i>
+              <input aria-label="Search tasks" id="tasksSearch" placeholder="Search tasks..." type="search"/>
+            </div>
+          </div>
+
+          <div class="right topbar-right">
+            <a aria-label="My account" class="account-mini" href="/account" title="My account">
+              <span class="ico-circle"><img alt="Logo" src="/images/logo.png"/></span>
+              <span class="label">My account</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="header-row2">
+          <h1 class="page-title">Tasks</h1>
+
+          <div class="header-actions">
+            <button class="btn btn--light" id="scopeMineBtn" type="button" title="Show my tasks">Mine</button>
+            <button class="btn btn--light" id="scopeAllBtn" type="button" title="Show all tasks">All</button>
+
+            <button class="btn btn--light" id="addTaskBtn" type="button">
+              <i data-feather="plus-circle"></i>
+              <span>Add Task</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main class="container-full-width">
+        <div class="tasks-layout">
+          <section class="tasks-left">
+            <div id="tasksGrid" class="tasks-grid">
+              <div class="modern-loading" role="status" aria-live="polite">
+                <div class="modern-loading__spinner" aria-hidden="true"></div>
+                <div class="modern-loading__text">
+                  Loading tasks
+                  <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="tasks-right">
+            <section class="card tasks-detail-card">
+              <div class="tasks-detail-head">
+                <h2 id="taskDetailTitle" style="margin:0; font-size:1.05rem; font-weight:900;">Task details</h2>
+                <a id="taskDetailOpenNotion" class="btn btn--light btn-sm" target="_blank" rel="noopener" style="display:none;">
+                  <i data-feather="external-link"></i>
+                  <span>Open in Notion</span>
+                </a>
+              </div>
+
+              <div id="taskDetailBody" class="tasks-detail-body">
+                <p class="muted" style="margin:0;">Select a task from the left to see details.</p>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Add Task Modal -->
+  <div class="modal hidden" id="taskModal" aria-hidden="true">
+    <div class="modal__backdrop" data-close="1"></div>
+    <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+      <div class="modal__header">
+        <div class="modal__title" id="taskModalTitle">Add Task</div>
+        <button class="modal__close" type="button" data-close="1" aria-label="Close">×</button>
+      </div>
+
+      <form id="taskForm">
+        <div class="modal__body">
+          <div class="form-field">
+            <label for="taskTitle">Task title</label>
+            <input id="taskTitle" type="text" required placeholder="e.g. Get Ready to make tech day"/>
+          </div>
+
+          <div class="form-row">
+            <div class="form-field">
+              <label for="taskPriority">Priority</label>
+              <select id="taskPriority">
+                <option value="">—</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="taskDueDate">Delivery Date</label>
+              <input id="taskDueDate" type="date"/>
+            </div>
+          </div>
+
+          <div class="form-field">
+            <label for="taskStatus">Status</label>
+            <select id="taskStatus">
+              <option value="">—</option>
+            </select>
+          </div>
+
+          <p class="muted" style="margin-top:10px;">
+            The created task will be assigned to you automatically (if the Tasks database has an Assignee relation).
+          </p>
+        </div>
+
+        <div class="modal__footer">
+          <button type="button" class="btn btn--light" data-close="1">Cancel</button>
+          <button type="submit" class="btn btn-3d-orange" id="taskCreateBtn">
+            <i data-feather="check"></i>
+            <span>Create</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>feather.replace();</script>
+  <script src="/js/common-ui.js"></script>
+  <script src="/js/tasks.js"></script>
+</body>
+</html>
