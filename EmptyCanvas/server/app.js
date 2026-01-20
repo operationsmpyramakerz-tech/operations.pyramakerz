@@ -1834,6 +1834,26 @@ app.get(
       const { meta, items } = await _getB2BSchoolStocktakingPayload(id);
       const schoolName = String(meta?.schoolName || "School").trim() || "School";
 
+      // Columns selection (used by Finish Inventory modal)
+      // ?cols=inventory | defected | both
+      const colsReqRaw = String((req.query && req.query.cols) || "both").toLowerCase().trim();
+      let includeInventoryCol = true;
+      let includeDefectedCol = true;
+      if (colsReqRaw === "inventory" || colsReqRaw === "inv") {
+        includeDefectedCol = false;
+      } else if (colsReqRaw === "defected" || colsReqRaw === "def" || colsReqRaw === "damaged") {
+        includeInventoryCol = false;
+      } else {
+        includeInventoryCol = true;
+        includeDefectedCol = true;
+      }
+
+      // Safety: don't allow both to be hidden.
+      if (!includeInventoryCol && !includeDefectedCol) {
+        includeInventoryCol = true;
+        includeDefectedCol = true;
+      }
+
       // Build rows in the same shape as /api/stock/pdf
       const filteredStockForPdf = (items || [])
         .map((r) => ({
@@ -1847,7 +1867,12 @@ app.get(
             r.defected === null || typeof r.defected === "undefined" ? null : Number(r.defected),
           tag: r.tag,
         }))
-        .filter((r) => Number(r.quantity) > 0 || (r.inventory !== null && Number(r.inventory) >= 0) || (r.defected !== null && Number(r.defected) >= 0));
+        .filter((r) => {
+          const qOk = Number(r.quantity) > 0;
+          const invOk = includeInventoryCol && r.inventory !== null && Number(r.inventory) >= 0;
+          const defOk = includeDefectedCol && r.defected !== null && Number(r.defected) >= 0;
+          return qOk || invOk || defOk;
+        });
 
       const createdAt = new Date();
       const dateStr = createdAt.toISOString().slice(0, 10);
@@ -1925,8 +1950,8 @@ app.get(
 
       const colIdW = 70;
       const colQtyW = 60;
-      const colInvW = 70;
-      const colDefW = 70;
+      const colInvW = includeInventoryCol ? 70 : 0;
+      const colDefW = includeDefectedCol ? 70 : 0;
       const colCompW = contentW - colIdW - colQtyW - colInvW - colDefW;
 
       // Page tracking for footer signatures
@@ -2153,16 +2178,21 @@ app.get(
           .font("Helvetica-Bold")
           .fontSize(9)
           .text("In Stock", mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
-        doc
-          .fillColor(txt)
-          .font("Helvetica-Bold")
-          .fontSize(9)
-          .text("Inventory", mL + colIdW + colCompW + colQtyW, y + 6, { width: colInvW - 10, align: "right" });
-        doc
-          .fillColor(txt)
-          .font("Helvetica-Bold")
-          .fontSize(9)
-          .text("Defected", mL + colIdW + colCompW + colQtyW + colInvW, y + 6, { width: colDefW - 10, align: "right" });
+        if (includeInventoryCol) {
+          doc
+            .fillColor(txt)
+            .font("Helvetica-Bold")
+            .fontSize(9)
+            .text("Inventory", mL + colIdW + colCompW + colQtyW, y + 6, { width: colInvW - 10, align: "right" });
+        }
+        if (includeDefectedCol) {
+          const defX = mL + colIdW + colCompW + colQtyW + (includeInventoryCol ? colInvW : 0);
+          doc
+            .fillColor(txt)
+            .font("Helvetica-Bold")
+            .fontSize(9)
+            .text("Defected", defX, y + 6, { width: colDefW - 10, align: "right" });
+        }
 
         doc.y = y + 24;
       };
@@ -2172,8 +2202,8 @@ app.get(
         const rowH = 20;
 
         // Mismatch highlight background
-        const invHasValue = item.inventory !== null && typeof item.inventory !== "undefined";
-        const mismatch = invHasValue && Number(item.inventory) !== Number(item.quantity);
+        const invHasValue = includeInventoryCol && item.inventory !== null && typeof item.inventory !== "undefined";
+        const mismatch = includeInventoryCol && invHasValue && Number(item.inventory) !== Number(item.quantity);
         if (mismatch) {
           doc
             .rect(mL, y, contentW, rowH)
@@ -2198,48 +2228,53 @@ app.get(
           .fontSize(9)
           .text(String(item.quantity ?? 0), mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
 
-        const invX = mL + colIdW + colCompW + colQtyW;
-        const defX = invX + colInvW;
+        const afterQtyX = mL + colIdW + colCompW + colQtyW;
+        const invX = afterQtyX;
+        const defX = afterQtyX + (includeInventoryCol ? colInvW : 0);
 
-        if (invHasValue) {
-          doc
-            .fillColor(mismatch ? COLORS.mismatch : COLORS.text)
-            .font("Helvetica")
-            .fontSize(9)
-            .text(String(Number(item.inventory)), invX, y + 6, {
-              width: colInvW - 10,
-              align: "right",
-            });
-        } else {
-          // underline for handwritten inventory
-          const lineY = y + 14;
-          doc
-            .moveTo(invX + 8, lineY)
-            .lineTo(invX + colInvW - 8, lineY)
-            .lineWidth(0.8)
-            .strokeColor(COLORS.border)
-            .stroke();
+        if (includeInventoryCol) {
+          if (invHasValue) {
+            doc
+              .fillColor(mismatch ? COLORS.mismatch : COLORS.text)
+              .font("Helvetica")
+              .fontSize(9)
+              .text(String(Number(item.inventory)), invX, y + 6, {
+                width: colInvW - 10,
+                align: "right",
+              });
+          } else {
+            // underline for handwritten inventory
+            const lineY = y + 14;
+            doc
+              .moveTo(invX + 8, lineY)
+              .lineTo(invX + colInvW - 8, lineY)
+              .lineWidth(0.8)
+              .strokeColor(COLORS.border)
+              .stroke();
+          }
         }
 
-        const defHasValue = item.defected !== null && typeof item.defected !== "undefined";
-        if (defHasValue) {
-          doc
-            .fillColor(COLORS.text)
-            .font("Helvetica")
-            .fontSize(9)
-            .text(String(Number(item.defected)), defX, y + 6, {
-              width: colDefW - 10,
-              align: "right",
-            });
-        } else {
-          // underline for handwritten defected
-          const lineY = y + 14;
-          doc
-            .moveTo(defX + 8, lineY)
-            .lineTo(defX + colDefW - 8, lineY)
-            .lineWidth(0.8)
-            .strokeColor(COLORS.border)
-            .stroke();
+        if (includeDefectedCol) {
+          const defHasValue = item.defected !== null && typeof item.defected !== "undefined";
+          if (defHasValue) {
+            doc
+              .fillColor(COLORS.text)
+              .font("Helvetica")
+              .fontSize(9)
+              .text(String(Number(item.defected)), defX, y + 6, {
+                width: colDefW - 10,
+                align: "right",
+              });
+          } else {
+            // underline for handwritten defected
+            const lineY = y + 14;
+            doc
+              .moveTo(defX + 8, lineY)
+              .lineTo(defX + colDefW - 8, lineY)
+              .lineWidth(0.8)
+              .strokeColor(COLORS.border)
+              .stroke();
+          }
         }
 
         // separator
@@ -2296,6 +2331,26 @@ app.get(
       const { meta, items } = await _getB2BSchoolStocktakingPayload(id);
       const schoolName = String(meta?.schoolName || "School").trim() || "School";
 
+      // Columns selection (used by Finish Inventory modal)
+      // ?cols=inventory | defected | both
+      const colsReqRaw = String((req.query && req.query.cols) || "both").toLowerCase().trim();
+      let includeInventoryCol = true;
+      let includeDefectedCol = true;
+      if (colsReqRaw === "inventory" || colsReqRaw === "inv") {
+        includeDefectedCol = false;
+      } else if (colsReqRaw === "defected" || colsReqRaw === "def" || colsReqRaw === "damaged") {
+        includeInventoryCol = false;
+      } else {
+        includeInventoryCol = true;
+        includeDefectedCol = true;
+      }
+
+      // Safety: don't allow both to be hidden.
+      if (!includeInventoryCol && !includeDefectedCol) {
+        includeInventoryCol = true;
+        includeDefectedCol = true;
+      }
+
       // Sort by tag then component name (same as /api/stock/excel)
       const rows = (items || [])
         .map((r) => ({
@@ -2309,7 +2364,12 @@ app.get(
           defected:
             r.defected === null || typeof r.defected === "undefined" ? null : Number(r.defected),
         }))
-        .filter((r) => Number(r.quantity) > 0 || (r.inventory !== null && Number(r.inventory) >= 0) || (r.defected !== null && Number(r.defected) >= 0))
+        .filter((r) => {
+          const qOk = Number(r.quantity) > 0;
+          const invOk = includeInventoryCol && r.inventory !== null && Number(r.inventory) >= 0;
+          const defOk = includeDefectedCol && r.defected !== null && Number(r.defected) >= 0;
+          return qOk || invOk || defOk;
+        })
         .slice()
         .sort((a, b) => {
           const ta = String(a?.tag?.name || "Untagged");
@@ -2326,6 +2386,28 @@ app.get(
       const createdAt = new Date();
       const formattedDate = formatDateTime(createdAt);
 
+      // Dynamic columns (based on cols selection)
+      const columns = ["Tag", "ID Code", "Component", "In Stock"];
+      if (includeInventoryCol) columns.push("Inventory");
+      if (includeDefectedCol) columns.push("Defected");
+      columns.push("Unity Price");
+
+      const colLetter = (n) => {
+        let num = Math.max(1, Number(n) || 1);
+        let s = "";
+        while (num > 0) {
+          const m = (num - 1) % 26;
+          s = String.fromCharCode(65 + m) + s;
+          num = Math.floor((num - 1) / 26);
+        }
+        return s;
+      };
+
+      const lastCol = colLetter(columns.length);
+      const split = Math.ceil(columns.length / 2);
+      const leftEnd = colLetter(split);
+      const rightStart = colLetter(split + 1);
+
       const safeSchool = String(schoolName)
         .replace(/[<>:"/\\|?*]+/g, " ")
         .replace(/\s+/g, " ")
@@ -2335,14 +2417,14 @@ app.get(
       const fileName = `stocktaking_${safeSchool || "School"}.xlsx`;
 
       // Title row
-      ws.mergeCells("A1:G1");
+      ws.mergeCells(`A1:${lastCol}1`);
       ws.getCell("A1").value = "Stocktaking";
       ws.getCell("A1").font = { size: 18, bold: true };
       ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
       ws.getRow(1).height = 28;
 
       // Subtitle row
-      ws.mergeCells("A2:G2");
+      ws.mergeCells(`A2:${lastCol}2`);
       ws.getCell("A2").value = `School: ${schoolName}  •  Generated: ${formattedDate}`;
       ws.getCell("A2").font = { size: 10, color: { argb: "FF6B7280" } };
       ws.getCell("A2").alignment = { vertical: "middle", horizontal: "center" };
@@ -2352,12 +2434,12 @@ app.get(
       ws.addRow([]);
 
       // Handover confirmation section
-      ws.mergeCells("A4:G4");
+      ws.mergeCells(`A4:${lastCol}4`);
       ws.getCell("A4").value = "Handover Confirmation";
       ws.getCell("A4").font = { size: 14, bold: true };
       ws.getCell("A4").alignment = { vertical: "middle", horizontal: "left" };
 
-      ws.mergeCells("A5:G5");
+      ws.mergeCells(`A5:${lastCol}5`);
       ws.getCell("A5").value =
         "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.";
       ws.getCell("A5").font = { size: 9, color: { argb: "FF6B7280" } };
@@ -2366,11 +2448,11 @@ app.get(
 
       // Info boxes (School / Date)
       ws.getRow(6).height = 22;
-      ws.mergeCells("A6:D6");
-      ws.mergeCells("E6:G6");
+      ws.mergeCells(`A6:${leftEnd}6`);
+      ws.mergeCells(`${rightStart}6:${lastCol}6`);
       ws.getCell("A6").value = `School: ${schoolName}`;
-      ws.getCell("E6").value = `Date: ${formattedDate}`;
-      ["A6", "E6"].forEach((addr) => {
+      ws.getCell(`${rightStart}6`).value = `Date: ${formattedDate}`;
+      ["A6", `${rightStart}6`].forEach((addr) => {
         const c = ws.getCell(addr);
         c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
         c.border = {
@@ -2385,11 +2467,11 @@ app.get(
 
       // Signature boxes
       ws.getRow(7).height = 26;
-      ws.mergeCells("A7:D7");
-      ws.mergeCells("E7:G7");
+      ws.mergeCells(`A7:${leftEnd}7`);
+      ws.mergeCells(`${rightStart}7:${lastCol}7`);
       ws.getCell("A7").value = "Inventory Team Names / Signatures";
-      ws.getCell("E7").value = "Stockholder Name / Signature";
-      ["A7", "E7"].forEach((addr) => {
+      ws.getCell(`${rightStart}7`).value = "Stockholder Name / Signature";
+      ["A7", `${rightStart}7`].forEach((addr) => {
         const c = ws.getCell(addr);
         c.border = {
           top: { style: "thin", color: { argb: "FFE5E7EB" } },
@@ -2402,9 +2484,9 @@ app.get(
       });
       // Signature line row
       ws.getRow(8).height = 18;
-      ws.mergeCells("A8:D8");
-      ws.mergeCells("E8:G8");
-      ["A8", "E8"].forEach((addr) => {
+      ws.mergeCells(`A8:${leftEnd}8`);
+      ws.mergeCells(`${rightStart}8:${lastCol}8`);
+      ["A8", `${rightStart}8`].forEach((addr) => {
         const c = ws.getCell(addr);
         c.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
       });
@@ -2414,7 +2496,7 @@ app.get(
 
       // Table header
       const headerRowIndex = ws.lastRow.number + 1;
-      ws.addRow(["Tag", "ID Code", "Component", "In Stock", "Inventory", "Defected", "Unity Price"]);
+      ws.addRow(columns);
       const headerRow = ws.getRow(headerRowIndex);
       headerRow.font = { bold: true, color: { argb: "FF065F46" } };
       headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
@@ -2429,14 +2511,19 @@ app.get(
         };
       });
 
-      // Column widths
-      ws.getColumn(1).width = 32; // Tag
-      ws.getColumn(2).width = 14; // ID Code
-      ws.getColumn(3).width = 52; // Component
-      ws.getColumn(4).width = 12; // In Stock
-      ws.getColumn(5).width = 12; // Inventory
-      ws.getColumn(6).width = 12; // Defected
-      ws.getColumn(7).width = 14; // Unity Price
+      // Column widths (based on selected columns)
+      const widthByHeader = {
+        "Tag": 32,
+        "ID Code": 14,
+        "Component": 52,
+        "In Stock": 12,
+        "Inventory": 12,
+        "Defected": 12,
+        "Unity Price": 14,
+      };
+      columns.forEach((h, idx) => {
+        ws.getColumn(idx + 1).width = widthByHeader[h] || 12;
+      });
 
       // Unit price map (same as /api/stock/excel)
       const unitPriceMap = await _getProductsNameToUnityPriceMap();
@@ -2477,15 +2564,21 @@ app.get(
         const tagName = r?.tag?.name || "Untagged";
         const tagColor = r?.tag?.color || "default";
         const price = unitPriceOf(r.name);
-        const row = ws.addRow([
+        const rowValues = [
           tagName,
           r.idCode || "",
           r.name || "-",
           Number(r.quantity) || 0,
-          r.inventory === null || typeof r.inventory === "undefined" ? "" : Number(r.inventory),
-          r.defected === null || typeof r.defected === "undefined" ? "" : Number(r.defected),
-          price === null ? "" : price,
-        ]);
+        ];
+        if (includeInventoryCol) {
+          rowValues.push(r.inventory === null || typeof r.inventory === "undefined" ? "" : Number(r.inventory));
+        }
+        if (includeDefectedCol) {
+          rowValues.push(r.defected === null || typeof r.defected === "undefined" ? "" : Number(r.defected));
+        }
+        rowValues.push(price === null ? "" : price);
+
+        const row = ws.addRow(rowValues);
 
         // Tag pill style
         const tagCell = row.getCell(1);
@@ -2505,14 +2598,19 @@ app.get(
         });
 
         // Numeric alignment
-        row.getCell(4).alignment = { vertical: "middle", horizontal: "right" };
-        row.getCell(5).alignment = { vertical: "middle", horizontal: "right" };
-        row.getCell(6).alignment = { vertical: "middle", horizontal: "right" };
-        row.getCell(7).alignment = { vertical: "middle", horizontal: "right" };
+        const idxInStock = columns.indexOf("In Stock") + 1;
+        const idxInventory = includeInventoryCol ? columns.indexOf("Inventory") + 1 : null;
+        const idxDefected = includeDefectedCol ? columns.indexOf("Defected") + 1 : null;
+        const idxPrice = columns.indexOf("Unity Price") + 1;
+
+        if (idxInStock > 0) row.getCell(idxInStock).alignment = { vertical: "middle", horizontal: "right" };
+        if (idxInventory) row.getCell(idxInventory).alignment = { vertical: "middle", horizontal: "right" };
+        if (idxDefected) row.getCell(idxDefected).alignment = { vertical: "middle", horizontal: "right" };
+        if (idxPrice > 0) row.getCell(idxPrice).alignment = { vertical: "middle", horizontal: "right" };
 
         // Unity price format
-        if (price !== null) {
-          row.getCell(7).numFmt = '"EGP" #,##0.00';
+        if (price !== null && idxPrice > 0) {
+          row.getCell(idxPrice).numFmt = '"EGP" #,##0.00';
         }
       }
 
