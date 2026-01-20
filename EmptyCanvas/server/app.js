@@ -1465,7 +1465,8 @@ app.get(
     if (!id) return res.status(400).json({ error: "Missing school id." });
 
     try {
-      const cacheKey = `cache:api:b2b:school:${id}:v1`;
+      // v2: include Grades (G1..G12) checkbox flags
+      const cacheKey = `cache:api:b2b:school:${id}:v2`;
       const data = await cacheGetOrSet(cacheKey, 5 * 60, async () => {
         const page = await notion.pages.retrieve({ page_id: id });
         const props = page.properties || {};
@@ -1498,6 +1499,19 @@ app.get(
           (props.Program && props.Program.select?.name) ||
           "";
 
+        // Grades (G1..G12) — checkbox columns in the B2B Schools Notion DB
+        const grades = (() => {
+          const out = {};
+          for (let i = 1; i <= 12; i++) {
+            const key =
+              _findPropNameByNorm(props, `G${i}`) ||
+              _findPropNameByNorm(props, `Grade ${i}`) ||
+              null;
+            out[i] = key ? _boolFrom(props[key]) : false;
+          }
+          return out;
+        })();
+
         return {
           id: page.id,
           name: name || "Untitled",
@@ -1505,6 +1519,7 @@ app.get(
           governorate,
           educationSystem,
           programType,
+          grades,
         };
       });
 
