@@ -1834,12 +1834,28 @@ app.get(
       const { meta, items } = await _getB2BSchoolStocktakingPayload(id);
       const schoolName = String(meta?.schoolName || "School").trim() || "School";
 
-      // Columns selection (used by Finish Inventory modal)
-      // ?cols=inventory | defected | both
-      const colsReqRaw = String((req.query && req.query.cols) || "both").toLowerCase().trim();
+      // Columns selection
+      // - Download PDF button (no query) should show Done only (no Inventory/Defected)
+      // - Finish Inventory modal uses: ?cols=inventory | defected | both
+      //
+      // Supported values:
+      // ?cols=done|none        -> Done only (hide Inventory & Defected)
+      // ?cols=inventory|inv    -> Inventory only
+      // ?cols=defected|def     -> Defected only
+      // ?cols=both             -> Inventory & Defected (default when cols is provided but invalid)
+      const hasColsParam = !!(req.query && Object.prototype.hasOwnProperty.call(req.query, "cols"));
+      const colsReqRaw = String(hasColsParam ? (req.query && req.query.cols) : "done")
+        .toLowerCase()
+        .trim();
+
       let includeInventoryCol = true;
       let includeDefectedCol = true;
-      if (colsReqRaw === "inventory" || colsReqRaw === "inv") {
+
+      const doneOnly = colsReqRaw === "done" || colsReqRaw === "onlydone" || colsReqRaw === "none";
+      if (doneOnly) {
+        includeInventoryCol = false;
+        includeDefectedCol = false;
+      } else if (colsReqRaw === "inventory" || colsReqRaw === "inv") {
         includeDefectedCol = false;
       } else if (colsReqRaw === "defected" || colsReqRaw === "def" || colsReqRaw === "damaged") {
         includeInventoryCol = false;
@@ -1848,8 +1864,8 @@ app.get(
         includeDefectedCol = true;
       }
 
-      // Safety: don't allow both to be hidden.
-      if (!includeInventoryCol && !includeDefectedCol) {
+      // Safety: don't allow both to be hidden unless explicitly requested.
+      if (!doneOnly && !includeInventoryCol && !includeDefectedCol) {
         includeInventoryCol = true;
         includeDefectedCol = true;
       }
