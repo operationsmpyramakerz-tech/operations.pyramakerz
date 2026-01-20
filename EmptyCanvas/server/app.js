@@ -1870,6 +1870,11 @@ app.get(
         includeDefectedCol = true;
       }
 
+      // Signature blocks:
+      // - Download PDF button should NOT include signatures blocks
+      // - Finish Inventory modal keeps signatures blocks (it sends ?cols=...)
+      const includeSignatureBlocks = hasColsParam;
+
       // Build rows in the same shape as /api/stock/pdf
       const filteredStockForPdf = (items || [])
         .map((r) => ({
@@ -1974,7 +1979,7 @@ app.get(
       let pageNum = 1;
 
       const sigBoxH = 54;
-      const sigFooterReserve = sigBoxH + 20;
+      const sigFooterReserve = includeSignatureBlocks ? (sigBoxH + 20) : 0;
 
       const bottomLimit = () => doc.page.height - mB - (pageNum === 1 ? 0 : sigFooterReserve);
 
@@ -2093,9 +2098,14 @@ app.get(
       };
 
       // First page: keep signatures near the top (as-is)
-      const sigY = doc.y;
-      drawSignaturesAt(sigY);
-      doc.y = sigY + sigBoxH + 18;
+      if (includeSignatureBlocks) {
+        const sigY = doc.y;
+        drawSignaturesAt(sigY);
+        doc.y = sigY + sigBoxH + 18;
+      } else {
+        // Small spacing so the table doesn't stick to the meta boxes
+        doc.moveDown(0.5);
+      }
 
       // Pages 2+: draw signatures in the footer (bottom of each page)
       // IMPORTANT: drawing the footer must not move the writing cursor (doc.x/doc.y),
@@ -2103,7 +2113,7 @@ app.get(
       doc.on("pageAdded", () => {
         pageNum += 1;
 
-        if (pageNum >= 2) {
+        if (includeSignatureBlocks && pageNum >= 2) {
           const prevX = doc.x;
           const prevY = doc.y;
 
