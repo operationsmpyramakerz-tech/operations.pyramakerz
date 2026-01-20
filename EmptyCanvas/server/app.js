@@ -2184,7 +2184,9 @@ app.get(
       ws.getColumn(6).width = 14; // Unity Price
 
       // Unit price map (same as /api/stock/excel)
-      const unitPriceMap = await _getProductsNameToUnitPriceMap();
+      // NOTE: in this codebase we use the Products DB Number property: "Unity Price",
+      // and the helper is named _getProductsNameToUnityPriceMap().
+      const unitPriceMap = await _getProductsNameToUnityPriceMap();
       const unitPriceOf = (componentName) => {
         const n = unitPriceMap.get(_normNameKey(componentName));
         if (typeof n === "number" && Number.isFinite(n)) return n;
