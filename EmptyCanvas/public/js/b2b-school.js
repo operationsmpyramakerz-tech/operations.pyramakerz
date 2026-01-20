@@ -139,6 +139,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const modal = document.createElement('div');
       modal.id = MODAL_ID;
       modal.className = 'modal hidden';
+      // NOTE:
+      // This codebase contains legacy `.modal { display:none; }` rules in the global CSS.
+      // If we rely only on toggling the `.hidden` class, the modal may never become visible.
+      // We therefore control `display` inline when opening/closing.
+      modal.style.display = 'none';
       modal.innerHTML = `
         <div class="modal__backdrop" data-admin-backdrop></div>
         <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="adminPwdTitle">
@@ -171,6 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const closeWith = (result) => {
         try {
           modal.classList.add('hidden');
+          modal.style.display = 'none';
           err.style.display = 'none';
           err.textContent = '';
           input.value = '';
@@ -282,6 +288,7 @@ document.addEventListener('DOMContentLoaded', () => {
       x.err.textContent = '';
       x.input.value = '';
       x.modal.classList.remove('hidden');
+      x.modal.style.display = 'block';
       setTimeout(() => x.input.focus(), 50);
       return new Promise((resolve) => {
         currentResolve = resolve;
