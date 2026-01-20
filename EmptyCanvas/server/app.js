@@ -1769,7 +1769,7 @@ app.get(
         .fillColor(COLORS.text)
         .font("Helvetica-Bold")
         .fontSize(18)
-        .text("Stocktaking", headerX, headerTopY);
+        .text("Inventory Process", headerX, headerTopY);
 
       doc
         .fillColor(COLORS.muted)
@@ -1791,14 +1791,14 @@ app.get(
         .fillColor(COLORS.text)
         .font("Helvetica-Bold")
         .fontSize(14)
-        .text("Handover Confirmation", mL, doc.y);
+        .text("Inventory Confirmation", mL, doc.y);
 
       doc
         .fillColor(COLORS.muted)
         .font("Helvetica")
         .fontSize(9)
         .text(
-          "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.",
+          "Acknowledgment from us that the inventory process has been carried out correctly for all assets, and this is a detailed statement of the inventory.",
           mL,
           doc.y + 4,
           { width: contentW },
@@ -1856,8 +1856,8 @@ app.get(
           .strokeColor(COLORS.border)
           .stroke();
       };
-      drawSigBox(mL, "Deliverer Name / Signature");
-      drawSigBox(mL + boxW + boxGap, "Receiver Name / Signature");
+      drawSigBox(mL, "Inventory Team Names / Signatures");
+      drawSigBox(mL + boxW + boxGap, "Stockholder Name / Signature");
       doc.y = sigY + sigBoxH + 18;
 
       if (!groups.length) {
