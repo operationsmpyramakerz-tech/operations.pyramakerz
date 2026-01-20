@@ -88,6 +88,39 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const renderGradesBar = (grades) => {
+      const get = (i) => {
+        try {
+          if (!grades) return false;
+          if (Array.isArray(grades)) return !!grades[i - 1];
+          if (typeof grades === 'object') {
+            if (Object.prototype.hasOwnProperty.call(grades, i)) return !!grades[i];
+            if (Object.prototype.hasOwnProperty.call(grades, String(i))) return !!grades[String(i)];
+            if (Object.prototype.hasOwnProperty.call(grades, `G${i}`)) return !!grades[`G${i}`];
+            if (Object.prototype.hasOwnProperty.call(grades, `g${i}`)) return !!grades[`g${i}`];
+          }
+        } catch {}
+        return false;
+      };
+
+      let html = `<div class="grades-stepper" role="list" aria-label="Grades">`;
+      for (let i = 1; i <= 12; i++) {
+        const checked = get(i);
+        html += `
+          <div class="grades-step ${checked ? 'is-checked' : ''}" role="listitem" aria-label="Grade ${i} ${checked ? 'checked' : 'not checked'}">
+            <div class="grades-step__cap"><span class="grades-step__num">${i}</span></div>
+            <div class="grades-step__dot" aria-hidden="true"></div>
+          </div>
+        `;
+        if (i < 12) {
+          const segActive = checked && get(i + 1);
+          html += `<div class="grades-connector ${segActive ? 'is-active' : ''}" aria-hidden="true"></div>`;
+        }
+      }
+      html += `</div>`;
+      return html;
+    };
+
     const gov = school.governorate?.name || '';
     const govColor = school.governorate?.color || 'default';
     const edu = Array.isArray(school.educationSystem) ? school.educationSystem.filter(Boolean) : [];
@@ -98,7 +131,14 @@ document.addEventListener('DOMContentLoaded', () => {
       ? `<a href="${location}" target="_blank" rel="noopener noreferrer">Open location</a>`
       : '—';
 
+    const gradesBarHtml = renderGradesBar(school.grades);
+
     detailsEl.innerHTML = `
+      <div class="detail-row grades-row">
+        <div class="label">Grades</div>
+        <div class="value">${gradesBarHtml}</div>
+      </div>
+
       <div class="detail-row">
         <div class="label">Governorate</div>
         <div class="value">${gov ? makeInfoPill(gov, govColor).outerHTML : '—'}</div>
