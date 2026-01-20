@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let school = null;
   let allStock = [];
   let stockMeta = { donePropName: null, inventoryPropName: null, inventoryDate: null };
+  // UI state: show/hide the inventory column (protected by Admin password)
+  let inventoryMode = false;
 
   // Disable export buttons until we know the school
   if (downloadPdfBtn) downloadPdfBtn.disabled = true;
@@ -121,6 +123,179 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.feather) feather.replace();
   };
 
+  // ---------- Admin password modal (for Inventory actions) ----------
+  // Uses Team Members DB (Admin) via: POST /api/b2b/admin/verify
+  const AdminAuth = (() => {
+    const MODAL_ID = 'adminPasswordModal';
+
+    /** @type {null | {modal:HTMLElement, title:HTMLElement, hint:HTMLElement, input:HTMLInputElement, err:HTMLElement, confirm:HTMLButtonElement, cancel:HTMLButtonElement, close:HTMLButtonElement, backdrop:HTMLElement}} */
+    let ui = null;
+    let currentResolve = null;
+    let currentActionLabel = '';
+
+    const ensure = () => {
+      if (ui) return ui;
+
+      const modal = document.createElement('div');
+      modal.id = MODAL_ID;
+      modal.className = 'modal hidden';
+      modal.innerHTML = `
+        <div class="modal__backdrop" data-admin-backdrop></div>
+        <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="adminPwdTitle">
+          <div class="modal__header">
+            <div style="font-weight:800;" id="adminPwdTitle" data-admin-title>Admin verification</div>
+            <button class="modal__close" type="button" aria-label="Close" data-admin-close>&times;</button>
+          </div>
+          <div class="modal__body">
+            <div class="hint" style="margin-bottom:10px;" data-admin-hint></div>
+            <input class="input" type="password" autocomplete="current-password" placeholder="Password" data-admin-input />
+            <div class="hint" style="margin-top:10px; color:#DC2626; display:none;" data-admin-err></div>
+          </div>
+          <div class="modal__footer">
+            <button class="btn btn--light" type="button" data-admin-cancel>Cancel</button>
+            <button class="btn" type="button" data-admin-confirm>Confirm</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      const title = modal.querySelector('[data-admin-title]');
+      const hint = modal.querySelector('[data-admin-hint]');
+      const input = modal.querySelector('[data-admin-input]');
+      const err = modal.querySelector('[data-admin-err]');
+      const confirm = modal.querySelector('[data-admin-confirm]');
+      const cancel = modal.querySelector('[data-admin-cancel]');
+      const close = modal.querySelector('[data-admin-close]');
+      const backdrop = modal.querySelector('[data-admin-backdrop]');
+
+      const closeWith = (result) => {
+        try {
+          modal.classList.add('hidden');
+          err.style.display = 'none';
+          err.textContent = '';
+          input.value = '';
+          if (typeof currentResolve === 'function') {
+            const r = currentResolve;
+            currentResolve = null;
+            r(result);
+          }
+        } catch {
+          // no-op
+        }
+      };
+
+      backdrop.addEventListener('click', () => closeWith(false));
+      close.addEventListener('click', () => closeWith(false));
+      cancel.addEventListener('click', () => closeWith(false));
+
+      // Enter submits
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          confirm.click();
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeWith(false);
+        }
+      });
+
+      // Verify on confirm
+      confirm.addEventListener('click', async () => {
+        const pw = String(input.value || '').trim();
+        err.style.display = 'none';
+        err.textContent = '';
+
+        if (!pw) {
+          err.textContent = 'Please enter the Admin password.';
+          err.style.display = 'block';
+          input.focus();
+          return;
+        }
+
+        confirm.disabled = true;
+        confirm.classList.add('is-busy');
+
+        try {
+          const res = await fetch('/api/b2b/admin/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ password: pw }),
+          });
+
+          if (res.status === 401 || res.redirected) {
+            // If session expired → server redirects to /login
+            if (res.redirected) {
+              window.location.href = '/login';
+              return;
+            }
+            const j = await res.json().catch(() => ({}));
+            err.textContent = j?.error || 'Invalid password.';
+            err.style.display = 'block';
+            input.select();
+            input.focus();
+            return;
+          }
+
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            err.textContent = j?.error || 'Failed to verify password.';
+            err.style.display = 'block';
+            input.select();
+            input.focus();
+            return;
+          }
+
+          // success
+          closeWith(true);
+          if (window.UI && UI.toast) {
+            UI.toast({
+              type: 'success',
+              title: 'Verified',
+              message: currentActionLabel ? `Admin verified (${currentActionLabel}).` : 'Admin verified.',
+              duration: 2500,
+            });
+          }
+        } catch (e) {
+          err.textContent = e?.message || 'Failed to verify password.';
+          err.style.display = 'block';
+          input.focus();
+        } finally {
+          confirm.disabled = false;
+          confirm.classList.remove('is-busy');
+        }
+      });
+
+      ui = { modal, title, hint, input, err, confirm, cancel, close, backdrop };
+      return ui;
+    };
+
+    const open = ({ actionLabel }) => {
+      const x = ensure();
+      currentActionLabel = String(actionLabel || '').trim();
+      x.title.textContent = 'Admin verification';
+      x.hint.textContent = currentActionLabel
+        ? `Enter Admin password to ${currentActionLabel}.`
+        : 'Enter Admin password.';
+      x.err.style.display = 'none';
+      x.err.textContent = '';
+      x.input.value = '';
+      x.modal.classList.remove('hidden');
+      setTimeout(() => x.input.focus(), 50);
+      return new Promise((resolve) => {
+        currentResolve = resolve;
+      });
+    };
+
+    return {
+      verify: async (actionLabel) => {
+        const ok = await open({ actionLabel });
+        return !!ok;
+      },
+    };
+  })();
+
   // Inventory save (B2B) — debounce updates per row
   const inventorySaveTimers = new Map();
 
@@ -177,8 +352,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const doneLabel = stockMeta?.donePropName || (school?.name ? `${school.name} Done` : 'Done');
-    const hasInventory = !!stockMeta?.inventoryPropName;
-    const inventoryLabel = hasInventory
+    const hasInventoryProp = !!stockMeta?.inventoryPropName;
+    const showInventory = inventoryMode && hasInventoryProp;
+    const inventoryLabel = showInventory
       ? (stockMeta?.inventoryDate ? `Inventory (${stockMeta.inventoryDate})` : 'Inventory')
       : null;
 
@@ -219,7 +395,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <tr>
           <th>Component</th>
           <th class="col-num col-done">${doneLabel}</th>
-          ${hasInventory ? `<th class="col-inventory col-inv">${inventoryLabel}</th>` : ''}
+          ${showInventory ? `<th class="col-inventory col-inv">${inventoryLabel}</th>` : ''}
         </tr>
       `;
 
@@ -241,7 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
           tr.appendChild(tdName);
           tr.appendChild(tdDone);
 
-          if (hasInventory) {
+          if (showInventory) {
             const tdInv = document.createElement('td');
             tdInv.className = 'col-inventory col-inv';
 
@@ -298,6 +474,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     groupsEl.appendChild(frag);
+    if (window.feather) feather.replace();
+  };
+
+  const setInventoryButtonUI = (isOn) => {
+    if (!makeInventoryBtn) return;
+    const label = makeInventoryBtn.querySelector('span');
+    if (label) label.textContent = isOn ? 'Finish inventory' : 'Make inventory';
+    const icon = makeInventoryBtn.querySelector('i[data-feather]');
+    if (icon) icon.setAttribute('data-feather', isOn ? 'check-square' : 'plus-square');
     if (window.feather) feather.replace();
   };
 
@@ -467,11 +652,15 @@ document.addEventListener('DOMContentLoaded', () => {
       stockMeta = { ...stockMeta, ...(stockRes.meta || {}) };
       renderGroups(allStock);
 
-      // Make inventory (creates "<School> Inventory YYYY-MM-DD" column in Notion)
+      // Make / Finish inventory (protected by Admin password)
       if (makeInventoryBtn) {
         makeInventoryBtn.disabled = false;
-        makeInventoryBtn.onclick = async (e) => {
-          e.preventDefault();
+        setInventoryButtonUI(false);
+
+        const startInventory = async () => {
+          const ok = await AdminAuth.verify('start inventory');
+          if (!ok) return;
+
           try {
             const r = await fetch(`/api/b2b/schools/${encodeURIComponent(id)}/inventory`, {
               method: 'POST',
@@ -480,16 +669,23 @@ document.addEventListener('DOMContentLoaded', () => {
               body: JSON.stringify({}),
             });
             const j = await r.json().catch(() => ({}));
+            if (r.redirected) {
+              window.location.href = '/login';
+              return;
+            }
             if (!r.ok) throw new Error(j.details || j.error || 'Failed to create inventory column.');
 
             // Refresh stock data to show the new column + values
             const refreshed = await fetchStock(id);
             allStock = refreshed.items;
             stockMeta = { ...stockMeta, ...(refreshed.meta || {}) };
+
+            inventoryMode = true;
+            setInventoryButtonUI(true);
             applyFilter();
 
             if (window.UI && UI.toast) {
-              const label = j?.inventoryPropName || 'Inventory column';
+              const label = j?.inventoryPropName || stockMeta?.inventoryPropName || 'Inventory';
               UI.toast({ type: 'success', title: 'Inventory', message: `${label} is ready.` });
             }
           } catch (err) {
@@ -498,6 +694,30 @@ document.addEventListener('DOMContentLoaded', () => {
               UI.toast({ type: 'error', title: 'Inventory', message: err.message || 'Failed to create inventory column.' });
             }
           }
+        };
+
+        const finishInventory = async () => {
+          const ok = await AdminAuth.verify('finish inventory');
+          if (!ok) return;
+
+          try {
+            // Give the debounced saves a moment to flush before hiding the column
+            await new Promise((r) => setTimeout(r, 650));
+          } catch {}
+
+          inventoryMode = false;
+          setInventoryButtonUI(false);
+          applyFilter();
+
+          if (window.UI && UI.toast) {
+            UI.toast({ type: 'success', title: 'Inventory', message: 'Inventory column is hidden.' });
+          }
+        };
+
+        makeInventoryBtn.onclick = async (e) => {
+          e.preventDefault();
+          if (inventoryMode) return finishInventory();
+          return startInventory();
         };
       }
 
