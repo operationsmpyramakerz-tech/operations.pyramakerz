@@ -1179,33 +1179,6 @@ function _findLatestInventoryProp(schemaProps, schoolName) {
   return best;
 }
 
-
-
-function _makeDefectedPropName(schoolName, dateISO) {
-  const base = String(schoolName || '').trim();
-  const d = String(dateISO || '').trim();
-  return `${base} Defected ${d}`.trim();
-}
-
-function _findLatestDefectedProp(schemaProps, schoolName) {
-  const name = String(schoolName || '').trim();
-  if (!name) return null;
-
-  // Match: "<School> Defected YYYY-MM-DD" (case-insensitive)
-  const re = new RegExp(`^\\s*${_escapeRegExp(name)}\\s+defected\\s+(\\d{4}-\\d{2}-\\d{2})\\s*$`, 'i');
-
-  let best = null;
-  for (const key of Object.keys(schemaProps || {})) {
-    const m = String(key || '').match(re);
-    if (!m) continue;
-    const dateStr = m[1];
-    if (!best || String(dateStr) > String(best.date)) {
-      best = { name: key, date: dateStr };
-    }
-  }
-  return best;
-}
-
 async function _ensureInventoryPropExists({ schoolName, dateISO }) {
   if (!stocktakingDatabaseId) return null;
   const name = String(schoolName || '').trim();
@@ -1213,38 +1186,6 @@ async function _ensureInventoryPropExists({ schoolName, dateISO }) {
   if (!name || !d) return null;
 
   const desired = _makeInventoryPropName(name, d);
-
-  const schemaPropsBefore = await _getStocktakingDBProps();
-  const existing = _findPropNameByNorm(schemaPropsBefore, desired);
-  if (existing) return existing;
-
-  // Create a new Number property in the School Stocktaking DB
-  await notion.databases.update({
-    database_id: stocktakingDatabaseId,
-    properties: {
-      [desired]: { number: { format: 'number' } },
-    },
-  });
-
-  // Invalidate schema cache so subsequent requests see the new property.
-  try {
-    const cacheKey = `cache:notion:dbprops:stocktaking:${stocktakingDatabaseId}:v1`;
-    await cacheDel(cacheKey);
-  } catch {}
-
-  // Return canonical name (as stored by Notion)
-  const schemaPropsAfter = await _getStocktakingDBProps();
-  return _findPropNameByNorm(schemaPropsAfter, desired) || desired;
-}
-
-
-async function _ensureDefectedPropExists({ schoolName, dateISO }) {
-  if (!stocktakingDatabaseId) return null;
-  const name = String(schoolName || '').trim();
-  const d = String(dateISO || '').trim();
-  if (!name || !d) return null;
-
-  const desired = _makeDefectedPropName(name, d);
 
   const schemaPropsBefore = await _getStocktakingDBProps();
   const existing = _findPropNameByNorm(schemaPropsBefore, desired);
@@ -1281,7 +1222,7 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
   const id = String(schoolId || "").trim();
   if (!id) return { meta: {}, items: [] };
 
-  const cacheKey = `cache:api:b2b:school-stock:${id}:v5`;
+  const cacheKey = `cache:api:b2b:school-stock:${id}:v4`;
   return await cacheGetOrSet(cacheKey, 60, async () => {
     const school = await _getB2BSchoolById(id);
     if (!school) return { meta: {}, items: [] };
@@ -1299,10 +1240,6 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
     const latestInv = _findLatestInventoryProp(schemaProps, schoolName);
     const inventoryPropName = latestInv?.name || null;
     const inventoryDate = latestInv?.date || null;
-
-    const latestDef = _findLatestDefectedProp(schemaProps, schoolName);
-    const defectedPropName = latestDef?.name || null;
-    const defectedDate = latestDef?.date || null;
 
     const productsNameToIdCode = await _getProductsNameToIdCodeMap();
     const lookupIdCode = (componentName, fallbackProps) => {
@@ -1359,15 +1296,6 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
             inventory = numberOrNull(props[invKey]);
           }
 
-          let defected = null;
-          if (defectedPropName) {
-            const defKey =
-              (defectedPropName in props && defectedPropName) ||
-              _findPropNameByNorm(props, defectedPropName) ||
-              defectedPropName;
-            defected = numberOrNull(props[defKey]);
-          }
-
           const idCode = lookupIdCode(componentName, props);
 
           let tag = null;
@@ -1391,7 +1319,6 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
             doneQuantity: doneQuantity === null ? 0 : Number(doneQuantity) || 0,
             done: !!doneBool,
             inventory,
-            defected,
             tag,
           };
         })
@@ -1404,7 +1331,7 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
 
     // Keep rows that have either a positive "<School> Done" value OR any inventory value.
     const filtered = (allStock || []).filter(
-      (it) => Number(it.doneQuantity) > 0 || (it.inventory !== null && Number(it.inventory) >= 0) || (it.defected !== null && Number(it.defected) >= 0),
+      (it) => Number(it.doneQuantity) > 0 || (it.inventory !== null && Number(it.inventory) >= 0),
     );
 
     return {
@@ -1413,8 +1340,6 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
         donePropName,
         inventoryPropName,
         inventoryDate,
-        defectedPropName,
-        defectedDate,
       },
       items: filtered,
     };
@@ -1613,23 +1538,12 @@ app.post(
         dateISO,
       });
 
-      const defectedPropName = await _ensureDefectedPropExists({
-        schoolName,
-        dateISO,
-      });
-
-      // Invalidate school stock cache so UI shows the new columns immediately.
+      // Invalidate school stock cache so UI shows the new column immediately.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${id}:v5`);
+        await cacheDel(`cache:api:b2b:school-stock:${id}:v4`);
       } catch {}
 
-      return res.json({
-        ok: true,
-        inventoryPropName,
-        inventoryDate: dateISO,
-        defectedPropName,
-        defectedDate: dateISO,
-      });
+      return res.json({ ok: true, inventoryPropName, inventoryDate: dateISO });
     } catch (e) {
       console.error("Error creating B2B inventory column:", e?.body || e);
       const msg = e?.body?.message || e?.message || "Failed to create inventory column.";
@@ -1686,7 +1600,7 @@ app.patch(
       }
 
       if (!inventoryPropName && requestedInvDate) {
-        const candidate = _makeInventoryPropName(schoolName, requestedInvDate);
+        const candidate = _makeInventoryPropName({ schoolName, dateISO: requestedInvDate });
         inventoryPropName = _findPropNameByNorm(schemaProps, candidate) || (schemaProps?.[candidate] ? candidate : null);
         inventoryDate = inventoryPropName ? requestedInvDate : null;
       }
@@ -1712,7 +1626,7 @@ app.patch(
 
       // Invalidate school stock cache so UI reflects updates.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v5`);
+        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v4`);
       } catch {}
 
       return res.json({ ok: true, inventoryPropName, inventoryDate, value });
@@ -1724,95 +1638,6 @@ app.patch(
   },
 );
 
-
-
-// ===== B2B — Update defected value for a single stock item (row) =====
-// Writes the number into the latest defected column for the school.
-app.patch(
-  "/api/b2b/schools/:id/stock/:stockId/defected",
-  requireAuth,
-  requirePage("B2B"),
-  async (req, res) => {
-    if (!stocktakingDatabaseId) {
-      return res.status(500).json({ error: "Stocktaking database ID is not configured." });
-    }
-
-    const schoolId = String(req.params.id || "").trim();
-    const stockId = String(req.params.stockId || "").trim();
-    if (!schoolId) return res.status(400).json({ error: "Missing school id." });
-    if (!stockId) return res.status(400).json({ error: "Missing stock item id." });
-
-    const raw = req?.body?.value;
-    const value = raw === null || typeof raw === "undefined" || raw === "" ? null : Number(raw);
-    if (value !== null && (!Number.isFinite(value) || value < 0)) {
-      return res.status(400).json({ error: "Invalid defected value." });
-    }
-
-    res.set("Cache-Control", "no-store");
-
-    try {
-      const school = await _getB2BSchoolById(schoolId);
-      if (!school) return res.status(404).json({ error: "School not found." });
-      const schoolName = String(school.name || "").trim();
-      if (!schoolName) return res.status(400).json({ error: "Invalid school name." });
-
-      const schemaProps = await _getStocktakingDBProps();
-      const requestedDefProp = typeof req?.body?.defectedPropName === "string" ? String(req.body.defectedPropName).trim() : "";
-      const requestedDefDate = typeof req?.body?.defectedDate === "string" ? String(req.body.defectedDate).trim() : "";
-
-      let defectedPropName = null;
-      let defectedDate = null;
-
-      if (requestedDefProp) {
-        defectedPropName =
-          _findPropNameByNorm(schemaProps, requestedDefProp) ||
-          (schemaProps?.[requestedDefProp] ? requestedDefProp : null);
-        if (defectedPropName) {
-          const m = String(defectedPropName).match(/\b(\d{4}-\d{2}-\d{2})\b/);
-          defectedDate = m ? m[1] : null;
-        }
-      }
-
-      if (!defectedPropName && requestedDefDate) {
-        const candidate = _makeDefectedPropName(schoolName, requestedDefDate);
-        defectedPropName =
-          _findPropNameByNorm(schemaProps, candidate) ||
-          (schemaProps?.[candidate] ? candidate : null);
-        defectedDate = defectedPropName ? requestedDefDate : null;
-      }
-
-      if (!defectedPropName) {
-        const latestDef = _findLatestDefectedProp(schemaProps, schoolName);
-        defectedPropName = latestDef?.name || null;
-        defectedDate = latestDef?.date || null;
-      }
-
-      if (!defectedPropName) {
-        const dateISO = _cairoDateISO(new Date());
-        defectedPropName = await _ensureDefectedPropExists({ schoolName, dateISO });
-        defectedDate = dateISO;
-      }
-
-      await notion.pages.update({
-        page_id: stockId,
-        properties: {
-          [defectedPropName]: { number: value },
-        },
-      });
-
-      // Invalidate school stock cache so UI reflects updates.
-      try {
-        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v5`);
-      } catch {}
-
-      return res.json({ ok: true, defectedPropName, defectedDate, value });
-    } catch (e) {
-      console.error("Error updating B2B defected value:", e?.body || e);
-      const msg = e?.body?.message || e?.message || "Failed to update defected.";
-      return res.status(500).json({ error: "Failed to update defected.", details: msg });
-    }
-  },
-);
 
 
 // ===== B2B School Stocktaking — PDF download (same template as /stocktaking) =====
@@ -1843,11 +1668,9 @@ app.get(
           quantity: Number(r.doneQuantity) || 0,
           inventory:
             r.inventory === null || typeof r.inventory === "undefined" ? null : Number(r.inventory),
-          defected:
-            r.defected === null || typeof r.defected === "undefined" ? null : Number(r.defected),
           tag: r.tag,
         }))
-        .filter((r) => Number(r.quantity) > 0 || (r.inventory !== null && Number(r.inventory) >= 0) || (r.defected !== null && Number(r.defected) >= 0));
+        .filter((r) => Number(r.quantity) > 0 || (r.inventory !== null && Number(r.inventory) >= 0));
 
       const createdAt = new Date();
       const dateStr = createdAt.toISOString().slice(0, 10);
@@ -1899,7 +1722,7 @@ app.get(
           case "red":
             return { bg: "#FEF2F2", text: "#991B1B" };
           default:
-            return { bg: "#F3F4F6", text: "#374151" };
+            return { bg: COLORS.tagPillBg, text: COLORS.accent };
         }
       };
 
@@ -1926,19 +1749,10 @@ app.get(
       const colIdW = 70;
       const colQtyW = 60;
       const colInvW = 70;
-      const colDefW = 70;
-      const colCompW = contentW - colIdW - colQtyW - colInvW - colDefW;
-
-      // Page tracking for footer signatures
-      let pageNum = 1;
-
-      const sigBoxH = 54;
-      const sigFooterReserve = sigBoxH + 20;
-
-      const bottomLimit = () => doc.page.height - mB - (pageNum === 1 ? 0 : sigFooterReserve);
+      const colCompW = contentW - colIdW - colQtyW - colInvW;
 
       const ensureSpace = (needed) => {
-        if (doc.y + needed > bottomLimit()) doc.addPage();
+        if (doc.y + needed > doc.page.height - mB) doc.addPage();
       };
 
       // Header
@@ -2021,59 +1835,30 @@ app.get(
       drawInfoBox(mL + boxW + boxGap, "Date", formatDateTime(createdAt));
       doc.y = boxY + boxH + 16;
 
-      // Signature blocks
-      const drawSigBox = (x, y, title, linesCount = 1) => {
+      // Signature boxes
+      const sigBoxH = 44;
+      const sigY = doc.y;
+      const drawSigBox = (x, title) => {
         doc
-          .roundedRect(x, y, boxW, sigBoxH, 8)
+          .roundedRect(x, sigY, boxW, sigBoxH, 8)
           .strokeColor(COLORS.border)
           .stroke();
         doc
           .fillColor(COLORS.muted)
           .font("Helvetica-Bold")
           .fontSize(9)
-          .text(title, x + 10, y + 8);
-
-        const firstLineY = y + 30;
-        const gap = 12;
-        for (let i = 0; i < Math.max(1, Number(linesCount) || 1); i++) {
-          const lineY = firstLineY + i * gap;
-          doc
-            .moveTo(x + 10, lineY)
-            .lineTo(x + boxW - 10, lineY)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-        }
+          .text(title, x + 10, sigY + 8);
+        // signature line
+        doc
+          .moveTo(x + 10, sigY + 30)
+          .lineTo(x + boxW - 10, sigY + 30)
+          .lineWidth(1)
+          .strokeColor(COLORS.border)
+          .stroke();
       };
-
-      const drawSignaturesAt = (y) => {
-        drawSigBox(mL, y, "Inventory Team Names / Signatures", 2);
-        drawSigBox(mL + boxW + boxGap, y, "Stockholder Name / Signature", 1);
-      };
-
-      // First page: keep signatures near the top (as-is)
-      const sigY = doc.y;
-      drawSignaturesAt(sigY);
+      drawSigBox(mL, "Deliverer Name / Signature");
+      drawSigBox(mL + boxW + boxGap, "Receiver Name / Signature");
       doc.y = sigY + sigBoxH + 18;
-
-      // Pages 2+: draw signatures in the footer (bottom of each page)
-      // IMPORTANT: drawing the footer must not move the writing cursor (doc.x/doc.y),
-      // otherwise subsequent content will start at the bottom and the PDF will look broken.
-      doc.on("pageAdded", () => {
-        pageNum += 1;
-
-        if (pageNum >= 2) {
-          const prevX = doc.x;
-          const prevY = doc.y;
-
-          const footerY = doc.page.height - mB - sigBoxH;
-          drawSignaturesAt(footerY);
-
-          // Restore cursor position (top of new page)
-          doc.x = prevX;
-          doc.y = prevY;
-        }
-      });
 
       if (!groups.length) {
         doc
@@ -2090,13 +1875,13 @@ app.get(
         const pill = notionToHex(tagColor);
         const pillText = `Tag   ${tagName}`;
 
-        // section background should match the tag background
+        // light section background
         doc
           .roundedRect(mL, y, contentW, 28, 10)
-          .fillColor(pill.bg)
+          .fillColor(COLORS.tableHeadBg)
           .fill();
 
-        // tag label (same background — pill is visually merged)
+        // tag pill
         doc
           .roundedRect(mL + 10, y + 6, Math.min(280, doc.widthOfString(pillText) + 18), 16, 8)
           .fillColor(pill.bg)
@@ -2107,17 +1892,13 @@ app.get(
           .fontSize(9)
           .text(pillText, mL + 18, y + 9);
 
-        // count pill (subtle)
+        // count pill
         const countText = `${count} items`;
         const countW = doc.widthOfString(countText) + 18;
         doc
           .roundedRect(mL + contentW - countW - 10, y + 6, countW, 16, 8)
-          .fillColor(pill.bg)
+          .fillColor("#F3F4F6")
           .fill();
-        doc
-          .roundedRect(mL + contentW - countW - 10, y + 6, countW, 16, 8)
-          .strokeColor(COLORS.border)
-          .stroke();
         doc
           .fillColor(COLORS.text)
           .font("Helvetica-Bold")
@@ -2125,44 +1906,35 @@ app.get(
           .text(countText, mL + contentW - countW - 10 + 9, y + 9);
 
         doc.y = y + 34;
-        return pill;
       };
 
-      const drawTableHeader = (pill) => {
+      const drawTableHeader = () => {
         const y = doc.y;
-        const bg = pill?.bg || COLORS.tableHeadBg;
-        const txt = pill?.text || COLORS.accent;
-
         doc
           .rect(mL, y, contentW, 20)
-          .fillColor(bg)
+          .fillColor(COLORS.tableHeadBg)
           .fill();
 
         doc
-          .fillColor(txt)
+          .fillColor(COLORS.accent)
           .font("Helvetica-Bold")
           .fontSize(9)
           .text("ID Code", mL + 8, y + 6, { width: colIdW - 10 });
         doc
-          .fillColor(txt)
+          .fillColor(COLORS.accent)
           .font("Helvetica-Bold")
           .fontSize(9)
           .text("Component", mL + colIdW, y + 6, { width: colCompW - 10 });
         doc
-          .fillColor(txt)
+          .fillColor(COLORS.accent)
           .font("Helvetica-Bold")
           .fontSize(9)
           .text("In Stock", mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
         doc
-          .fillColor(txt)
+          .fillColor(COLORS.accent)
           .font("Helvetica-Bold")
           .fontSize(9)
           .text("Inventory", mL + colIdW + colCompW + colQtyW, y + 6, { width: colInvW - 10, align: "right" });
-        doc
-          .fillColor(txt)
-          .font("Helvetica-Bold")
-          .fontSize(9)
-          .text("Defected", mL + colIdW + colCompW + colQtyW + colInvW, y + 6, { width: colDefW - 10, align: "right" });
 
         doc.y = y + 24;
       };
@@ -2198,15 +1970,12 @@ app.get(
           .fontSize(9)
           .text(String(item.quantity ?? 0), mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
 
-        const invX = mL + colIdW + colCompW + colQtyW;
-        const defX = invX + colInvW;
-
         if (invHasValue) {
           doc
             .fillColor(mismatch ? COLORS.mismatch : COLORS.text)
             .font("Helvetica")
             .fontSize(9)
-            .text(String(Number(item.inventory)), invX, y + 6, {
+            .text(String(Number(item.inventory)), mL + colIdW + colCompW + colQtyW, y + 6, {
               width: colInvW - 10,
               align: "right",
             });
@@ -2214,29 +1983,8 @@ app.get(
           // underline for handwritten inventory
           const lineY = y + 14;
           doc
-            .moveTo(invX + 8, lineY)
-            .lineTo(invX + colInvW - 8, lineY)
-            .lineWidth(0.8)
-            .strokeColor(COLORS.border)
-            .stroke();
-        }
-
-        const defHasValue = item.defected !== null && typeof item.defected !== "undefined";
-        if (defHasValue) {
-          doc
-            .fillColor(COLORS.text)
-            .font("Helvetica")
-            .fontSize(9)
-            .text(String(Number(item.defected)), defX, y + 6, {
-              width: colDefW - 10,
-              align: "right",
-            });
-        } else {
-          // underline for handwritten defected
-          const lineY = y + 14;
-          doc
-            .moveTo(defX + 8, lineY)
-            .lineTo(defX + colDefW - 8, lineY)
+            .moveTo(mL + colIdW + colCompW + colQtyW + 8, lineY)
+            .lineTo(mL + colIdW + colCompW + colQtyW + colInvW - 8, lineY)
             .lineWidth(0.8)
             .strokeColor(COLORS.border)
             .stroke();
@@ -2255,8 +2003,8 @@ app.get(
 
       for (const group of groups) {
         ensureSpace(60);
-        const pill = drawGroupHeader(group.name, group.color, group.items.length);
-        drawTableHeader(pill);
+        drawGroupHeader(group.name, group.color, group.items.length);
+        drawTableHeader();
 
         (group.items || [])
           .slice()
@@ -2306,10 +2054,8 @@ app.get(
           quantity: Number(r.doneQuantity) || 0,
           inventory:
             r.inventory === null || typeof r.inventory === "undefined" ? null : Number(r.inventory),
-          defected:
-            r.defected === null || typeof r.defected === "undefined" ? null : Number(r.defected),
         }))
-        .filter((r) => Number(r.quantity) > 0 || (r.inventory !== null && Number(r.inventory) >= 0) || (r.defected !== null && Number(r.defected) >= 0))
+        .filter((r) => Number(r.quantity) > 0 || (r.inventory !== null && Number(r.inventory) >= 0))
         .slice()
         .sort((a, b) => {
           const ta = String(a?.tag?.name || "Untagged");
@@ -2335,14 +2081,14 @@ app.get(
       const fileName = `stocktaking_${safeSchool || "School"}.xlsx`;
 
       // Title row
-      ws.mergeCells("A1:G1");
+      ws.mergeCells("A1:F1");
       ws.getCell("A1").value = "Stocktaking";
       ws.getCell("A1").font = { size: 18, bold: true };
       ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
       ws.getRow(1).height = 28;
 
       // Subtitle row
-      ws.mergeCells("A2:G2");
+      ws.mergeCells("A2:F2");
       ws.getCell("A2").value = `School: ${schoolName}  •  Generated: ${formattedDate}`;
       ws.getCell("A2").font = { size: 10, color: { argb: "FF6B7280" } };
       ws.getCell("A2").alignment = { vertical: "middle", horizontal: "center" };
@@ -2352,12 +2098,12 @@ app.get(
       ws.addRow([]);
 
       // Handover confirmation section
-      ws.mergeCells("A4:G4");
+      ws.mergeCells("A4:F4");
       ws.getCell("A4").value = "Handover Confirmation";
       ws.getCell("A4").font = { size: 14, bold: true };
       ws.getCell("A4").alignment = { vertical: "middle", horizontal: "left" };
 
-      ws.mergeCells("A5:G5");
+      ws.mergeCells("A5:F5");
       ws.getCell("A5").value =
         "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.";
       ws.getCell("A5").font = { size: 9, color: { argb: "FF6B7280" } };
@@ -2366,11 +2112,11 @@ app.get(
 
       // Info boxes (School / Date)
       ws.getRow(6).height = 22;
-      ws.mergeCells("A6:D6");
-      ws.mergeCells("E6:G6");
+      ws.mergeCells("A6:C6");
+      ws.mergeCells("D6:F6");
       ws.getCell("A6").value = `School: ${schoolName}`;
-      ws.getCell("E6").value = `Date: ${formattedDate}`;
-      ["A6", "E6"].forEach((addr) => {
+      ws.getCell("D6").value = `Date: ${formattedDate}`;
+      ["A6", "D6"].forEach((addr) => {
         const c = ws.getCell(addr);
         c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
         c.border = {
@@ -2385,11 +2131,11 @@ app.get(
 
       // Signature boxes
       ws.getRow(7).height = 26;
-      ws.mergeCells("A7:D7");
-      ws.mergeCells("E7:G7");
-      ws.getCell("A7").value = "Inventory Team Names / Signatures";
-      ws.getCell("E7").value = "Stockholder Name / Signature";
-      ["A7", "E7"].forEach((addr) => {
+      ws.mergeCells("A7:C7");
+      ws.mergeCells("D7:F7");
+      ws.getCell("A7").value = "Deliverer Name / Signature";
+      ws.getCell("D7").value = "Receiver Name / Signature";
+      ["A7", "D7"].forEach((addr) => {
         const c = ws.getCell(addr);
         c.border = {
           top: { style: "thin", color: { argb: "FFE5E7EB" } },
@@ -2402,9 +2148,9 @@ app.get(
       });
       // Signature line row
       ws.getRow(8).height = 18;
-      ws.mergeCells("A8:D8");
-      ws.mergeCells("E8:G8");
-      ["A8", "E8"].forEach((addr) => {
+      ws.mergeCells("A8:C8");
+      ws.mergeCells("D8:F8");
+      ["A8", "D8"].forEach((addr) => {
         const c = ws.getCell(addr);
         c.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
       });
@@ -2414,7 +2160,7 @@ app.get(
 
       // Table header
       const headerRowIndex = ws.lastRow.number + 1;
-      ws.addRow(["Tag", "ID Code", "Component", "In Stock", "Inventory", "Defected", "Unity Price"]);
+      ws.addRow(["Tag", "ID Code", "Component", "In Stock", "Inventory", "Unity Price"]);
       const headerRow = ws.getRow(headerRowIndex);
       headerRow.font = { bold: true, color: { argb: "FF065F46" } };
       headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
@@ -2435,11 +2181,10 @@ app.get(
       ws.getColumn(3).width = 52; // Component
       ws.getColumn(4).width = 12; // In Stock
       ws.getColumn(5).width = 12; // Inventory
-      ws.getColumn(6).width = 12; // Defected
-      ws.getColumn(7).width = 14; // Unity Price
+      ws.getColumn(6).width = 14; // Unity Price
 
       // Unit price map (same as /api/stock/excel)
-      const unitPriceMap = await _getProductsNameToUnityPriceMap();
+      const unitPriceMap = await _getProductsNameToUnitPriceMap();
       const unitPriceOf = (componentName) => {
         const n = unitPriceMap.get(_normNameKey(componentName));
         if (typeof n === "number" && Number.isFinite(n)) return n;
@@ -2468,7 +2213,7 @@ app.get(
           case "red":
             return { fg: "FFFEF2F2", text: "FF991B1B" };
           default:
-            return { fg: "FFF3F4F6", text: "FF374151" };
+            return { fg: "FFD1FAE5", text: "FF065F46" };
         }
       };
 
@@ -2483,7 +2228,6 @@ app.get(
           r.name || "-",
           Number(r.quantity) || 0,
           r.inventory === null || typeof r.inventory === "undefined" ? "" : Number(r.inventory),
-          r.defected === null || typeof r.defected === "undefined" ? "" : Number(r.defected),
           price === null ? "" : price,
         ]);
 
@@ -2508,11 +2252,10 @@ app.get(
         row.getCell(4).alignment = { vertical: "middle", horizontal: "right" };
         row.getCell(5).alignment = { vertical: "middle", horizontal: "right" };
         row.getCell(6).alignment = { vertical: "middle", horizontal: "right" };
-        row.getCell(7).alignment = { vertical: "middle", horizontal: "right" };
 
         // Unity price format
         if (price !== null) {
-          row.getCell(7).numFmt = '"EGP" #,##0.00';
+          row.getCell(6).numFmt = '"EGP" #,##0.00';
         }
       }
 
@@ -7012,7 +6755,7 @@ app.all(
       ws.addRow([]);
 
       // ---- Data table ----
-      const header = ws.addRow(["Tag", "ID Code", "Component", "In Stock", "Inventory", "Defected", "Unity Price"]);
+      const header = ws.addRow(["Tag", "ID Code", "Component", "In Stock", "Inventory", "Unity Price"]);
       header.font = { bold: true };
       header.alignment = { vertical: "middle" };
       header.eachCell((cell) => {
