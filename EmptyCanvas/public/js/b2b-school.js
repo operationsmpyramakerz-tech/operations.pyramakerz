@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let school = null;
   let allStock = [];
-  let stockMeta = { donePropName: null, inventoryPropName: null, inventoryDate: null, defectedPropName: null, defectedDate: null };
+  let stockMeta = { donePropName: null, inventoryPropName: null, inventoryDate: null };
   // UI state: show/hide the inventory column (protected by Admin password)
   let inventoryMode = false;
 
@@ -171,7 +171,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const closeWith = (result) => {
         try {
           modal.classList.add('hidden');
-          modal.style.display = 'none';
           err.style.display = 'none';
           err.textContent = '';
           input.value = '';
@@ -283,7 +282,6 @@ document.addEventListener('DOMContentLoaded', () => {
       x.err.textContent = '';
       x.input.value = '';
       x.modal.classList.remove('hidden');
-      x.modal.style.display = 'flex';
       setTimeout(() => x.input.focus(), 50);
       return new Promise((resolve) => {
         currentResolve = resolve;
@@ -344,53 +342,6 @@ document.addEventListener('DOMContentLoaded', () => {
     inventorySaveTimers.set(key, t);
   };
 
-
-  // Defected save (B2B) — debounce updates per row (same UI as Inventory)
-  const defectedSaveTimers = new Map();
-
-  const saveDefectedValue = async (schoolId, stockPageId, value) => {
-    const res = await fetch(
-      `/api/b2b/schools/${encodeURIComponent(schoolId)}/stock/${encodeURIComponent(stockPageId)}/defected`,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          value,
-          defectedPropName: stockMeta?.defectedPropName || null,
-          defectedDate: stockMeta?.defectedDate || null,
-        }),
-      },
-    );
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg = data?.details || data?.error || 'Failed to save defected value.';
-      throw new Error(msg);
-    }
-    // Keep meta in sync (server may create the column on-demand)
-    if (data?.defectedPropName) stockMeta.defectedPropName = data.defectedPropName;
-    if (data?.defectedDate) stockMeta.defectedDate = data.defectedDate;
-    return data;
-  };
-
-  const scheduleDefectedSave = (schoolId, stockPageId, value) => {
-    const key = String(stockPageId || '');
-    if (!key) return;
-    const prev = defectedSaveTimers.get(key);
-    if (prev) clearTimeout(prev);
-    const t = setTimeout(async () => {
-      try {
-        await saveDefectedValue(schoolId, stockPageId, value);
-      } catch (e) {
-        console.error(e);
-        if (window.UI && UI.toast) {
-          UI.toast({ type: 'error', title: 'Defected', message: e.message || 'Failed to save defected value.' });
-        }
-      }
-    }, 550);
-    defectedSaveTimers.set(key, t);
-  };
-
   const renderGroups = (rows) => {
     if (!groupsEl) return;
     groupsEl.innerHTML = '';
@@ -402,14 +353,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const doneLabel = stockMeta?.donePropName || (school?.name ? `${school.name} Done` : 'Done');
     const hasInventoryProp = !!stockMeta?.inventoryPropName;
-    const hasDefectedProp = !!stockMeta?.defectedPropName;
     const showInventory = inventoryMode && hasInventoryProp;
-    const showDefected = inventoryMode && hasDefectedProp;
     const inventoryLabel = showInventory
       ? (stockMeta?.inventoryDate ? `Inventory (${stockMeta.inventoryDate})` : 'Inventory')
-      : null;
-    const defectedLabel = showDefected
-      ? (stockMeta?.defectedDate ? `Defected (${stockMeta.defectedDate})` : 'Defected')
       : null;
 
     const groups = groupByTag(rows);
@@ -450,7 +396,6 @@ document.addEventListener('DOMContentLoaded', () => {
           <th>Component</th>
           <th class="col-num col-done">${doneLabel}</th>
           ${showInventory ? `<th class="col-inventory col-inv">${inventoryLabel}</th>` : ''}
-          ${showDefected ? `<th class="col-inventory col-def">${defectedLabel}</th>` : ''}
         </tr>
       `;
 
@@ -515,32 +460,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             tdInv.appendChild(invInput);
             tr.appendChild(tdInv);
-          }
-
-          if (showDefected) {
-            const tdDef = document.createElement('td');
-            tdDef.className = 'col-inventory col-def';
-
-            const defInput = document.createElement('input');
-            defInput.type = 'number';
-            defInput.min = '0';
-            defInput.step = '1';
-            defInput.inputMode = 'numeric';
-            defInput.className = 'inventory-input defected-input';
-            defInput.placeholder = '—';
-            defInput.value = item.defected === null || typeof item.defected === 'undefined' ? '' : String(item.defected);
-            defInput.setAttribute('data-stock-id', item.id || '');
-
-            defInput.addEventListener('input', () => {
-              const raw = defInput.value;
-              const v = raw === '' ? null : Number(raw);
-              item.defected = v;
-              const currentSchoolId = school?.id || getSchoolIdFromPath();
-              scheduleDefectedSave(currentSchoolId, item.id, v);
-            });
-
-            tdDef.appendChild(defInput);
-            tr.appendChild(tdDef);
           }
           tbody.appendChild(tr);
         });
