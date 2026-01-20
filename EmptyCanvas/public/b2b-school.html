@@ -167,6 +167,84 @@
       color: #6b7280;
     }
 
+    /* Grades stepper (G1..G12) */
+    .grades-stepper {
+      display: flex;
+      align-items: flex-end;
+      gap: 0;
+      overflow-x: auto;
+      padding: 0.35rem 0.15rem 0.15rem;
+      max-width: 100%;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+
+    .grades-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+      min-width: 28px;
+    }
+
+    .grades-step__cap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.78rem;
+      line-height: 1;
+    }
+
+    .grades-step__num {
+      font-weight: 900;
+      color: #9ca3af;
+    }
+
+    .grades-step__dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: #fff;
+      border: 2px solid #d1d5db;
+    }
+
+    .grades-step.is-checked .grades-step__num {
+      color: #f97316;
+    }
+
+    .grades-step.is-checked .grades-step__dot {
+      background: #f97316;
+      border-color: #f97316;
+      box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.14);
+    }
+
+    .grades-connector {
+      width: 18px;
+      height: 12px; /* align with dot center */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      margin: 0 4px;
+    }
+
+    .grades-connector::before {
+      content: "";
+      width: 100%;
+      border-top: 2px dashed #d1d5db;
+    }
+
+    .grades-connector.is-active::before {
+      border-top-style: solid;
+      border-top-color: #f97316;
+    }
+
+    /* Nice tiny scrollbar (WebKit) */
+    .grades-stepper::-webkit-scrollbar { height: 6px; }
+    .grades-stepper::-webkit-scrollbar-track { background: transparent; }
+    .grades-stepper::-webkit-scrollbar-thumb { background: rgba(17, 24, 39, 0.18); border-radius: 999px; }
+
     .error-block, .empty-block {
       padding: 1rem;
       border-radius: 14px;
