@@ -128,10 +128,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const AdminAuth = (() => {
     const MODAL_ID = 'adminPasswordModal';
 
-    /** @type {null | {modal:HTMLElement, title:HTMLElement, hint:HTMLElement, input:HTMLInputElement, err:HTMLElement, confirm:HTMLButtonElement, cancel:HTMLButtonElement, close:HTMLButtonElement, backdrop:HTMLElement}} */
+    /** @type {null | {modal:HTMLElement, title:HTMLElement, hint:HTMLElement, extraWrap:HTMLElement, fileTypeSel:HTMLSelectElement, colsSel:HTMLSelectElement, input:HTMLInputElement, err:HTMLElement, confirm:HTMLButtonElement, cancel:HTMLButtonElement, close:HTMLButtonElement, backdrop:HTMLElement}} */
     let ui = null;
     let currentResolve = null;
     let currentActionLabel = '';
+    /** @type {null | ((opts: {fileType:string, cols:string}) => Promise<void>)} */
+    let currentOnVerified = null;
+    let currentMode = 'simple'; // simple | finish
 
     const ensure = () => {
       if (ui) return ui;
@@ -148,6 +151,20 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="modal__body">
             <div class="hint" style="margin-bottom:10px;" data-admin-hint></div>
+            <div data-admin-extras style="display:none; margin-bottom:10px;">
+              <div class="hint" style="margin-bottom:6px;">Choose file type to download</div>
+              <select class="input" data-admin-filetype>
+                <option value="pdf">PDF</option>
+                <option value="excel">Excel</option>
+              </select>
+
+              <div class="hint" style="margin-top:10px; margin-bottom:6px;">Choose columns</div>
+              <select class="input" data-admin-cols>
+                <option value="inventory">Inventory column only</option>
+                <option value="defected">Defected column only</option>
+                <option value="both">Inventory &amp; Defected</option>
+              </select>
+            </div>
             <input class="input" type="password" autocomplete="current-password" placeholder="Password" data-admin-input />
             <div class="hint" style="margin-top:10px; color:#DC2626; display:none;" data-admin-err></div>
           </div>
@@ -161,6 +178,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const title = modal.querySelector('[data-admin-title]');
       const hint = modal.querySelector('[data-admin-hint]');
+      const extraWrap = modal.querySelector('[data-admin-extras]');
+      const fileTypeSel = modal.querySelector('[data-admin-filetype]');
+      const colsSel = modal.querySelector('[data-admin-cols]');
       const input = modal.querySelector('[data-admin-input]');
       const err = modal.querySelector('[data-admin-err]');
       const confirm = modal.querySelector('[data-admin-confirm]');
@@ -172,9 +192,12 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           modal.classList.add('hidden');
           modal.style.display = 'none';
+          extraWrap.style.display = 'none';
           err.style.display = 'none';
           err.textContent = '';
           input.value = '';
+          currentOnVerified = null;
+          currentMode = 'simple';
           if (typeof currentResolve === 'function') {
             const r = currentResolve;
             currentResolve = null;
@@ -249,6 +272,19 @@ document.addEventListener('DOMContentLoaded', () => {
           }
 
           // success
+          // If this is the Finish Inventory modal, run the extra action before closing.
+          if (typeof currentOnVerified === 'function') {
+            try {
+              const fileType = String(fileTypeSel?.value || 'pdf').toLowerCase();
+              const cols = String(colsSel?.value || 'both').toLowerCase();
+              await currentOnVerified({ fileType, cols });
+            } catch (e) {
+              err.textContent = e?.message || 'Failed to complete the action.';
+              err.style.display = 'block';
+              return;
+            }
+          }
+
           closeWith(true);
           if (window.UI && UI.toast) {
             UI.toast({
@@ -268,13 +304,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      ui = { modal, title, hint, input, err, confirm, cancel, close, backdrop };
+      ui = { modal, title, hint, extraWrap, fileTypeSel, colsSel, input, err, confirm, cancel, close, backdrop };
       return ui;
     };
 
-    const open = ({ actionLabel }) => {
+    const open = ({ actionLabel, mode = 'simple', defaults = null, onVerified = null }) => {
       const x = ensure();
       currentActionLabel = String(actionLabel || '').trim();
+      currentMode = String(mode || 'simple');
+      currentOnVerified = typeof onVerified === 'function' ? onVerified : null;
       x.title.textContent = 'Admin verification';
       x.hint.textContent = currentActionLabel
         ? `Enter Admin password to ${currentActionLabel}.`
@@ -282,6 +320,17 @@ document.addEventListener('DOMContentLoaded', () => {
       x.err.style.display = 'none';
       x.err.textContent = '';
       x.input.value = '';
+
+      // Show/hide extras (Finish inventory only)
+      if (currentMode === 'finish') {
+        x.extraWrap.style.display = 'block';
+        const d = defaults && typeof defaults === 'object' ? defaults : {};
+        x.fileTypeSel.value = String(d.fileType || 'pdf').toLowerCase();
+        x.colsSel.value = String(d.cols || 'both').toLowerCase();
+      } else {
+        x.extraWrap.style.display = 'none';
+      }
+
       x.modal.classList.remove('hidden');
       x.modal.style.display = 'flex';
       setTimeout(() => x.input.focus(), 50);
@@ -292,7 +341,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     return {
       verify: async (actionLabel) => {
-        const ok = await open({ actionLabel });
+        const ok = await open({ actionLabel, mode: 'simple', defaults: null, onVerified: null });
+        return !!ok;
+      },
+      finish: async ({ onVerified, defaults } = {}) => {
+        const ok = await open({
+          actionLabel: 'finish inventory',
+          mode: 'finish',
+          defaults: defaults || { fileType: 'pdf', cols: 'both' },
+          onVerified: typeof onVerified === 'function' ? onVerified : null,
+        });
         return !!ok;
       },
     };
@@ -778,21 +836,56 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const finishInventory = async () => {
-          const ok = await AdminAuth.verify('finish inventory');
+          const safeName = safeFileName(school?.name || 'School');
+
+          const ok = await AdminAuth.finish({
+            defaults: { fileType: 'pdf', cols: 'both' },
+            onVerified: async ({ fileType, cols }) => {
+              // Give the debounced saves a moment to flush before generating the export
+              try {
+                await new Promise((r) => setTimeout(r, 650));
+              } catch {}
+
+              const colsParam = ['inventory', 'defected', 'both'].includes(String(cols)) ? String(cols) : 'both';
+              const ft = String(fileType || 'pdf').toLowerCase();
+              const isExcel = ft === 'excel' || ft === 'xlsx';
+
+              const endpoint = isExcel
+                ? `/api/b2b/schools/${encodeURIComponent(id)}/stock/excel?cols=${encodeURIComponent(colsParam)}`
+                : `/api/b2b/schools/${encodeURIComponent(id)}/stock/pdf?cols=${encodeURIComponent(colsParam)}`;
+
+              const fallbackName = isExcel
+                ? `Stocktaking-${safeName}.xlsx`
+                : `Stocktaking-${safeName}.pdf`;
+
+              const res = await fetch(endpoint, { method: 'GET', credentials: 'include' });
+              if (res.status === 401 || res.redirected) {
+                window.location.href = '/login';
+                return;
+              }
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || err.message || 'Export failed');
+              }
+
+              await downloadBlobResponse(res, fallbackName);
+
+              // Hide columns after successful download
+              inventoryMode = false;
+              setInventoryButtonUI(false);
+              applyFilter();
+
+              if (window.UI && UI.toast) {
+                UI.toast({
+                  type: 'success',
+                  title: 'Inventory',
+                  message: 'File downloaded successfully. Inventory/Defected columns are now hidden.',
+                });
+              }
+            },
+          });
+
           if (!ok) return;
-
-          try {
-            // Give the debounced saves a moment to flush before hiding the column
-            await new Promise((r) => setTimeout(r, 650));
-          } catch {}
-
-          inventoryMode = false;
-          setInventoryButtonUI(false);
-          applyFilter();
-
-          if (window.UI && UI.toast) {
-            UI.toast({ type: 'success', title: 'Inventory', message: 'Inventory column is hidden.' });
-          }
         };
 
         makeInventoryBtn.onclick = async (e) => {
