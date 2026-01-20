@@ -31,6 +31,11 @@ function _extractNotionIdFromEnv(raw) {
 const b2bDatabaseId = _extractNotionIdFromEnv(
   process.env.B2B || process.env.B2B_Database || process.env.B2B_DB_ID || null,
 );
+
+// Tasks DB (from ENV)
+const tasksDatabaseId = _extractNotionIdFromEnv(
+  process.env.TASKS || process.env.Tasks || process.env.Tasks_Database || process.env.TASKS_DB_ID || null,
+);
 const NOTION_VER = process.env.NOTION_VERSION || '2022-06-28'; // المطلوب في أمثلة Notion 
 // Team Members DB (from ENV)
 const teamMembersDatabaseId =
@@ -361,6 +366,7 @@ const ALL_PAGES = [
   "Assigned Schools Requested Orders",
   "Create New Order",
   "Stocktaking",
+  "Tasks",
   "B2B",
   "Funds",
   "Expenses",
@@ -393,6 +399,7 @@ function normalizePages(names = []) {
   }
   if (set.has("create new order")) out.push("Create New Order");
   if (set.has("stocktaking")) out.push("Stocktaking");
+  if (set.has("tasks") || set.has("task")) out.push("Tasks");
   if (set.has("b2b")) out.push("B2B");
   if (set.has("funds")) out.push("Funds");
   if (set.has("expenses")) out.push("Expenses");
@@ -433,6 +440,9 @@ function expandAllowedForUI(list = []) {
   }
   if (set.has("Logistics")) {
     set.add("Logistics");
+  }
+  if (set.has("Tasks")) {
+    set.add("Tasks");
   }
   if (set.has("Damaged Assets")) { set.add("Damaged Assets"); }
   return Array.from(set);
@@ -475,6 +485,7 @@ function firstAllowedPath(allowed = []) {
   if (list.includes("S.V schools orders")) return "/orders/sv-orders";
   if (list.includes("Create New Order")) return "/orders/new";
   if (list.includes("Stocktaking")) return "/stocktaking";
+  if (list.includes("Tasks")) return "/tasks";
   if (list.includes("B2B")) return "/b2b";
   if (list.includes("Logistics")) return "/logistics";
   if (list.includes("Damaged Assets")) return "/damaged-assets";
@@ -540,6 +551,17 @@ async function getOrdersDBProps() {
   const key = `cache:notion:dbProps:${normalizeNotionId(ordersDatabaseId)}:v1`;
   return await cacheGetOrSet(key, 10 * 60, async () => {
     const db = await notion.databases.retrieve({ database_id: ordersDatabaseId });
+    return db.properties || {};
+  });
+}
+
+
+async function getTasksDBProps() {
+  if (!tasksDatabaseId) return {};
+  // DB schema doesn't change often; cache it to avoid repeated Notion calls.
+  const key = `cache:notion:dbProps:${normalizeNotionId(tasksDatabaseId)}:v1`;
+  return await cacheGetOrSet(key, 10 * 60, async () => {
+    const db = await notion.databases.retrieve({ database_id: tasksDatabaseId });
     return db.properties || {};
   });
 }
@@ -789,6 +811,10 @@ app.get("/stocktaking", requireAuth, requirePage("Stocktaking"), (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "stocktaking.html"));
 });
 
+app.get("/tasks", requireAuth, requirePage("Tasks"), (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "tasks.html"));
+});
+
 // B2B page
 app.get("/b2b", requireAuth, requirePage("B2B"), (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "b2b.html"));
@@ -990,6 +1016,374 @@ app.get("/api/account", requireAuth, async (req, res) => {
 });
 
 
+
+
+
+// ===== Tasks APIs =====
+// Uses Notion database ID from process.env.TASKS
+
+function _titleTextFromProp(prop) {
+  if (!prop) return "";
+  const arr = prop.title || prop.rich_text || [];
+  if (Array.isArray(arr) && arr.length) return arr.map((t) => t.plain_text).join("");
+  return "";
+}
+
+function _dateStartFromProp(prop) {
+  if (!prop) return null;
+  if (prop.type === "date" && prop.date) return prop.date.start || null;
+  return null;
+}
+
+function _selectFromProp(prop) {
+  if (!prop) return null;
+  if (prop.type === "select" && prop.select) {
+    return { name: prop.select.name || "", color: prop.select.color || "default" };
+  }
+  if (prop.type === "status" && prop.status) {
+    return { name: prop.status.name || "", color: prop.status.color || "default" };
+  }
+  if (prop.type === "multi_select" && Array.isArray(prop.multi_select) && prop.multi_select[0]) {
+    const s = prop.multi_select[0];
+    return { name: s.name || "", color: s.color || "default" };
+  }
+  return null;
+}
+
+function _formatUniqueId(prop) {
+  if (!prop || prop.type !== "unique_id" || !prop.unique_id) return "";
+  const prefix = prop.unique_id.prefix || "";
+  const num = prop.unique_id.number;
+  if (num === null || num === undefined) return "";
+  return prefix ? `${prefix}-${num}` : String(num);
+}
+
+function _findFirstUniqueIdPropName(propsObj = {}) {
+  for (const [k, v] of Object.entries(propsObj || {})) {
+    if (v && v.type === "unique_id") return k;
+  }
+  return null;
+}
+
+async function getTasksSchemaCached() {
+  const props = await getTasksDBProps();
+  const titleProp = firstTitlePropName(props) || "Name";
+  const priorityProp = pickPropName(props, ["Priority Level", "Priority", "Priority level", "PriorityLevel"]);
+  const statusProp = pickPropName(props, ["Status", "Task Status", "State"]);
+  const deliveryDateProp = pickPropName(props, ["Delivery Date", "Due Date", "Due date", "Deadline"]);
+  const completionProp = pickPropName(props, ["Completion Rate", "Completion", "Progress", "Completion rate"]);
+  const createdByProp = pickPropName(props, ["Created By", "Creator", "Created by"]);
+  const assigneeProp = pickPropName(props, ["Assignee To", "Assignee", "Assigned To", "Assignee to"]);
+  const idProp = pickPropName(props, ["ID", "Id"]) || _findFirstUniqueIdPropName(props);
+
+  return {
+    props,
+    titleProp,
+    priorityProp,
+    statusProp,
+    deliveryDateProp,
+    completionProp,
+    createdByProp,
+    assigneeProp,
+    idProp,
+  };
+}
+
+function _parseNumberProp(prop) {
+  if (!prop) return null;
+  try {
+    if (prop.type === "number") return prop.number ?? null;
+
+    if (prop.type === "formula") {
+      if (prop.formula?.type === "number") return prop.formula.number ?? null;
+      if (prop.formula?.type === "string") {
+        const n = parseFloat(prop.formula.string);
+        return Number.isFinite(n) ? n : null;
+      }
+    }
+
+    if (prop.type === "rollup") {
+      const r = prop.rollup;
+      if (!r) return null;
+      if (r.type === "number") return r.number ?? null;
+      if (r.type === "array" && Array.isArray(r.array)) {
+        const nums = r.array
+          .map((x) => (x?.type === "number" ? x.number : null))
+          .filter((n) => typeof n === "number");
+        if (!nums.length) return null;
+        return nums.reduce((a, b) => a + b, 0);
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// Meta for building UI (priority options etc.)
+app.get("/api/tasks/meta", requireAuth, requirePage("Tasks"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!tasksDatabaseId) return res.status(500).json({ error: "TASKS database ID is not configured." });
+
+  try {
+    const schema = await getTasksSchemaCached();
+    const props = schema.props || {};
+    const meta = {
+      titleProp: schema.titleProp,
+      priorityProp: schema.priorityProp,
+      statusProp: schema.statusProp,
+      deliveryDateProp: schema.deliveryDateProp,
+      completionProp: schema.completionProp,
+      idProp: schema.idProp,
+      options: {
+        priority: [],
+        status: [],
+      },
+    };
+
+    if (schema.priorityProp && props[schema.priorityProp]) {
+      const def = props[schema.priorityProp];
+      if (def.type === "select") meta.options.priority = (def.select?.options || []).map((o) => ({ name: o.name, color: o.color || "default" }));
+      if (def.type === "status") meta.options.priority = (def.status?.options || []).map((o) => ({ name: o.name, color: o.color || "default" }));
+      if (def.type === "multi_select") meta.options.priority = (def.multi_select?.options || []).map((o) => ({ name: o.name, color: o.color || "default" }));
+    }
+    if (schema.statusProp && props[schema.statusProp]) {
+      const def = props[schema.statusProp];
+      if (def.type === "select") meta.options.status = (def.select?.options || []).map((o) => ({ name: o.name, color: o.color || "default" }));
+      if (def.type === "status") meta.options.status = (def.status?.options || []).map((o) => ({ name: o.name, color: o.color || "default" }));
+    }
+
+    return res.json(meta);
+  } catch (e) {
+    console.error("Tasks meta error:", e?.body || e);
+    return res.status(500).json({ error: "Failed to load tasks metadata." });
+  }
+});
+
+app.get("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!tasksDatabaseId) return res.status(500).json({ error: "TASKS database ID is not configured." });
+
+  try {
+    const schema = await getTasksSchemaCached();
+    const userId = await getSessionUserNotionId(req);
+    const scope = String(req.query.scope || "mine").trim().toLowerCase();
+
+    // Filter: default show only tasks assigned to the current user (if property exists)
+    let filter = undefined;
+    if (scope !== "all" && userId && schema.assigneeProp) {
+      const def = schema.props?.[schema.assigneeProp];
+      if (def && def.type === "relation") {
+        filter = { property: schema.assigneeProp, relation: { contains: userId } };
+      }
+    }
+
+    const sorts = [];
+    if (schema.deliveryDateProp) sorts.push({ property: schema.deliveryDateProp, direction: "ascending" });
+    sorts.push({ timestamp: "created_time", direction: "descending" });
+
+    const all = [];
+    let hasMore = true;
+    let cursor = undefined;
+
+    while (hasMore) {
+      const r = await notion.databases.query({
+        database_id: tasksDatabaseId,
+        page_size: 100,
+        start_cursor: cursor,
+        filter,
+        sorts,
+      });
+
+      for (const p of r.results || []) {
+        const props = p.properties || {};
+        const title = _titleTextFromProp(props?.[schema.titleProp]) || "Untitled";
+
+        const priority = schema.priorityProp ? _selectFromProp(props?.[schema.priorityProp]) : null;
+        const status = schema.statusProp ? _selectFromProp(props?.[schema.statusProp]) : null;
+
+        const dueDate = schema.deliveryDateProp ? _dateStartFromProp(props?.[schema.deliveryDateProp]) : null;
+        const completion = schema.completionProp ? _parseNumberProp(props?.[schema.completionProp]) : null;
+
+        const idText = schema.idProp ? _formatUniqueId(props?.[schema.idProp]) : "";
+
+        // Relations → names (best-effort)
+        let createdBy = "";
+        if (schema.createdByProp && props?.[schema.createdByProp]?.type === "relation") {
+          const rid = props[schema.createdByProp].relation?.[0]?.id;
+          if (rid) createdBy = await getTeamMemberNameCached(rid);
+        }
+
+        let assignees = [];
+        if (schema.assigneeProp && props?.[schema.assigneeProp]?.type === "relation") {
+          const ids = (props[schema.assigneeProp].relation || []).map((x) => x?.id).filter(Boolean);
+          if (ids.length) {
+            const map = await mapWithConcurrency(ids, 4, getTeamMemberNameCached);
+            assignees = ids.map((id) => map.get(id) || "").filter(Boolean);
+          }
+        }
+
+        all.push({
+          id: p.id,
+          url: p.url,
+          title,
+          idText,
+          priority,
+          status,
+          dueDate,
+          completion,
+          createdTime: p.created_time,
+          lastEditedTime: p.last_edited_time,
+          createdBy,
+          assignees,
+        });
+      }
+
+      hasMore = !!r.has_more;
+      cursor = r.next_cursor || undefined;
+      if (!hasMore) break;
+    }
+
+    return res.json({ tasks: all });
+  } catch (e) {
+    console.error("Tasks list error:", e?.body || e);
+    return res.status(500).json({ error: "Failed to load tasks." });
+  }
+});
+
+app.get("/api/tasks/:id", requireAuth, requirePage("Tasks"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ error: "Missing task id" });
+
+  try {
+    const schema = await getTasksSchemaCached();
+    const page = await notion.pages.retrieve({ page_id: id });
+    const props = page.properties || {};
+
+    const title = _titleTextFromProp(props?.[schema.titleProp]) || "Untitled";
+    const priority = schema.priorityProp ? _selectFromProp(props?.[schema.priorityProp]) : null;
+    const status = schema.statusProp ? _selectFromProp(props?.[schema.statusProp]) : null;
+    const dueDate = schema.deliveryDateProp ? _dateStartFromProp(props?.[schema.deliveryDateProp]) : null;
+    const completion = schema.completionProp ? _parseNumberProp(props?.[schema.completionProp]) : null;
+    const idText = schema.idProp ? _formatUniqueId(props?.[schema.idProp]) : "";
+
+    let createdBy = "";
+    if (schema.createdByProp && props?.[schema.createdByProp]?.type === "relation") {
+      const rid = props[schema.createdByProp].relation?.[0]?.id;
+      if (rid) createdBy = await getTeamMemberNameCached(rid);
+    }
+
+    let assignees = [];
+    if (schema.assigneeProp && props?.[schema.assigneeProp]?.type === "relation") {
+      const ids = (props[schema.assigneeProp].relation || []).map((x) => x?.id).filter(Boolean);
+      if (ids.length) {
+        const map = await mapWithConcurrency(ids, 4, getTeamMemberNameCached);
+        assignees = ids.map((id) => map.get(id) || "").filter(Boolean);
+      }
+    }
+
+    // Pull to-do blocks (checklist) from page content (best-effort)
+    const todos = [];
+    let cursor = undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+      const resp = await notion.blocks.children.list({
+        block_id: id,
+        page_size: 100,
+        start_cursor: cursor,
+      });
+
+      for (const b of resp.results || []) {
+        if (b.type === "to_do") {
+          const rt = b.to_do?.rich_text || [];
+          const txt = Array.isArray(rt) ? rt.map((t) => t.plain_text).join("") : "";
+          todos.push({ text: txt, checked: !!b.to_do?.checked });
+        }
+      }
+
+      hasMore = !!resp.has_more;
+      cursor = resp.next_cursor || undefined;
+      if (!hasMore) break;
+    }
+
+    return res.json({
+      id: page.id,
+      url: page.url,
+      title,
+      idText,
+      priority,
+      status,
+      dueDate,
+      completion,
+      createdTime: page.created_time,
+      lastEditedTime: page.last_edited_time,
+      createdBy,
+      assignees,
+      todos,
+    });
+  } catch (e) {
+    console.error("Task details error:", e?.body || e);
+    return res.status(500).json({ error: "Failed to load task details." });
+  }
+});
+
+app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!tasksDatabaseId) return res.status(500).json({ error: "TASKS database ID is not configured." });
+
+  try {
+    const schema = await getTasksSchemaCached();
+    const title = String(req.body?.title || req.body?.subject || "").trim();
+    const priorityName = String(req.body?.priority || "").trim();
+    const statusName = String(req.body?.status || "").trim();
+    const dueDate = String(req.body?.dueDate || req.body?.deliveryDate || "").trim();
+
+    if (!title) return res.status(400).json({ error: "Title is required" });
+
+    const properties = {};
+    properties[schema.titleProp] = { title: [{ text: { content: title } }] };
+
+    if (schema.priorityProp && priorityName) {
+      const def = schema.props?.[schema.priorityProp];
+      if (def?.type === "select") properties[schema.priorityProp] = { select: { name: priorityName } };
+      if (def?.type === "status") properties[schema.priorityProp] = { status: { name: priorityName } };
+      if (def?.type === "multi_select") properties[schema.priorityProp] = { multi_select: [{ name: priorityName }] };
+    }
+
+    if (schema.statusProp && statusName) {
+      const def = schema.props?.[schema.statusProp];
+      if (def?.type === "select") properties[schema.statusProp] = { select: { name: statusName } };
+      if (def?.type === "status") properties[schema.statusProp] = { status: { name: statusName } };
+    }
+
+    if (schema.deliveryDateProp && dueDate) {
+      properties[schema.deliveryDateProp] = { date: { start: dueDate } };
+    }
+
+    // Default: set Created By & Assignee To to current user (if relation props exist)
+    const me = await getSessionUserNotionId(req);
+    if (me) {
+      if (schema.createdByProp && schema.props?.[schema.createdByProp]?.type === "relation") {
+        properties[schema.createdByProp] = { relation: [{ id: me }] };
+      }
+      if (schema.assigneeProp && schema.props?.[schema.assigneeProp]?.type === "relation") {
+        properties[schema.assigneeProp] = { relation: [{ id: me }] };
+      }
+    }
+
+    const created = await notion.pages.create({
+      parent: { database_id: tasksDatabaseId },
+      properties,
+    });
+
+    return res.json({ ok: true, id: created.id, url: created.url });
+  } catch (e) {
+    console.error("Task create error:", e?.body || e);
+    return res.status(500).json({ error: "Failed to create task." });
+  }
+});
+
+// ===== End Tasks APIs =====
 
 // ===== B2B Schools APIs =====
 // Uses Notion database ID from process.env.B2B
