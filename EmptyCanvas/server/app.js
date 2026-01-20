@@ -1,4 +1,5 @@
 const express = require("express");
+const fs = require("fs");
 const path = require("path");
 const { Client } = require("@notionhq/client");
 const PDFDocument = require("pdfkit"); // PDF
@@ -40,6 +41,23 @@ const teamMembersDatabaseId =
 
 // ----- Hardbind: Received Quantity property name (Number) -----
 const REC_PROP_HARDBIND = "Quantity received by operations";
+
+// Shared formatter (used by B2B PDF/Excel exports)
+function formatDateTime(date) {
+  try {
+    const d = date instanceof Date ? date : new Date(date);
+    if (Number.isNaN(d.getTime())) return String(date || "-");
+    return d.toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return String(date || "-");
+  }
+}
 
 
 // Middleware
@@ -1446,6 +1464,50 @@ app.get(
   },
 );
 
+// ===== B2B — Verify Admin password (Team Members DB) =====
+// Frontend uses this to protect "Make inventory" / "Finish inventory" actions.
+app.post(
+  "/api/b2b/admin/verify",
+  requireAuth,
+  requirePage("B2B"),
+  async (req, res) => {
+    if (!teamMembersDatabaseId) {
+      return res
+        .status(500)
+        .json({ error: "Team_Members database ID is not configured." });
+    }
+
+    const password = String(req?.body?.password || "").trim();
+    if (!password) return res.status(400).json({ error: "Missing password." });
+
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const response = await notion.databases.query({
+        database_id: teamMembersDatabaseId,
+        page_size: 1,
+        filter: { property: "Name", title: { equals: "Admin" } },
+      });
+
+      const admin = response?.results?.[0] || null;
+      if (!admin) return res.status(404).json({ error: "Admin user not found." });
+
+      const storedPassword = admin?.properties?.Password?.number;
+      if (storedPassword === null || typeof storedPassword === "undefined") {
+        return res.status(500).json({ error: "Admin password is not set." });
+      }
+
+      const ok = String(storedPassword) === password;
+      if (!ok) return res.status(401).json({ error: "Invalid password." });
+
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error("Error verifying Admin password:", e?.body || e);
+      return res.status(500).json({ error: "Failed to verify password." });
+    }
+  },
+);
+
 // ===== B2B — Create (or get) today's inventory column for a school =====
 // Creates a new Number property in the School Stocktaking database:
 //   "<School> Inventory YYYY-MM-DD"
@@ -1595,7 +1657,7 @@ app.get(
 
     try {
       const { meta, items } = await _getB2BSchoolStocktakingPayload(id);
-      const schoolName = String(meta?.donePropName || meta?.schoolName || "School").trim() || "School";
+      const schoolName = String(meta?.schoolName || "School").trim() || "School";
 
       // Build rows in the same shape as /api/stock/pdf
       const filteredStockForPdf = (items || [])
@@ -1980,7 +2042,7 @@ app.get(
 
     try {
       const { meta, items } = await _getB2BSchoolStocktakingPayload(id);
-      const schoolName = String(meta?.donePropName || meta?.schoolName || "School").trim() || "School";
+      const schoolName = String(meta?.schoolName || "School").trim() || "School";
 
       // Sort by tag then component name (same as /api/stock/excel)
       const rows = (items || [])
