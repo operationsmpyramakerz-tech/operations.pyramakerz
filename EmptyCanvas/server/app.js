@@ -2093,8 +2093,8 @@ app.get(
       };
 
       const drawSignaturesAt = (y) => {
-        drawSigBox(mL, y, "Inventory Team Names / Signatures", 3);
-        drawSigBox(mL + boxW + boxGap, y, "Stockholder Name / Signature", 3);
+        drawSigBox(mL, y, "Inventory Team Names / Signatures", 4);
+        drawSigBox(mL + boxW + boxGap, y, "Stockholder Name / Signature", 4);
       };
 
       // First page: keep signatures near the top (as-is)
