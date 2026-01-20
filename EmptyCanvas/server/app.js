@@ -2057,11 +2057,21 @@ app.get(
       doc.y = sigY + sigBoxH + 18;
 
       // Pages 2+: draw signatures in the footer (bottom of each page)
-      doc.on('pageAdded', () => {
+      // IMPORTANT: drawing the footer must not move the writing cursor (doc.x/doc.y),
+      // otherwise subsequent content will start at the bottom and the PDF will look broken.
+      doc.on("pageAdded", () => {
         pageNum += 1;
+
         if (pageNum >= 2) {
+          const prevX = doc.x;
+          const prevY = doc.y;
+
           const footerY = doc.page.height - mB - sigBoxH;
           drawSignaturesAt(footerY);
+
+          // Restore cursor position (top of new page)
+          doc.x = prevX;
+          doc.y = prevY;
         }
       });
 
