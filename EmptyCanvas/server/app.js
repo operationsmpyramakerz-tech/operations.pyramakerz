@@ -6359,17 +6359,20 @@ app.get(
 );
 
 // ===== Stocktaking PDF download — requires Stocktaking =====
-// Supports BOTH GET (empty inventory) and POST (inventory values from UI)
+// Inventory column has been removed from Stocktaking (UI/PDF/Excel)
+// PDF template matches B2B-school stocktaking PDF template.
+// Supports BOTH GET and POST (POST body is ignored for backward compatibility)
 app.all(
   "/api/stock/pdf",
   requireAuth,
   requirePage("Stocktaking"),
   async (req, res) => {
-    try {
-      const inventoryMapRaw = req?.body?.inventory;
-      const inventoryMap =
-        inventoryMapRaw && typeof inventoryMapRaw === "object" ? inventoryMapRaw : {};
+    if (!teamMembersDatabaseId || !stocktakingDatabaseId) {
+      return res.status(500).json({ error: "Database IDs are not configured." });
+    }
 
+    try {
+      // Resolve the current user's school (same logic as /api/stock)
       const userResponse = await notion.databases.query({
         database_id: teamMembersDatabaseId,
         filter: { property: "Name", title: { equals: req.session.username } },
@@ -6392,12 +6395,12 @@ app.all(
           .json({ error: "Could not determine school name for the user." });
 
       const productsNameToIdCode = await _getProductsNameToIdCodeMap();
-
       const lookupIdCode = (componentName, fallbackProps) => {
         const fromProducts = productsNameToIdCode.get(_normNameKey(componentName));
         return fromProducts || _extractIdCodeFromProps(fallbackProps || {}) || "";
       };
 
+      // Fetch stock rows (same as /api/stock)
       const allStock = [];
       let hasMore = true;
       let startCursor = undefined;
@@ -6424,7 +6427,7 @@ app.all(
           sorts: [{ property: "Name", direction: "ascending" }],
         });
 
-        const stockFromPage = stockResponse.results
+        const stockFromPage = (stockResponse.results || [])
           .map((page) => {
             const props = page.properties || {};
             const componentName =
@@ -6433,15 +6436,7 @@ app.all(
               "Untitled";
 
             const quantity = firstDefinedNumber(props[schoolName]);
-
             const idCode = lookupIdCode(componentName, props);
-
-            // Inventory values come from the UI (POST body). If the key exists, allow 0.
-            let inventory = null;
-            if (inventoryMap && Object.prototype.hasOwnProperty.call(inventoryMap, page.id)) {
-              const n = Number(inventoryMap[page.id]);
-              if (Number.isFinite(n) && n >= 0) inventory = n;
-            }
 
             let tag = null;
             if (props.Tag?.select) {
@@ -6466,9 +6461,8 @@ app.all(
             return {
               id: page.id,
               name: componentName,
-              quantity: Number(quantity) || 0,
               idCode,
-              inventory,
+              quantity: Number(quantity) || 0,
               tag,
             };
           })
@@ -6482,494 +6476,335 @@ app.all(
       // Filter: include only items that have a positive In Stock value
       const filteredStockForPdf = (allStock || []).filter((it) => Number(it.quantity) > 0);
 
-      // ===== Grouping =====
-      const groupsMap = new Map();
-      (filteredStockForPdf || []).forEach((it) => {
-        const name = it?.tag?.name || "Untagged";
-        const color = it?.tag?.color || "default";
-        const key = `${String(name).toLowerCase()}|${color}`;
-        if (!groupsMap.has(key)) groupsMap.set(key, { name, color, items: [] });
-        groupsMap.get(key).items.push(it);
-      });
-      let groups = Array.from(groupsMap.values()).sort((a, b) =>
-        String(a.name).localeCompare(String(b.name)),
-      );
-      const untagged = groups.filter(
-        (g) => String(g.name).toLowerCase() === "untagged" || g.name === "-",
-      );
-      groups = groups
-        .filter(
-          (g) =>
-            !(String(g.name).toLowerCase() === "untagged" || g.name === "-"),
-        )
-        .concat(untagged);
+      // PDF should be Done-only (no Inventory/Defected) for Stocktaking.
+      const includeInventoryCol = false;
+      const includeDefectedCol = false;
+      const includeSignatureBlocks = false;
 
-      // ===== PDF =====
-      const fname = `Stocktaking-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const createdAt = new Date();
+      const dateStr = createdAt.toISOString().slice(0, 10);
+      const fileName = `Stocktaking-${dateStr}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+      res.set("Cache-Control", "no-store");
 
       const doc = new PDFDocument({ size: "A4", margin: 36 });
       doc.pipe(res);
 
+      const logoPath = path.join(__dirname, "../public/images/logo.png");
       const COLORS = {
-        border: "#E5E7EB",
-        muted: "#6B7280",
         text: "#111827",
-        danger: "#DC2626",
-        headerBg: "#F3F4F6",
+        muted: "#6B7280",
+        border: "#E5E7EB",
+        headerBg: "#F9FAFB",
+        tableHeadBg: "#ECFDF5",
+        tagPillBg: "#D1FAE5",
+        accent: "#065F46",
+        mismatch: "#DC2626",
+        mismatchBg: "#FEF2F2",
       };
 
-      const palette = {
-        default: { fill: "#F3F4F6", border: "#E5E7EB", text: "#111827" },
-        gray: { fill: "#F3F4F6", border: "#E5E7EB", text: "#374151" },
-        brown: { fill: "#EFEBE9", border: "#D7CCC8", text: "#4E342E" },
-        orange: { fill: "#FFF7ED", border: "#FED7AA", text: "#9A3412" },
-        yellow: { fill: "#FEFCE8", border: "#FDE68A", text: "#854D0E" },
-        green: { fill: "#ECFDF5", border: "#A7F3D0", text: "#065F46" },
-        blue: { fill: "#EFF6FF", border: "#BFDBFE", text: "#1E40AF" },
-        purple: { fill: "#F5F3FF", border: "#DDD6FE", text: "#5B21B6" },
-        pink: { fill: "#FDF2F8", border: "#FBCFE8", text: "#9D174D" },
-        red: { fill: "#FEF2F2", border: "#FECACA", text: "#991B1B" },
+      const normalizeTagName = (name) => {
+        const n = String(name || "").trim();
+        if (!n) return "Untagged";
+        if (n.toLowerCase() === "untagged" || n === "-") return "Untagged";
+        return n;
       };
-      const getPal = (c = "default") => palette[c] || palette.default;
 
-      const createdAt = new Date();
-      const teamMember = String(req.session.username || "—");
-      const preparedBy = teamMember;
-
-      function formatDateTime(date) {
-        try {
-          const d = date instanceof Date ? date : new Date(date);
-          if (Number.isNaN(d.getTime())) return String(date || "-");
-          return d.toLocaleString("en-GB", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-        } catch {
-          return String(date || "-");
+      const notionToHex = (color = "default") => {
+        switch (color) {
+          case "gray":
+            return { bg: "#F3F4F6", text: "#374151" };
+          case "brown":
+            return { bg: "#EFEBE9", text: "#4E342E" };
+          case "orange":
+            return { bg: "#FFF7ED", text: "#9A3412" };
+          case "yellow":
+            return { bg: "#FEFCE8", text: "#854D0E" };
+          case "green":
+            return { bg: "#ECFDF5", text: "#065F46" };
+          case "blue":
+            return { bg: "#EFF6FF", text: "#1E40AF" };
+          case "purple":
+            return { bg: "#F5F3FF", text: "#5B21B6" };
+          case "pink":
+            return { bg: "#FDF2F8", text: "#9D174D" };
+          case "red":
+            return { bg: "#FEF2F2", text: "#991B1B" };
+          default:
+            return { bg: "#F3F4F6", text: "#374151" };
         }
+      };
+
+      // Group items by tag
+      const groupMap = new Map();
+      for (const it of filteredStockForPdf) {
+        const tagName = normalizeTagName(it?.tag?.name);
+        const tagColor = it?.tag?.color || "default";
+        const key = `${tagName.toLowerCase()}|${tagColor}`;
+        if (!groupMap.has(key)) groupMap.set(key, { name: tagName, color: tagColor, items: [] });
+        groupMap.get(key).items.push(it);
       }
+      let groups = Array.from(groupMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+      const untagged = groups.filter((g) => g.name === "Untagged");
+      groups = groups.filter((g) => g.name !== "Untagged").concat(untagged);
 
-      const logoPath = path.join(
-        __dirname,
-        "..",
-        "public",
-        "images",
-        "Logo horizontal.png",
-      );
+      // Layout
+      const pageW = doc.page.width;
+      const mL = doc.page.margins.left;
+      const mR = doc.page.margins.right;
+      const mB = doc.page.margins.bottom;
+      const contentW = pageW - mL - mR;
 
-      // ===== Signature footer sizing (draw on every page) =====
-      const sigTitleH = 22;
-      const sigBoxesH = 120;
-      const sigBlockH = sigTitleH + 14 + 6 + sigBoxesH + 10;
+      const colIdW = 70;
+      const colQtyW = 60;
+      const colInvW = includeInventoryCol ? 70 : 0;
+      const colDefW = includeDefectedCol ? 70 : 0;
+      const colCompW = contentW - colIdW - colQtyW - colInvW - colDefW;
 
-      const drawPageHeader = ({ compact = false } = {}) => {
-        const pageW = doc.page.width;
-        const mL = doc.page.margins.left;
-        const mR = doc.page.margins.right;
-        const mT = doc.page.margins.top;
-        const contentW = pageW - mL - mR;
+      // Page tracking for footer signatures
+      let pageNum = 1;
 
-        const headerTop = mT;
-        const headerH = compact ? 42 : 56;
+      const sigBoxH = 54;
+      const sigFooterReserve = includeSignatureBlocks ? sigBoxH + 20 : 0;
 
-        // Logo (top-right)
-        try {
-          const logoW = compact ? 140 : 170;
-          const logoX = pageW - mR - logoW;
-          const logoY = headerTop - 4;
-          doc.image(logoPath, logoX, logoY, { width: logoW });
-        } catch {
-          // ignore
+      const bottomLimit = () => doc.page.height - mB - (pageNum === 1 ? 0 : sigFooterReserve);
+      const ensureSpace = (needed) => {
+        if (doc.y + needed > bottomLimit()) doc.addPage();
+      };
+
+      // Header
+      try {
+        if (fs.existsSync(logoPath)) {
+          doc.image(logoPath, mL, doc.y, { width: 42 });
         }
+      } catch {}
 
-        // Title (left)
-        const titleX = mL;
-        const titleY = headerTop + (compact ? 2 : 6);
-        const titleW = contentW - (compact ? 150 : 180);
+      const headerX = mL + 52;
+      const headerTopY = doc.y;
 
-        doc
-          .fillColor(COLORS.text)
-          .font("Helvetica-Bold")
-          .fontSize(compact ? 16 : 20)
-          .text("Stocktaking", titleX, titleY, {
-            width: Math.max(120, titleW),
-            align: "left",
-          });
-
-        doc
-          .fillColor(COLORS.muted)
-          .font("Helvetica")
-          .fontSize(10)
-          .text(
-            compact
-              ? `School: ${schoolName || "-"}`
-              : `School: ${schoolName || "-"}   •   Generated: ${formatDateTime(createdAt)}`,
-            titleX,
-            titleY + (compact ? 18 : 24),
-            {
-              width: Math.max(120, titleW),
-              align: "left",
-            },
-          );
-
-        // Divider
-        const lineY = headerTop + headerH;
-        doc
-          .moveTo(mL, lineY)
-          .lineTo(pageW - mR, lineY)
-          .lineWidth(1)
-          .strokeColor(COLORS.border)
-          .stroke();
-
-        doc.y = lineY + 14;
-      };
-
-      const drawSignatureFooter = () => {
-        const prevY = doc.y;
-
-        const pageW = doc.page.width;
-        const pageH = doc.page.height;
-        const mL = doc.page.margins.left;
-        const mR = doc.page.margins.right;
-        const mB = doc.page.margins.bottom;
-        const contentW = pageW - mL - mR;
-
-        const bottomY = pageH - mB;
-        const startY = bottomY - sigBlockH;
-
-        const gap = 16;
-        const boxW = (contentW - gap) / 2;
-        const boxH = sigBoxesH;
-        const boxY = startY + 14 + 6;
-        const leftX = mL;
-        const rightX = mL + boxW + gap;
-
-        const drawSignatureBox = (title, x, y) => {
-          doc.roundedRect(x, y, boxW, boxH, 10).lineWidth(1).strokeColor(COLORS.border).stroke();
-          doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(10);
-          doc.text(title, x + 12, y + 10, { width: boxW - 24, align: "left" });
-
-          const lineStartX = x + 12;
-          const lineEndX = x + boxW - 12;
-
-          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9);
-
-          doc.text("Name", lineStartX, y + 34);
-          doc
-            .moveTo(lineStartX + 40, y + 45)
-            .lineTo(lineEndX, y + 45)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-
-          doc.text("Signature", lineStartX, y + 58);
-          doc
-            .moveTo(lineStartX + 55, y + 69)
-            .lineTo(lineEndX, y + 69)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-
-          doc.text("Date", lineStartX, y + 82);
-          doc
-            .moveTo(lineStartX + 30, y + 93)
-            .lineTo(lineStartX + 95, y + 93)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 102, y + 84);
-          doc
-            .moveTo(lineStartX + 110, y + 93)
-            .lineTo(lineStartX + 175, y + 93)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 182, y + 84);
-          doc
-            .moveTo(lineStartX + 190, y + 93)
-            .lineTo(lineEndX, y + 93)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-        };
-
-        doc.save();
-        doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(12);
-        doc.text("Handover confirmation", mL, startY, { width: contentW, align: "left" });
-
-        drawSignatureBox("Delivered to", leftX, boxY);
-        drawSignatureBox("Received from", rightX, boxY);
-
-        doc.restore();
-        doc.y = prevY;
-      };
-
-      const contentBottomY = () =>
-        doc.page.height - doc.page.margins.bottom - sigBlockH;
-
-      const ensureSpace = (needH, onNewPage) => {
-        const bottom = contentBottomY();
-        if (doc.y + needH > bottom) {
-          doc.addPage();
-          drawPageHeader({ compact: true });
-          drawSignatureFooter();
-          onNewPage?.();
-        }
-      };
-
-      // ===== Page 1 header + footer =====
-      drawPageHeader({ compact: false });
-      drawSignatureFooter();
-
-      // ===== Meta small table (page 1) =====
-      const pageW1 = doc.page.width;
-      const mL1 = doc.page.margins.left;
-      const mR1 = doc.page.margins.right;
-      const contentW1 = pageW1 - mL1 - mR1;
-
-      const metaX = mL1;
-      const metaY = doc.y;
-      const metaW = contentW1;
-      const metaRowH = 30;
-      const metaH = metaRowH; // one-row header table
-      const metaColW = metaW / 2;
-
-      // If the footer is very close (rare), start a new page.
-      ensureSpace(metaH + 20, () => {
-        // Page 2+ doesn't have the meta table; if we ever hit this, just continue.
-      });
+      doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(18).text("Stocktaking", headerX, headerTopY);
 
       doc
-        .roundedRect(metaX, metaY, metaW, metaH, 8)
+        .fillColor(COLORS.muted)
+        .font("Helvetica")
+        .fontSize(10)
+        .text(`School: ${schoolName}  •  Generated: ${formatDateTime(createdAt)}`, headerX, headerTopY + 22);
+
+      doc.moveDown(1.2);
+      doc
+        .moveTo(mL, doc.y)
+        .lineTo(pageW - mR, doc.y)
         .lineWidth(1)
         .strokeColor(COLORS.border)
         .stroke();
+      doc.moveDown(0.8);
+
+      // Handover confirmation title
+      doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(14).text("Handover Confirmation", mL, doc.y);
 
       doc
-        .moveTo(metaX + metaColW, metaY)
-        .lineTo(metaX + metaColW, metaY + metaH)
-        .strokeColor(COLORS.border)
-        .stroke();
-
-      const drawMetaCell = (label, value, x, y, w) => {
-        const padX = 10;
-        doc
-          .fillColor(COLORS.muted)
-          .font("Helvetica")
-          .fontSize(9)
-          .text(label, x + padX, y + 6, { width: w - padX * 2, align: "left" });
-        doc
-          .fillColor(COLORS.text)
-          .font("Helvetica-Bold")
-          .fontSize(11)
-          .text(value || "—", x + padX, y + 16, { width: w - padX * 2, align: "left" });
-      };
-
-      drawMetaCell("School", String(schoolName || "—"), metaX, metaY, metaColW);
-      drawMetaCell("Date", formatDateTime(createdAt), metaX + metaColW, metaY, metaColW);
-      doc.y = metaY + metaH + 18;
-
-      // ===== Grouped table layout =====
-      const pageInnerWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-      const gap = 10;
-      const colCodeW = 90;
-      const colInStockW = 80;
-      const colInvW = 90;
-      const colNameW = pageInnerWidth - colCodeW - colInStockW - colInvW - gap * 3;
-
-      const drawGroupHeader = (gName, pal, count, cont = false) => {
-        const y = doc.y + 2;
-        const h = 22;
-        doc.save();
-        doc
-          .roundedRect(doc.page.margins.left, y, pageInnerWidth, h, 6)
-          .fillColor(pal.fill)
-          .strokeColor(pal.border)
-          .lineWidth(1)
-          .fillAndStroke();
-        doc
-          .fillColor(COLORS.muted)
-          .font("Helvetica-Bold")
-          .fontSize(10)
-          .text("Tag", doc.page.margins.left + 10, y + 6);
-        const pillText = cont ? `${gName} (cont.)` : gName;
-        const pillPadX = 10,
-          pillH = 16;
-        const pillW = Math.max(
-          40,
-          doc.widthOfString(pillText, { font: "Helvetica-Bold", size: 10 }) +
-            pillPadX * 2,
+        .fillColor(COLORS.muted)
+        .font("Helvetica")
+        .fontSize(9)
+        .text(
+          "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.",
+          mL,
+          doc.y + 4,
+          { width: contentW },
         );
-        const pillX = doc.page.margins.left + 38;
-        const pillY = y + (h - pillH) / 2;
-        doc
-          .roundedRect(pillX, pillY, pillW, pillH, 8)
-          .fillColor(pal.fill)
-          .strokeColor(pal.border)
-          .lineWidth(1)
-          .fillAndStroke();
-        doc
-          .fillColor(pal.text)
-          .font("Helvetica-Bold")
-          .fontSize(10)
-          .text(pillText, pillX + pillPadX, pillY + 3);
-        const countTxt = `${count} items`;
-        doc
-          .fillColor(COLORS.text)
-          .font("Helvetica-Bold")
-          .text(countTxt, doc.page.margins.left, y + 5, {
-            width: pageInnerWidth - 10,
-            align: "right",
-          });
-        doc.restore();
-        doc.moveDown(1.4);
-      };
 
-      const drawTableHead = (pal) => {
-        const y = doc.y;
-        const h = 20;
-        doc.save();
-        doc
-          .roundedRect(doc.page.margins.left, y, pageInnerWidth, h, 6)
-          .fillColor(pal.fill)
-          .strokeColor(pal.border)
-          .lineWidth(1)
-          .fillAndStroke();
-        doc.fillColor(pal.text).font("Helvetica-Bold").fontSize(10);
+      doc.moveDown(1.1);
 
-        const baseX = doc.page.margins.left + 10;
-        doc.text("ID Code", baseX, y + 5, { width: colCodeW });
-
-        const compX = baseX + colCodeW + gap;
-        doc.text("Component", compX, y + 5, { width: colNameW });
-
-        const midX = compX + colNameW + gap;
-        doc.text("In Stock", midX, y + 5, {
-          width: colInStockW - 10,
-          align: "right",
-        });
-
-        const lastX = midX + colInStockW + gap;
-        doc.text("Inventory", lastX, y + 5, {
-          width: colInvW - 10,
-          align: "right",
-        });
-
-        doc.restore();
-        doc.moveDown(1.2);
-      };
-
-      const drawRow = (item, pal, onNewPage) => {
-        const codeText = item?.idCode ? String(item.idCode) : "-";
-        const codeHeight = doc.heightOfString(codeText, { width: colCodeW });
-        const nameHeight = doc.heightOfString(item.name || "-", {
-          width: colNameW,
-        });
-        const rowH = Math.max(18, codeHeight, nameHeight);
-
-        // Make sure the whole row fits above the signature footer
-        ensureSpace(rowH + 8, onNewPage);
-
-        const y = doc.y;
-
-        doc.font("Helvetica").fontSize(11).fillColor(COLORS.text);
-        const baseX = doc.page.margins.left + 10;
-        doc.text(codeText, baseX, y, { width: colCodeW });
-
-        const compX = baseX + colCodeW + gap;
-        doc.text(item.name || "-", compX, y, { width: colNameW });
-
-        const midX = compX + colNameW + gap;
+      // Meta info boxes
+      const boxH = 32;
+      const boxGap = 12;
+      const boxW = (contentW - boxGap) / 2;
+      const boxY = doc.y;
+      const drawInfoBox = (x, title, value) => {
+        doc.roundedRect(x, boxY, boxW, boxH, 8).fillColor(COLORS.headerBg).fill();
+        doc.roundedRect(x, boxY, boxW, boxH, 8).strokeColor(COLORS.border).stroke();
+        doc.fillColor(COLORS.muted).font("Helvetica-Bold").fontSize(9).text(title, x + 10, boxY + 6);
         doc
           .fillColor(COLORS.text)
           .font("Helvetica")
-          .fontSize(11)
-          .text(String(Number(item.quantity ?? 0)), midX, y, {
-            width: colInStockW - 10,
-            align: "right",
-          });
+          .fontSize(10)
+          .text(String(value || "-"), x + 10, boxY + 18, { width: boxW - 20 });
+      };
+      drawInfoBox(mL, "School", schoolName);
+      drawInfoBox(mL + boxW + boxGap, "Date", formatDateTime(createdAt));
+      doc.y = boxY + boxH + 16;
 
-        const lastX = midX + colInStockW + gap;
+      // Signature blocks (disabled for Stocktaking exports)
+      const drawSigBox = (x, y, title, linesCount = 1) => {
+        doc.roundedRect(x, y, boxW, sigBoxH, 8).strokeColor(COLORS.border).stroke();
+        doc.fillColor(COLORS.muted).font("Helvetica-Bold").fontSize(9).text(title, x + 10, y + 8);
 
-        // Inventory: if there is a value from the UI, print it; otherwise draw an underline.
-        const invHasValue = item.inventory !== null && typeof item.inventory !== "undefined";
-        if (invHasValue) {
-          const invNum = Number(item.inventory);
-          const stockNum = Number(item.quantity ?? 0);
-          const mismatch = Number.isFinite(invNum) && Number.isFinite(stockNum) && invNum !== stockNum;
-
+        const firstLineY = y + 30;
+        const gap = 12;
+        for (let i = 0; i < Math.max(1, Number(linesCount) || 1); i++) {
+          const lineY = firstLineY + i * gap;
           doc
-            .fillColor(mismatch ? COLORS.danger : COLORS.text)
-            .font("Helvetica")
-            .fontSize(11)
-            .text(String(Number(item.inventory)), lastX, y, {
-              width: colInvW - 10,
-              align: "right",
-            });
-        } else {
-          const lineY = y + rowH - 2;
-          doc
-            .moveTo(lastX + 12, lineY)
-            .lineTo(lastX + colInvW - 18, lineY)
-            .strokeColor(COLORS.border)
+            .moveTo(x + 10, lineY)
+            .lineTo(x + boxW - 10, lineY)
             .lineWidth(1)
+            .strokeColor(COLORS.border)
             .stroke();
         }
-
-        // Row separator
-        doc
-          .moveTo(doc.page.margins.left, y + rowH + 4)
-          .lineTo(doc.page.margins.left + pageInnerWidth, y + rowH + 4)
-          .strokeColor("#F3F4F6")
-          .lineWidth(1)
-          .stroke();
-
-        doc.y = y + rowH + 6;
       };
 
-      const ensureGroupStartSpace = () => ensureSpace(22 + 20 + 18);
+      const drawSignaturesAt = (y) => {
+        drawSigBox(mL, y, "Inventory Team Names / Signatures", 2);
+        drawSigBox(mL + boxW + boxGap, y, "Stockholder Name / Signature", 2);
+      };
 
-      for (const g of groups) {
-        const pal = getPal(g.color);
+      if (includeSignatureBlocks) {
+        const sigY = doc.y;
+        drawSignaturesAt(sigY);
+        doc.y = sigY + sigBoxH + 18;
+      } else {
+        doc.moveDown(0.5);
+      }
 
-        ensureGroupStartSpace();
-        drawGroupHeader(g.name, pal, g.items.length, false);
-        drawTableHead(pal);
-
-        g.items.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-        for (const item of g.items) {
-          drawRow(item, pal, () => {
-            drawGroupHeader(g.name, pal, g.items.length, true);
-            drawTableHead(pal);
-          });
+      doc.on("pageAdded", () => {
+        pageNum += 1;
+        if (includeSignatureBlocks && pageNum >= 2) {
+          const prevX = doc.x;
+          const prevY = doc.y;
+          const footerY = doc.page.height - mB - sigBoxH;
+          drawSignaturesAt(footerY);
+          doc.x = prevX;
+          doc.y = prevY;
         }
+      });
+
+      if (!groups.length) {
+        doc.fillColor(COLORS.muted).font("Helvetica").fontSize(11).text("No stock data found.", mL, doc.y);
+        doc.end();
+        return;
+      }
+
+      const drawGroupHeader = (tagName, tagColor, count) => {
+        const y = doc.y;
+        const pill = notionToHex(tagColor);
+        const pillText = `Tag   ${tagName}`;
+
+        doc.roundedRect(mL, y, contentW, 28, 10).fillColor(pill.bg).fill();
+
+        doc
+          .roundedRect(mL + 10, y + 6, Math.min(280, doc.widthOfString(pillText) + 18), 16, 8)
+          .fillColor(pill.bg)
+          .fill();
+        doc.fillColor(pill.text).font("Helvetica-Bold").fontSize(9).text(pillText, mL + 18, y + 9);
+
+        const countText = `${count} items`;
+        const countW = doc.widthOfString(countText) + 18;
+        doc.roundedRect(mL + contentW - countW - 10, y + 6, countW, 16, 8).fillColor(pill.bg).fill();
+        doc
+          .roundedRect(mL + contentW - countW - 10, y + 6, countW, 16, 8)
+          .strokeColor(COLORS.border)
+          .stroke();
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text(countText, mL + contentW - countW - 10 + 9, y + 9);
+
+        doc.y = y + 34;
+        return pill;
+      };
+
+      const drawTableHeader = (pill) => {
+        const y = doc.y;
+        const bg = pill?.bg || COLORS.tableHeadBg;
+        const txt = pill?.text || COLORS.accent;
+
+        doc.rect(mL, y, contentW, 20).fillColor(bg).fill();
+
+        doc.fillColor(txt).font("Helvetica-Bold").fontSize(9).text("ID Code", mL + 8, y + 6, { width: colIdW - 10 });
+        doc
+          .fillColor(txt)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text("Component", mL + colIdW, y + 6, { width: colCompW - 10 });
+        doc
+          .fillColor(txt)
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .text("In Stock", mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
+
+        doc.y = y + 24;
+      };
+
+      const drawRow = (item) => {
+        const y = doc.y;
+        const rowH = 20;
+
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica")
+          .fontSize(9)
+          .text(String(item.idCode || ""), mL + 8, y + 6, { width: colIdW - 10 });
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica")
+          .fontSize(9)
+          .text(String(item.name || "-"), mL + colIdW, y + 6, { width: colCompW - 10 });
+        doc
+          .fillColor(COLORS.text)
+          .font("Helvetica")
+          .fontSize(9)
+          .text(String(item.quantity ?? 0), mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
+
+        doc
+          .moveTo(mL, y + rowH)
+          .lineTo(mL + contentW, y + rowH)
+          .lineWidth(1)
+          .strokeColor("#F3F4F6")
+          .stroke();
+
+        doc.y = y + rowH + 2;
+      };
+
+      for (const group of groups) {
+        ensureSpace(60);
+        const pill = drawGroupHeader(group.name, group.color, group.items.length);
+        drawTableHeader(pill);
+
+        (group.items || [])
+          .slice()
+          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+          .forEach((it) => {
+            ensureSpace(28);
+            drawRow(it);
+          });
+
+        doc.moveDown(0.5);
       }
 
       doc.end();
     } catch (e) {
-      console.error("PDF generation error:", e);
-      res.status(500).json({ error: "Failed to generate PDF" });
+      console.error("Stocktaking PDF generation error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to generate PDF" });
     }
   },
 );
 
 // ===== Stocktaking Excel download — requires Stocktaking =====
-// Supports BOTH GET (empty inventory) and POST (inventory values from UI)
+// Inventory column has been removed from Stocktaking (UI/PDF/Excel)
+// Excel template matches B2B-school stocktaking Excel template.
+// Supports BOTH GET and POST (POST body is ignored for backward compatibility)
 app.all(
   "/api/stock/excel",
   requireAuth,
   requirePage("Stocktaking"),
   async (req, res) => {
-    try {
-      const inventoryMapRaw = req?.body?.inventory;
-      const inventoryMap =
-        inventoryMapRaw && typeof inventoryMapRaw === "object" ? inventoryMapRaw : {};
+    if (!teamMembersDatabaseId || !stocktakingDatabaseId) {
+      return res.status(500).json({ error: "Database IDs are not configured." });
+    }
 
+    try {
+      // Resolve the current user's school (same logic as /api/stock)
       const userResponse = await notion.databases.query({
         database_id: teamMembersDatabaseId,
         filter: { property: "Name", title: { equals: req.session.username } },
@@ -6992,34 +6827,15 @@ app.all(
           .json({ error: "Could not determine school name for the user." });
 
       const productsNameToIdCode = await _getProductsNameToIdCodeMap();
-      const productsNameToUnityPrice = await _getProductsNameToUnityPriceMap();
-
       const lookupIdCode = (componentName, fallbackProps) => {
         const fromProducts = productsNameToIdCode.get(_normNameKey(componentName));
         return fromProducts || _extractIdCodeFromProps(fallbackProps || {}) || "";
       };
 
-      const lookupUnityPrice = (componentName) => {
-        const n = productsNameToUnityPrice.get(_normNameKey(componentName));
-        return typeof n === "number" && Number.isFinite(n) ? n : null;
-      };
-
-      const createdAt = new Date();
-      const formatDateTime = (date) => {
-        try {
-          const d = date instanceof Date ? date : new Date(date);
-          if (Number.isNaN(d.getTime())) return String(date || "-");
-          return d.toLocaleString("en-GB", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-        } catch {
-          return String(date || "-");
-        }
-      };
+      // Fetch stock rows
+      const allStock = [];
+      let hasMore = true;
+      let startCursor = undefined;
 
       const numberFrom = (prop) => {
         if (!prop) return undefined;
@@ -7036,10 +6852,6 @@ app.all(
         return 0;
       };
 
-      // Fetch stock rows
-      const allStock = [];
-      let hasMore = true;
-      let startCursor = undefined;
       while (hasMore) {
         const stockResponse = await notion.databases.query({
           database_id: stocktakingDatabaseId,
@@ -7058,28 +6870,32 @@ app.all(
             const quantity = firstDefinedNumber(props[schoolName]);
             const idCode = lookupIdCode(componentName, props);
 
-            // Inventory values come from the UI (POST body). If the key exists, allow 0.
-            let inventory = null;
-            if (inventoryMap && Object.prototype.hasOwnProperty.call(inventoryMap, page.id)) {
-              const n = Number(inventoryMap[page.id]);
-              if (Number.isFinite(n) && n >= 0) inventory = n;
+            let tag = null;
+            if (props.Tag?.select) {
+              tag = {
+                name: props.Tag.select.name,
+                color: props.Tag.select.color || "default",
+              };
+            } else if (
+              Array.isArray(props.Tag?.multi_select) &&
+              props.Tag.multi_select.length > 0
+            ) {
+              const t = props.Tag.multi_select[0];
+              tag = { name: t.name, color: t.color || "default" };
+            } else if (
+              Array.isArray(props.Tags?.multi_select) &&
+              props.Tags.multi_select.length > 0
+            ) {
+              const t = props.Tags.multi_select[0];
+              tag = { name: t.name, color: t.color || "default" };
             }
-
-            let tagName = "Untagged";
-            if (props.Tag?.select?.name) tagName = props.Tag.select.name;
-            else if (Array.isArray(props.Tag?.multi_select) && props.Tag.multi_select[0]?.name)
-              tagName = props.Tag.multi_select[0].name;
-            else if (Array.isArray(props.Tags?.multi_select) && props.Tags.multi_select[0]?.name)
-              tagName = props.Tags.multi_select[0].name;
 
             return {
               id: page.id,
-              tag: tagName,
-              idCode: idCode || "",
-              component: componentName,
-              inStock: Number(quantity) || 0,
-              inventory,
-              unityPrice: lookupUnityPrice(componentName),
+              name: componentName,
+              idCode,
+              tag,
+              quantity: Number(quantity) || 0,
             };
           })
           .filter(Boolean);
@@ -7089,180 +6905,249 @@ app.all(
         startCursor = stockResponse.next_cursor;
       }
 
-      const visibleRows = (allStock || []).filter((r) => Number(r.inStock) > 0);
+      const rows = (allStock || [])
+        .filter((r) => Number(r.quantity) > 0)
+        .slice()
+        .sort((a, b) => {
+          const ta = String(a?.tag?.name || "Untagged");
+          const tb = String(b?.tag?.name || "Untagged");
+          if (ta !== tb) return ta.localeCompare(tb);
+          return String(a?.name || "").localeCompare(String(b?.name || ""));
+        });
 
       const ExcelJS = require("exceljs");
       const wb = new ExcelJS.Workbook();
       wb.creator = "Operations Hub";
       const ws = wb.addWorksheet("Stocktaking");
 
-      // ---- Meta small table (one row) ----
-      // Make the Date cell full-width by merging across the remaining columns.
-      ws.addRow([
-        "School",
-        String(schoolName || "—"),
-        "Date",
-        formatDateTime(createdAt),
-        "",
-        "",
-      ]);
-      ws.mergeCells("D1:F1");
-      const metaRow = ws.getRow(1);
-      metaRow.height = 20;
-      // Style meta cells A1:F1
-      for (const col of [1, 2, 3, 4, 5, 6]) {
-        const cell = metaRow.getCell(col);
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFDDDDDD" } },
-          left: { style: "thin", color: { argb: "FFDDDDDD" } },
-          bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
-          right: { style: "thin", color: { argb: "FFDDDDDD" } },
-        };
-        cell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
-      }
-      // Label cells
-      [1, 3].forEach((col) => {
-        const c = metaRow.getCell(col);
-        c.font = { bold: true };
-        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFEFEF" } };
-      });
-      // Value cells
-      // Date value is the merged cell starting at D1.
-      [2, 4].forEach((col) => {
-        const c = metaRow.getCell(col);
-        c.font = { bold: true };
-      });
+      const createdAt = new Date();
+      const formattedDate = formatDateTime(createdAt);
 
+      // Stocktaking exports should NOT have Inventory/Defected
+      const columns = ["Tag", "ID Code", "Component", "In Stock", "Unity Price"];
+
+      const colLetter = (n) => {
+        let num = Math.max(1, Number(n) || 1);
+        let s = "";
+        while (num > 0) {
+          const m = (num - 1) % 26;
+          s = String.fromCharCode(65 + m) + s;
+          num = Math.floor((num - 1) / 26);
+        }
+        return s;
+      };
+
+      const lastCol = colLetter(columns.length);
+      const split = Math.ceil(columns.length / 2);
+      const leftEnd = colLetter(split);
+      const rightStart = colLetter(split + 1);
+
+      const safeSchool = String(schoolName)
+        .replace(/[<>:"/\\|?*]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\s/g, "_")
+        .slice(0, 50);
+      const fileName = `stocktaking_${safeSchool || "School"}.xlsx`;
+
+      // Title row
+      ws.mergeCells(`A1:${lastCol}1`);
+      ws.getCell("A1").value = "Stocktaking";
+      ws.getCell("A1").font = { size: 18, bold: true };
+      ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
+      ws.getRow(1).height = 28;
+
+      // Subtitle row
+      ws.mergeCells(`A2:${lastCol}2`);
+      ws.getCell("A2").value = `School: ${schoolName}  •  Generated: ${formattedDate}`;
+      ws.getCell("A2").font = { size: 10, color: { argb: "FF6B7280" } };
+      ws.getCell("A2").alignment = { vertical: "middle", horizontal: "center" };
+      ws.getRow(2).height = 18;
+
+      // Spacer
       ws.addRow([]);
 
-      // ---- Data table ----
-      const header = ws.addRow(["Tag", "ID Code", "Component", "In Stock", "Inventory", "Defected", "Unity Price"]);
-      header.font = { bold: true };
-      header.alignment = { vertical: "middle" };
-      header.eachCell((cell) => {
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFF7E8F1" }, // light pink-ish to match UI accents
+      // Handover confirmation section
+      ws.mergeCells(`A4:${lastCol}4`);
+      ws.getCell("A4").value = "Handover Confirmation";
+      ws.getCell("A4").font = { size: 14, bold: true };
+      ws.getCell("A4").alignment = { vertical: "middle", horizontal: "left" };
+
+      ws.mergeCells(`A5:${lastCol}5`);
+      ws.getCell("A5").value =
+        "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.";
+      ws.getCell("A5").font = { size: 9, color: { argb: "FF6B7280" } };
+      ws.getCell("A5").alignment = { wrapText: true, vertical: "top" };
+      ws.getRow(5).height = 28;
+
+      // Info boxes (School / Date)
+      ws.getRow(6).height = 22;
+      ws.mergeCells(`A6:${leftEnd}6`);
+      ws.mergeCells(`${rightStart}6:${lastCol}6`);
+      ws.getCell("A6").value = `School: ${schoolName}`;
+      ws.getCell(`${rightStart}6`).value = `Date: ${formattedDate}`;
+      ["A6", `${rightStart}6`].forEach((addr) => {
+        const c = ws.getCell(addr);
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
+        c.border = {
+          top: { style: "thin", color: { argb: "FFE5E7EB" } },
+          left: { style: "thin", color: { argb: "FFE5E7EB" } },
+          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+          right: { style: "thin", color: { argb: "FFE5E7EB" } },
         };
+        c.font = { size: 10, bold: true };
+        c.alignment = { vertical: "middle", horizontal: "left" };
+      });
+
+      // Signature boxes (kept to match B2B-school template)
+      ws.getRow(7).height = 26;
+      ws.mergeCells(`A7:${leftEnd}7`);
+      ws.mergeCells(`${rightStart}7:${lastCol}7`);
+      ws.getCell("A7").value = "Inventory Team Names / Signatures";
+      ws.getCell(`${rightStart}7`).value = "Stockholder Name / Signature";
+      ["A7", `${rightStart}7`].forEach((addr) => {
+        const c = ws.getCell(addr);
+        c.border = {
+          top: { style: "thin", color: { argb: "FFE5E7EB" } },
+          left: { style: "thin", color: { argb: "FFE5E7EB" } },
+          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+          right: { style: "thin", color: { argb: "FFE5E7EB" } },
+        };
+        c.font = { size: 9, bold: true, color: { argb: "FF6B7280" } };
+        c.alignment = { vertical: "middle", horizontal: "left" };
+      });
+      // Signature line row
+      ws.getRow(8).height = 18;
+      ws.mergeCells(`A8:${leftEnd}8`);
+      ws.mergeCells(`${rightStart}8:${lastCol}8`);
+      ["A8", `${rightStart}8`].forEach((addr) => {
+        const c = ws.getCell(addr);
+        c.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
+      });
+
+      // Spacer
+      ws.addRow([]);
+
+      // Table header
+      const headerRowIndex = ws.lastRow.number + 1;
+      ws.addRow(columns);
+      const headerRow = ws.getRow(headerRowIndex);
+      headerRow.font = { bold: true, color: { argb: "FF065F46" } };
+      headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
+      headerRow.alignment = { vertical: "middle", horizontal: "left" };
+      headerRow.height = 20;
+      headerRow.eachCell((cell) => {
         cell.border = {
-          top: { style: "thin", color: { argb: "FFDDDDDD" } },
-          left: { style: "thin", color: { argb: "FFDDDDDD" } },
-          bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
-          right: { style: "thin", color: { argb: "FFDDDDDD" } },
+          top: { style: "thin", color: { argb: "FFE5E7EB" } },
+          left: { style: "thin", color: { argb: "FFE5E7EB" } },
+          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+          right: { style: "thin", color: { argb: "FFE5E7EB" } },
         };
       });
 
-// Sort by Tag (ascending) and put "Untagged" at the end.
-// Also: insert a blank row between different tag groups (as requested).
-const groupsMap = new Map();
-(visibleRows || []).forEach((r) => {
-  const tagName = String(r.tag || "Untagged").trim() || "Untagged";
-  const key = _normNameKey(tagName);
-  if (!groupsMap.has(key)) groupsMap.set(key, { name: tagName, items: [] });
-  groupsMap.get(key).items.push(r);
-});
-
-let groups = Array.from(groupsMap.values()).sort((a, b) =>
-  String(a.name).localeCompare(String(b.name)),
-);
-const untaggedGroups = groups.filter(
-  (g) => _normNameKey(g.name) === "untagged" || String(g.name).trim() === "-",
-);
-groups = groups
-  .filter(
-    (g) =>
-      !(_normNameKey(g.name) === "untagged" || String(g.name).trim() === "-"),
-  )
-  .concat(untaggedGroups);
-
-groups.forEach((g, gi) => {
-  const items = (g.items || []).slice().sort((a, b) =>
-    String(a.component || "").localeCompare(String(b.component || "")),
-  );
-
-  for (const r of items) {
-    const row = ws.addRow([
-      r.tag || "Untagged",
-      r.idCode || "",
-      r.component || "",
-      Number(r.inStock) || 0,
-      r.inventory === null || typeof r.inventory === "undefined"
-        ? ""
-        : Number(r.inventory),
-      r.unityPrice === null || typeof r.unityPrice === "undefined"
-        ? ""
-        : Number(r.unityPrice),
-    ]);
-    row.getCell(4).numFmt = "0";
-    row.getCell(5).numFmt = "0";
-    // Currency format (GBP) for Unity Price
-    row.getCell(6).numFmt = "£#,##0.00";
-    row.eachCell((cell) => {
-      cell.border = {
-        top: { style: "thin", color: { argb: "FFEEEEEE" } },
-        left: { style: "thin", color: { argb: "FFEEEEEE" } },
-        bottom: { style: "thin", color: { argb: "FFEEEEEE" } },
-        right: { style: "thin", color: { argb: "FFEEEEEE" } },
+      // Column widths
+      const widthByHeader = {
+        "Tag": 32,
+        "ID Code": 14,
+        "Component": 52,
+        "In Stock": 12,
+        "Unity Price": 14,
       };
-      cell.alignment = { vertical: "middle", wrapText: true };
-    });
+      columns.forEach((h, idx) => {
+        ws.getColumn(idx + 1).width = widthByHeader[h] || 12;
+      });
 
-    // If Inventory differs from In Stock, make the Inventory number red (Excel only)
-    const invCell = row.getCell(5);
-    const invVal = invCell.value;
-    const invNum = typeof invVal === "number" ? invVal : Number(invVal);
-    const stockNum = Number(r.inStock) || 0;
-    if (
-      invVal !== "" &&
-      invVal !== null &&
-      typeof invVal !== "undefined" &&
-      Number.isFinite(invNum) &&
-      Number.isFinite(stockNum) &&
-      invNum !== stockNum
-    ) {
-      invCell.font = { ...(invCell.font || {}), color: { argb: "FFDC2626" } };
-    }
-  }
+      // Unit price map
+      const unitPriceMap = await _getProductsNameToUnityPriceMap();
+      const unitPriceOf = (componentName) => {
+        const n = unitPriceMap.get(_normNameKey(componentName));
+        if (typeof n === "number" && Number.isFinite(n)) return n;
+        return null;
+      };
 
-  // blank row between tag groups (except after last)
-  if (gi !== groups.length - 1) {
-    ws.addRow([]);
-  }
-});
+      // Notion tag color map for Excel
+      const notionColorToARGB = (color = "default") => {
+        switch (color) {
+          case "gray":
+            return { fg: "FFF3F4F6", text: "FF374151" };
+          case "brown":
+            return { fg: "FFEFEBE9", text: "FF4E342E" };
+          case "orange":
+            return { fg: "FFFFF7ED", text: "FF9A3412" };
+          case "yellow":
+            return { fg: "FFFEFCE8", text: "FF854D0E" };
+          case "green":
+            return { fg: "FFECFDF5", text: "FF065F46" };
+          case "blue":
+            return { fg: "FFEFF6FF", text: "FF1E40AF" };
+          case "purple":
+            return { fg: "FFF5F3FF", text: "FF5B21B6" };
+          case "pink":
+            return { fg: "FFFDF2F8", text: "FF9D174D" };
+          case "red":
+            return { fg: "FFFEF2F2", text: "FF991B1B" };
+          default:
+            return { fg: "FFF3F4F6", text: "FF374151" };
+        }
+      };
 
-      ws.columns = [
-        { width: 18 }, // Tag
-        { width: 14 }, // ID Code
-        { width: 44 }, // Component
-        { width: 12 }, // In Stock
-        { width: 12 }, // Inventory
-        { width: 14 }, // Unity Price
-      ];
+      // Data rows
+      for (const r of rows) {
+        const tagName = r?.tag?.name || "Untagged";
+        const tagColor = r?.tag?.color || "default";
+        const price = unitPriceOf(r.name);
 
-      // Freeze the meta rows + header row
-      ws.views = [{ state: "frozen", ySplit: 3 }];
+        const rowValues = [
+          tagName,
+          r.idCode || "",
+          r.name || "-",
+          Number(r.quantity) || 0,
+          price === null ? "" : price,
+        ];
 
-      const safeSchool = String(schoolName || "school")
-        .replace(/[\\/:*?"<>|]/g, "-")
-        .replace(/\s+/g, "_")
-        .slice(0, 60);
-      const fileName = `stocktaking_${safeSchool}.xlsx`;
+        const row = ws.addRow(rowValues);
 
-      const buf = await wb.xlsx.writeBuffer();
+        // Tag pill style
+        const tagCell = row.getCell(1);
+        const c = notionColorToARGB(tagColor);
+        tagCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: c.fg } };
+        tagCell.font = { bold: true, color: { argb: c.text } };
+        tagCell.alignment = { vertical: "middle", horizontal: "left" };
+
+        // Borders
+        row.eachCell((cell) => {
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFF3F4F6" } },
+            left: { style: "thin", color: { argb: "FFF3F4F6" } },
+            bottom: { style: "thin", color: { argb: "FFF3F4F6" } },
+            right: { style: "thin", color: { argb: "FFF3F4F6" } },
+          };
+        });
+
+        // Numeric alignment
+        const idxInStock = columns.indexOf("In Stock") + 1;
+        const idxPrice = columns.indexOf("Unity Price") + 1;
+        if (idxInStock > 0) row.getCell(idxInStock).alignment = { vertical: "middle", horizontal: "right" };
+        if (idxPrice > 0) row.getCell(idxPrice).alignment = { vertical: "middle", horizontal: "right" };
+
+        // Unity price format
+        if (price !== null && idxPrice > 0) {
+          row.getCell(idxPrice).numFmt = '"EGP" #,##0.00';
+        }
+      }
+
       res.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       );
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-      );
+      res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
       res.setHeader("Cache-Control", "no-store");
-      res.send(Buffer.from(buf));
+
+      await wb.xlsx.write(res);
+      res.end();
     } catch (e) {
-      console.error("Stocktaking Excel generation error:", e.body || e);
-      res.status(500).json({ error: "Failed to export Excel" });
+      console.error("Stocktaking Excel generation error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to export Excel" });
     }
   },
 );
