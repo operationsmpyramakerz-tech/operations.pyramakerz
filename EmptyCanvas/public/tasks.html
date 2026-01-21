@@ -95,10 +95,6 @@
 
                       <div class="tasks-v2-dropdown" id="tasksV2FilterMenu" role="menu" aria-label="Tasks filter" hidden></div>
                     </div>
-
-                    <a class="tasks-v2-profile" href="/account" aria-label="My account">
-                      <img id="tasksV2ProfileImg" src="/images/logo.png" alt="" />
-                    </a>
                   </div>
                 </div>
 
@@ -159,6 +155,29 @@
             </div>
           </div>
         </section>
+
+        <!-- Month/Year picker (opens when clicking the month label) -->
+        <div class="tv2-month-picker" id="tasksV2MonthPicker" aria-hidden="true" hidden>
+          <div class="tv2-month-picker__backdrop" data-close aria-hidden="true"></div>
+
+          <div class="tv2-month-picker__sheet" role="dialog" aria-modal="true" aria-label="Select month and year">
+            <div class="tv2-month-picker__header">
+              <button class="tasks-v2-icon-btn tasks-v2-icon-btn--light tv2-month-picker__nav" type="button" id="tasksV2YearPrev" aria-label="Previous year">
+                <i data-feather="chevron-left"></i>
+              </button>
+
+              <button class="tv2-month-picker__year" type="button" id="tasksV2YearLabel" aria-label="Select year"></button>
+
+              <button class="tasks-v2-icon-btn tasks-v2-icon-btn--light tv2-month-picker__nav" type="button" id="tasksV2YearNext" aria-label="Next year">
+                <i data-feather="chevron-right"></i>
+              </button>
+            </div>
+
+            <div class="tv2-month-picker__months" id="tasksV2MonthsGrid" aria-label="Months"></div>
+
+            <button class="tv2-month-picker__cancel" type="button" data-close>Cancel</button>
+          </div>
+        </div>
       </main>
     </div>
   </div>
