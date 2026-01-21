@@ -736,19 +736,25 @@ function requirePage(pageName) {
 // --- Page Serving Routes --- //
 
 app.get("/login", (req, res) => {
-  if (req.session?.authenticated)
-    return res.redirect(firstAllowedPath(req.session.allowedPages || ALL_PAGES));
+  // ✅ Home is the default landing for all authenticated users
+  if (req.session?.authenticated) return res.redirect("/home");
   res.sendFile(path.join(__dirname, "..", "public", "login.html"));
 });
 
 app.get("/", (req, res) => {
-  if (req.session?.authenticated)
-    return res.redirect(firstAllowedPath(req.session.allowedPages || ALL_PAGES));
+  // ✅ Home is the default landing for all authenticated users
+  if (req.session?.authenticated) return res.redirect("/home");
   res.sendFile(path.join(__dirname, "..", "public", "login.html"));
 });
 
 app.get("/dashboard", requireAuth, (req, res) => {
-  res.redirect(firstAllowedPath(req.session.allowedPages || ALL_PAGES));
+  // ✅ Keep /dashboard as a stable redirect target
+  res.redirect("/home");
+});
+
+// Home (visible for all authenticated users)
+app.get("/home", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "home.html"));
 });
 
 app.get("/orders", requireAuth, requirePage("Current Orders"), (req, res) => {
