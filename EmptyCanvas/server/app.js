@@ -1022,6 +1022,109 @@ app.get("/api/account", requireAuth, async (req, res) => {
 // ===== Tasks APIs =====
 // Uses Notion database ID from process.env.TASKS
 
+// ---- Tasks helpers: department scoping (Team Members DB) ----
+// We scope "All Tasks" to the current user's Department and we also
+// expose the list of users in the same Department for the Tasks UI.
+const _TEAM_MEMBERS_BY_DEPT_TTL_SEC = 5 * 60; // 5 minutes
+
+async function getSessionUserDepartment(req) {
+  try {
+    const cached = req.session?.accountCache?.department;
+    if (cached !== undefined && cached !== null) return String(cached || "");
+  } catch {}
+
+  try {
+    const userId = await getSessionUserNotionId(req);
+    if (!userId || !teamMembersDatabaseId) return "";
+
+    const userPage = await notion.pages.retrieve({ page_id: userId });
+    const dept = userPage?.properties?.Department?.select?.name || "";
+
+    // Best-effort: update session cache so subsequent calls are fast.
+    try {
+      req.session.accountCache = req.session.accountCache || {};
+      req.session.accountCache.department = dept;
+      req.session.accountCacheTs = Date.now();
+    } catch {}
+
+    return String(dept || "");
+  } catch (e) {
+    console.error("getSessionUserDepartment error:", e?.body || e);
+    return "";
+  }
+}
+
+async function getTeamMembersByDepartmentCached(deptName) {
+  const dept = String(deptName || "").trim();
+  if (!dept || !teamMembersDatabaseId) return [];
+
+  const key = `cache:notion:teamMembersByDept:${dept}:v1`;
+  return await cacheGetOrSet(key, _TEAM_MEMBERS_BY_DEPT_TTL_SEC, async () => {
+    // Try native Notion filter (fast). If schema differs, fall back to filtering in code.
+    const out = [];
+    try {
+      let cursor = undefined;
+      let hasMore = true;
+
+      while (hasMore) {
+        const r = await notion.databases.query({
+          database_id: teamMembersDatabaseId,
+          page_size: 100,
+          start_cursor: cursor,
+          filter: { property: "Department", select: { equals: dept } },
+          sorts: [{ property: "Name", direction: "ascending" }],
+        });
+
+        for (const p of r.results || []) {
+          out.push({
+            id: p.id,
+            name: p.properties?.Name?.title?.[0]?.plain_text || "Unnamed",
+            department: p.properties?.Department?.select?.name || "",
+          });
+        }
+
+        hasMore = !!r.has_more;
+        cursor = r.next_cursor || undefined;
+        if (!hasMore) break;
+      }
+
+      return out;
+    } catch (e) {
+      // Fallback: fetch all and filter locally
+      console.warn("[tasks] Team members dept filter fallback:", e?.body || e);
+      try {
+        out.length = 0;
+        let cursor2 = undefined;
+        let hasMore2 = true;
+        while (hasMore2) {
+          const r2 = await notion.databases.query({
+            database_id: teamMembersDatabaseId,
+            page_size: 100,
+            start_cursor: cursor2,
+            sorts: [{ property: "Name", direction: "ascending" }],
+          });
+          for (const p of r2.results || []) {
+            const d = p.properties?.Department?.select?.name || "";
+            if (String(d).trim() !== dept) continue;
+            out.push({
+              id: p.id,
+              name: p.properties?.Name?.title?.[0]?.plain_text || "Unnamed",
+              department: d,
+            });
+          }
+          hasMore2 = !!r2.has_more;
+          cursor2 = r2.next_cursor || undefined;
+          if (!hasMore2) break;
+        }
+        return out;
+      } catch (e2) {
+        console.error("[tasks] Team members fallback failed:", e2?.body || e2);
+        return [];
+      }
+    }
+  });
+}
+
 function _titleTextFromProp(prop) {
   if (!prop) return "";
   const arr = prop.title || prop.rich_text || [];
@@ -1158,6 +1261,34 @@ app.get("/api/tasks/meta", requireAuth, requirePage("Tasks"), async (req, res) =
   }
 });
 
+// Users list for Tasks filters (same Department as current user)
+app.get("/api/tasks/users", requireAuth, requirePage("Tasks"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!teamMembersDatabaseId) {
+    return res.status(500).json({ error: "Team_Members database ID is not configured." });
+  }
+
+  try {
+    const meId = await getSessionUserNotionId(req);
+    if (!meId) return res.status(404).json({ error: "User not found." });
+
+    const department = await getSessionUserDepartment(req);
+    if (!department) {
+      return res.json({ department: "", meId, users: [] });
+    }
+
+    const users = await getTeamMembersByDepartmentCached(department);
+    return res.json({
+      department,
+      meId,
+      users: (users || []).map((u) => ({ id: u.id, name: u.name || "Unnamed" })),
+    });
+  } catch (e) {
+    console.error("Tasks users error:", e?.body || e);
+    return res.status(500).json({ error: "Failed to load tasks users." });
+  }
+});
+
 app.get("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
   res.set("Cache-Control", "no-store");
   if (!tasksDatabaseId) return res.status(500).json({ error: "TASKS database ID is not configured." });
@@ -1166,14 +1297,51 @@ app.get("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
     const schema = await getTasksSchemaCached();
     const userId = await getSessionUserNotionId(req);
     const scope = String(req.query.scope || "mine").trim().toLowerCase();
+    const rawAssignee = String(req.query.assignee || req.query.assigneeId || req.query.userId || "").trim();
+    const assigneeId = looksLikeNotionId(rawAssignee) ? toHyphenatedUUID(rawAssignee) : null;
 
-    // Filter: default show only tasks assigned to the current user (if property exists)
+    // Filter rules:
+    // - scope=mine  => tasks where Assignee To contains current user
+    // - scope=all   => tasks where Assignee To contains any user in SAME Department as current user
+    // - assignee=ID => tasks where Assignee To contains that user (must be in same Department)
     let filter = undefined;
-    if (scope !== "all" && userId && schema.assigneeProp) {
-      const def = schema.props?.[schema.assigneeProp];
-      if (def && def.type === "relation") {
+
+    const def = schema.assigneeProp ? schema.props?.[schema.assigneeProp] : null;
+    const canFilterByAssignee = !!(schema.assigneeProp && def && def.type === "relation");
+
+    // Build same-department member IDs (only if we need them)
+    let deptMemberIds = [];
+    if (canFilterByAssignee && (scope === "all" || !!assigneeId)) {
+      const dept = await getSessionUserDepartment(req);
+      if (dept) {
+        const members = await getTeamMembersByDepartmentCached(dept);
+        deptMemberIds = (members || []).map((m) => m?.id).filter(Boolean);
+      }
+    }
+
+    if (canFilterByAssignee && assigneeId) {
+      // Security: only allow selecting users from the same department
+      if (deptMemberIds.length) {
+        const allowed = new Set(deptMemberIds.map((x) => normalizeNotionId(x)));
+        if (!allowed.has(normalizeNotionId(assigneeId))) {
+          return res.status(403).json({ error: "Assignee is not in the same department." });
+        }
+      }
+      filter = { property: schema.assigneeProp, relation: { contains: assigneeId } };
+    } else if (canFilterByAssignee && scope === "all") {
+      // All Tasks = same department
+      if (deptMemberIds.length) {
+        // Notion filter: OR across department members
+        filter = {
+          or: deptMemberIds.map((id) => ({ property: schema.assigneeProp, relation: { contains: id } })),
+        };
+      } else if (userId) {
+        // Fallback: if dept is unknown, at least show mine
         filter = { property: schema.assigneeProp, relation: { contains: userId } };
       }
+    } else if (canFilterByAssignee && userId) {
+      // Default = mine
+      filter = { property: schema.assigneeProp, relation: { contains: userId } };
     }
 
     const sorts = [];
