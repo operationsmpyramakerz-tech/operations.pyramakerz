@@ -135,10 +135,18 @@
   document.addEventListener("DOMContentLoaded", () => {
     const daysEl = $("tasksV2Days");
     const monthLabelEl = $("tasksV2MonthLabel");
+    const monthBtn = $("tasksV2MonthBtn");
     const gridEl = $("tasksGrid");
 
     const filterBtn = $("tasksV2FilterBtn");
     const filterMenu = $("tasksV2FilterMenu");
+
+    // Month / year picker
+    const monthPickerEl = $("tasksV2MonthPicker");
+    const yearPrevBtn = $("tasksV2YearPrev");
+    const yearNextBtn = $("tasksV2YearNext");
+    const yearLabelBtn = $("tasksV2YearLabel");
+    const monthsGridEl = $("tasksV2MonthsGrid");
 
     const profileImg = $("tasksV2ProfileImg");
 
@@ -163,10 +171,13 @@
       assigneeId: "",
       selectedDay: "",
       weekStart: null,
+      weekAnimDir: "",
       tasks: [],
       selectedTaskId: "",
       selectedTaskUrl: "",
     };
+
+    let monthPickerYear = new Date().getFullYear();
 
     // Detail screen is a separate "page".
     // We toggle it by adding/removing a class on <body>.
@@ -176,6 +187,89 @@
 
     function closeDetailView() {
       document.body.classList.remove("tv2-detail-open");
+    }
+
+    function isMonthPickerOpen() {
+      return !!(monthPickerEl && monthPickerEl.hidden === false);
+    }
+
+    function closeMonthPicker() {
+      if (!monthPickerEl) return;
+      monthPickerEl.hidden = true;
+      monthPickerEl.setAttribute("aria-hidden", "true");
+    }
+
+    function monthShortLabel(monthIndex) {
+      try {
+        return new Date(2000, monthIndex, 1).toLocaleString("en-US", { month: "short" });
+      } catch {
+        const fallback = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return fallback[monthIndex] || "";
+      }
+    }
+
+    function renderMonthPicker() {
+      if (!monthPickerEl || !yearLabelBtn || !monthsGridEl) return;
+
+      const cur = parseIsoDayToLocalDate(state.selectedDay) || new Date();
+      const activeYear = cur.getFullYear();
+      const activeMonth = cur.getMonth();
+
+      yearLabelBtn.textContent = String(monthPickerYear);
+
+      const btns = [];
+      for (let m = 0; m < 12; m++) {
+        const active = monthPickerYear === activeYear && m === activeMonth;
+        btns.push(
+          `<button class="tv2-month-btn${active ? " is-active" : ""}" type="button" data-month="${m}">${escapeHtml(
+            monthShortLabel(m)
+          )}</button>`
+        );
+      }
+
+      monthsGridEl.innerHTML = btns.join("");
+
+      monthsGridEl.querySelectorAll("[data-month]").forEach((b) => {
+        b.addEventListener("click", () => {
+          const m = Number(b.getAttribute("data-month"));
+          if (!Number.isFinite(m)) return;
+          jumpToMonth(monthPickerYear, m);
+          closeMonthPicker();
+        });
+      });
+    }
+
+    function openMonthPicker() {
+      if (!monthPickerEl) return;
+      closeMenu();
+
+      const cur = parseIsoDayToLocalDate(state.selectedDay) || new Date();
+      monthPickerYear = cur.getFullYear();
+
+      renderMonthPicker();
+      monthPickerEl.hidden = false;
+      monthPickerEl.setAttribute("aria-hidden", "false");
+      if (window.feather) window.feather.replace();
+    }
+
+    function jumpToMonth(year, monthIndex) {
+      // Prefer the first Delivery Date that exists in the chosen month.
+      // Otherwise, fallback to the 1st of the month.
+      const candidates = [];
+      for (const t of state.tasks || []) {
+        const iso = isoDayFromAny(t?.dueDate);
+        if (!iso) continue;
+        const d = parseIsoDayToLocalDate(iso);
+        if (!d) continue;
+        if (d.getFullYear() === year && d.getMonth() === monthIndex) {
+          candidates.push(iso);
+        }
+      }
+
+      candidates.sort();
+
+      const targetIso = candidates[0] || isoDayFromAny(new Date(year, monthIndex, 1));
+      setSelectedDay(targetIso);
     }
 
     // Calendar swipe handlers should only be bound once (renderCalendar re-renders buttons).
@@ -348,9 +442,11 @@
       return stored || today;
     }
 
-    function setSelectedDay(dayIso) {
+    function setSelectedDay(dayIso, opts) {
       const iso = isoDayFromAny(dayIso);
       if (!iso) return;
+
+      const prevWeek = state.weekStart;
       state.selectedDay = iso;
 
       try {
@@ -358,7 +454,19 @@
       } catch {}
 
       const d = parseIsoDayToLocalDate(iso) || new Date();
-      state.weekStart = startOfWeekSunday(d);
+      const nextWeek = startOfWeekSunday(d);
+
+      // Week change animation direction (used by the week swipe / navigation)
+      let dir = "";
+      const wanted = opts && typeof opts.weekDir === "string" ? opts.weekDir : "";
+      if (wanted === "next" || wanted === "prev") {
+        dir = wanted;
+      } else if (prevWeek && nextWeek && prevWeek.getTime() !== nextWeek.getTime()) {
+        dir = nextWeek.getTime() > prevWeek.getTime() ? "next" : "prev";
+      }
+
+      state.weekAnimDir = dir;
+      state.weekStart = nextWeek;
 
       renderCalendar();
       renderTasksList();
@@ -374,14 +482,21 @@
         monthLabelEl.textContent = formatMonthName(selectedDate) || "";
       }
 
+      const dueSet = new Set(
+        (state.tasks || [])
+          .map((t) => isoDayFromAny(t?.dueDate))
+          .filter(Boolean)
+      );
+
       const btns = [];
       for (let i = 0; i < 7; i++) {
         const d = addDays(weekStart, i);
         const iso = isoDayFromAny(d);
         const num = d.getDate();
         const active = iso === state.selectedDay;
+        const hasTask = dueSet.has(iso);
         btns.push(
-          `<button class="tasks-v2-day${active ? " is-active" : ""}" type="button" role="tab" aria-selected="${active ? "true" : "false"}" data-day="${iso}">${num}</button>`
+          `<button class="tasks-v2-day${hasTask ? " has-task" : ""}${active ? " is-active" : ""}" type="button" role="tab" aria-selected="${active ? "true" : "false"}" data-day="${iso}">${num}</button>`
         );
       }
 
@@ -421,10 +536,30 @@
             if (Math.abs(dx) < 60) return;
             const cur = parseIsoDayToLocalDate(state.selectedDay) || new Date();
             const next = dx > 0 ? addDays(cur, -7) : addDays(cur, 7);
-            setSelectedDay(next);
+            const dir = dx > 0 ? "prev" : "next";
+            setSelectedDay(next, { weekDir: dir });
           },
           { passive: true }
         );
+      }
+
+      // Week enter animation (applied after re-render)
+      if (state.weekAnimDir === "next" || state.weekAnimDir === "prev") {
+        const cls = state.weekAnimDir === "next" ? "tv2-week-anim--next" : "tv2-week-anim--prev";
+        state.weekAnimDir = "";
+
+        daysEl.classList.remove("tv2-week-anim--next", "tv2-week-anim--prev");
+        // Force reflow so the same animation can retrigger
+        void daysEl.offsetWidth;
+        daysEl.classList.add(cls);
+
+        const cleanup = () => {
+          daysEl.classList.remove("tv2-week-anim--next", "tv2-week-anim--prev");
+        };
+
+        daysEl.addEventListener("animationend", cleanup, { once: true });
+        // Fallback (e.g. reduced motion)
+        setTimeout(cleanup, 260);
       }
 
       if (window.feather) window.feather.replace();
@@ -747,11 +882,9 @@
 
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
-          if (document.body.classList.contains("tv2-detail-open")) {
-            closeDetailView();
-          } else {
-            closeMenu();
-          }
+          if (isMonthPickerOpen()) closeMonthPicker();
+          else if (document.body.classList.contains("tv2-detail-open")) closeDetailView();
+          else closeMenu();
           return;
         }
 
@@ -765,6 +898,56 @@
           const next = e.key === "ArrowLeft" ? addDays(cur, -1) : addDays(cur, 1);
           setSelectedDay(next);
         }
+      });
+    }
+
+    // Month picker bindings
+    if (monthBtn && monthPickerEl) {
+      monthBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isMonthPickerOpen()) closeMonthPicker();
+        else openMonthPicker();
+      });
+
+      monthPickerEl.addEventListener("click", (e) => {
+        const t = e.target;
+        if (!t) return;
+        const closeEl = t.closest && t.closest("[data-close]");
+        if (closeEl) {
+          e.preventDefault();
+          closeMonthPicker();
+        }
+      });
+    }
+
+    if (yearPrevBtn) {
+      yearPrevBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        monthPickerYear -= 1;
+        renderMonthPicker();
+      });
+    }
+
+    if (yearNextBtn) {
+      yearNextBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        monthPickerYear += 1;
+        renderMonthPicker();
+      });
+    }
+
+    if (yearLabelBtn) {
+      yearLabelBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const val = window.prompt("Enter year", String(monthPickerYear));
+        if (val === null) return;
+        const n = Number(String(val).trim());
+        if (!Number.isFinite(n)) return;
+        const y = Math.round(n);
+        if (y < 1970 || y > 2100) return;
+        monthPickerYear = y;
+        renderMonthPicker();
       });
     }
 
