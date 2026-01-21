@@ -15,42 +15,35 @@ body.tasks-v2{
   background-image: none !important;
 }
 
-/* Keep the page centered and give it some breathing room */
+/* Full-screen layout (list page fills the screen)
+   - List screen is the default view.
+   - Detail screen opens when clicking a task (toggled by body.tv2-detail-open)
+*/
 body.tasks-v2 .tasks-v2-main{
-  padding: 28px 20px;
+  padding: 0;
+  min-height: 100vh;
 }
 
-body.tasks-v2 .tasks-v2-shell{
-  width: 100%;
-  display: flex;
-  justify-content: center;
-}
-
+body.tasks-v2 .tasks-v2-shell,
 body.tasks-v2 .tasks-v2-panels{
   width: 100%;
-  max-width: 920px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(320px, 1fr));
-  gap: 28px;
-  align-items: start;
 }
 
-@media (max-width: 980px){
-  body.tasks-v2 .tasks-v2-panels{
-    grid-template-columns: 1fr;
-    justify-items: center;
-  }
-}
-
-/* Phone-like container */
+/* Screen container */
 body.tasks-v2 .tasks-v2-panel{
   width: 100%;
-  max-width: 420px;
+  max-width: none;
   background: var(--tv2-black);
-  border-radius: 44px;
+  border-radius: 0;
   overflow: hidden;
-  box-shadow: 0 26px 70px rgba(0,0,0,0.28);
+  box-shadow: none;
+  min-height: 100vh;
 }
+
+/* Toggle between list & detail screens */
+body.tasks-v2 .tasks-v2-panel--detail{ display: none; }
+body.tasks-v2.tv2-detail-open .tasks-v2-panel--list{ display: none; }
+body.tasks-v2.tv2-detail-open .tasks-v2-panel--detail{ display: block; }
 
 /* ================================
    LEFT SCREEN (calendar + list)
@@ -61,6 +54,13 @@ body.tasks-v2 .tasks-v2-hero{
   padding: 18px 18px 20px;
   border-bottom-left-radius: 40px;
   border-bottom-right-radius: 40px;
+}
+
+/* Make list view behave like an app screen (header fixed, list scrolls) */
+body.tasks-v2 .tasks-v2-panel--list{
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
 }
 
 body.tasks-v2 .tasks-v2-topbar{
@@ -246,9 +246,26 @@ body.tasks-v2 .tasks-v2-day:focus-visible{
 
 /* List area */
 body.tasks-v2 .tasks-v2-list{
+  flex: 1 1 auto;
   padding: 18px 18px 22px;
   display: grid;
   gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-content: start;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Ensure header stays visible while the list scrolls */
+body.tasks-v2 .tasks-v2-hero{
+  flex: 0 0 auto;
+}
+
+/* The first (highlight) card should span all columns in wide layouts */
+body.tasks-v2 .tv2-highlight,
+body.tasks-v2 .tv2-empty,
+body.tasks-v2 .modern-loading{
+  grid-column: 1 / -1;
 }
 
 body.tasks-v2 .tv2-empty{
@@ -429,7 +446,9 @@ body.tasks-v2 .tasks-v2-sheet{
   border-radius: 34px;
   margin: 18px;
   padding: 18px 18px 22px;
-  min-height: 680px;
+  min-height: auto;
+  height: calc(100vh - 36px);
+  overflow: auto;
 }
 
 body.tasks-v2 .tasks-v2-sheet__top{
@@ -527,6 +546,6 @@ body.tasks-v2 .tv2-plan-item--active .tv2-plan-item__time{
 
 /* Small screens: keep the panel height natural */
 @media (max-width: 520px){
-  body.tasks-v2 .tasks-v2-panel{ max-width: 100%; border-radius: 34px; }
-  body.tasks-v2 .tasks-v2-sheet{ min-height: auto; }
+  body.tasks-v2 .tasks-v2-panel{ border-radius: 0; }
+  body.tasks-v2 .tasks-v2-sheet{ height: calc(100vh - 36px); }
 }
