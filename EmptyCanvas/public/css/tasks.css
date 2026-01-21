@@ -11,7 +11,7 @@ body.tasks-v2{
   --tv2-yellow: #F6D66F;
 
   /* Override the global app background (image) for this page */
-  background: #D5B86D !important;
+  background: #ffffff !important;
   background-image: none !important;
 }
 
