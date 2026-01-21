@@ -5,10 +5,10 @@
   --primary-color: #EA580C; /* Orange */
   --primary-color-dark: #C2410C;
   --text-primary: #000000;
-  --text-secondary: #6B7280;
+  --text-secondary: #ffffff;
   --bg-main: #FFFFFF;
   --bg-card: #FFFFFF;
-  --border-color: #E5E7EB;
+  --border-color: #ffffff;
 
   --aside-w: 270px;
   --aside-w-collapsed: 88px;
@@ -339,7 +339,7 @@ body.sidebar-collapsed .main-content{ padding-left:0; }
 
 .greeting-pill{
   position:relative; display:inline-flex; align-items:center; gap:10px;
-  background:; border:1px solid #E9EDF3; border-radius:14px;
+  background:; border:1px solid ; border-radius:14px;
   padding:8px 12px; box-shadow:0 10px 24px rgba(0,0,0,.06); max-width:100%;
 }
 .greeting-emoji{ width:28px; height:28px; border-radius:50%; background:#FFE6D5; display:grid; place-items:center; font-size:16px; }
@@ -350,7 +350,7 @@ body.sidebar-collapsed .main-content{ padding-left:0; }
 .greet-sub{ font-size:12px; color:var(--text-secondary); }
 
 .searchbar{
-  display:flex; align-items:center; gap:10px; background:#fff; border:1px solid var(--border-color);
+  display:flex; align-items:center; gap:10px; background:; border:1px solid var(--border-color);
   height:44px; border-radius:22px; padding:0 12px 0 10px; box-shadow:0 10px 24px rgba(0,0,0,.06);
   width:520px; max-width:40vw;
 }
