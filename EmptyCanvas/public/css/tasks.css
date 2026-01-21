@@ -6,8 +6,8 @@
 
 body.tasks-v2{
   /* Brand orange used across the mock */
-  --tv2-orange: #D45B44;
-  --tv2-orange-2: #ff7419;
+  --tv2-orange: #ffffff;
+  --tv2-orange-2: #000000;
   --tv2-black: #ffffff;
   --tv2-yellow: #F6D66F;
 
@@ -193,20 +193,6 @@ body.tasks-v2 .tasks-v2-calendar{
   margin-top: 10px;
 }
 
-body.tasks-v2 .tasks-v2-weekdays{
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: rgba(255,255,255,0.72);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-body.tasks-v2 .tasks-v2-weekdays span{
-  flex: 1;
-  text-align: center;
-}
-
 body.tasks-v2 .tasks-v2-days{
   margin-top: 10px;
   display: flex;
@@ -217,18 +203,35 @@ body.tasks-v2 .tasks-v2-days{
 
 body.tasks-v2 .tasks-v2-day{
   flex: 1;
-  max-width: 46px;
-  height: 46px;
-  border-radius: 16px;
+  max-width: 52px;
+  height: 62px;
+  border-radius: 18px;
   border: 1px solid transparent;
   background: transparent;
   color: rgba(255,255,255,0.92);
   font-weight: 900;
   font-size: 13px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+}
+
+body.tasks-v2 .tasks-v2-day__dow{
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.72);
+  line-height: 1;
+}
+
+body.tasks-v2 .tasks-v2-day__num{
+  font-size: 15px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.92);
+  line-height: 1;
 }
 
 /* Days that contain at least one task get a stronger border */
@@ -319,8 +322,8 @@ body.tasks-v2 .tv2-month-btn:hover{
 }
 
 body.tasks-v2 .tv2-month-btn.is-active{
-  background: var(--tv2-orange);
-  color: #fff;
+  background: var(--tv2-orange-2);
+  color: #ff7519;
 }
 
 body.tasks-v2 .tv2-month-picker__cancel{
@@ -346,7 +349,83 @@ body.tasks-v2 .tasks-v2-day:hover{
 body.tasks-v2 .tasks-v2-day.is-active{
   background: #fff;
   color: #111827;
+  border-color: rgba(17,24,39,0.35);
+  border-width: 2px;
   box-shadow: 0 14px 26px rgba(0,0,0,0.20);
+}
+
+body.tasks-v2 .tasks-v2-day.is-active .tasks-v2-day__dow{
+  color: rgba(17,24,39,0.70);
+}
+
+body.tasks-v2 .tasks-v2-day.is-active .tasks-v2-day__num{
+  color: #111827;
+}
+
+/* ================================
+   LIST ACTIONS (New task + Sort)
+   ================================ */
+
+body.tasks-v2 .tv2-actionsbar{
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+body.tasks-v2 .tv2-newtask-btn{
+  border: 0;
+  background: #111827;
+  color: #fff;
+  border-radius: 18px;
+  padding: 14px 20px;
+  font-size: 14px;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  box-shadow: 0 18px 34px rgba(0,0,0,0.18);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.tasks-v2 .tv2-newtask-btn:hover{
+  opacity: 0.96;
+}
+
+body.tasks-v2 .tv2-newtask-btn:active{
+  transform: translateY(1px);
+}
+
+body.tasks-v2 .tv2-newtask-plus{
+  font-size: 18px;
+  line-height: 1;
+}
+
+body.tasks-v2 .tv2-sort-wrap{
+  position: relative;
+}
+
+body.tasks-v2 .tv2-sort-btn{
+  width: 46px;
+  height: 46px;
+  border-radius: 18px;
+  border: 0;
+  background: #111827;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 18px 34px rgba(0,0,0,0.18);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.tasks-v2 .tv2-sort-btn:hover{ opacity: 0.96; }
+body.tasks-v2 .tv2-sort-btn:active{ transform: translateY(1px); }
+
+body.tasks-v2 .tv2-sort-btn svg{
+  width: 20px;
+  height: 20px;
 }
 
 /* Week change animation (triggered by JS on swipe / week navigation) */
@@ -500,6 +579,70 @@ body.tasks-v2 .tv2-card__sub{
   font-size: 12px;
   font-weight: 800;
   color: rgba(17,24,39,0.55);
+}
+
+/* Progress row (inside card) */
+body.tasks-v2 .tv2-progress-row{
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body.tasks-v2 .tv2-progress{
+  position: relative;
+  flex: 1 1 auto;
+  height: 28px;
+  background: #3F3F46;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+body.tasks-v2 .tv2-progress__fill{
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: linear-gradient(90deg, #168116 0%, #168116 100%);
+  border-radius: 999px;
+  box-shadow: 0 0 22px rgba(79,255,224,0.65);
+}
+
+body.tasks-v2 .tv2-progress__pct{
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+  pointer-events: none;
+}
+
+body.tasks-v2 .tv2-progress__due{
+  flex: 0 0 auto;
+  background: #E5E7EB;
+  color: rgba(17,24,39,0.80);
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+/* Quick highlight when jumping to a day */
+@media (prefers-reduced-motion: no-preference){
+  body.tasks-v2 .tv2-card.tv2-card--jump{
+    animation: tv2CardJump 900ms ease;
+  }
+}
+
+@keyframes tv2CardJump{
+  0%{ transform: translateY(0); box-shadow: 0 18px 40px rgba(0,0,0,0.20); }
+  35%{ transform: translateY(-2px); box-shadow: 0 24px 52px rgba(0,0,0,0.28); }
+  100%{ transform: translateY(0); box-shadow: 0 18px 40px rgba(0,0,0,0.20); }
 }
 
 body.tasks-v2 .tv2-card__bottom{
