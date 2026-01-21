@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#ffffff" />
+
+  <link rel="icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <script src="/pwa-register.js" defer></script>
+
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+  <title>Home</title>
+
+  <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+  <style>
+    body.permissions-loading .sidebar li { display: none !important; }
+  </style>
+
+  <link href="/css/style.css" rel="stylesheet" />
+  <link href="/css/home.css" rel="stylesheet" />
+  <script src="https://unpkg.com/feather-icons"></script>
+</head>
+
+<body class="permissions-loading">
+  <script>
+    (function() {
+      try {
+        if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+          document.body.classList.add('sidebar-mini');
+        }
+      } catch(e) {}
+    })();
+  </script>
+
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Dashboard</h2>
+        <button aria-expanded="true" aria-label="Toggle sidebar" class="sidebar-toggle" id="sidebar-toggle">
+          <i data-feather="chevrons-left"></i>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav">
+        <ul class="nav-list">
+          <li><a class="nav-link active" href="/home"><i data-feather="home"></i><span class="nav-label">Home</span></a></li>
+          <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+          <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
+          <li><a class="nav-link" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+          <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+          <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+          <li><a class="nav-link" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
+          <li><a class="nav-link" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses Users</span></a></li>
+          <li><a class="nav-link" href="/b2b"><i data-feather="folder"></i><span class="nav-label">B2B</span></a></li>
+          <li><a class="nav-link" href="/tasks"><i data-feather="check-square"></i><span class="nav-label">Tasks</span></a></li>
+        </ul>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="logout-btn" id="logoutBtn"><i data-feather="log-out"></i> Logout</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="main-header">
+        <div class="header-row1">
+          <div class="left">
+            <div class="greeting-pill" aria-live="polite">
+              <span class="greeting-avatar">
+                <img src="/images/greeting-icon.png" alt="Hi icon" />
+              </span>
+              <div class="greet-text">
+                <div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
+                <div class="greet-sub">Your operations overview</div>
+              </div>
+            </div>
+
+            <div class="searchbar" id="home-searchbar" role="search">
+              <i data-feather="search"></i>
+              <input id="homeSearch" type="search" placeholder="Search inside Home..." aria-label="Search in Home" />
+            </div>
+          </div>
+
+          <div class="right topbar-right">
+            <a class="account-mini" href="/account" title="My account" aria-label="My account">
+              <span class="ico-circle"><img src="/images/logo.png" alt="Logo" /></span>
+              <span class="label">My account</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="header-row2">
+          <h1 class="page-title">Home</h1>
+          <div class="home-updated" id="homeUpdated" aria-live="polite">—</div>
+        </div>
+      </header>
+
+      <main class="container-full-width">
+
+        <!-- KPIs -->
+        <section class="card home-card" aria-label="Overview">
+          <div class="home-section-head">
+            <h2 class="home-section-title"><i data-feather="activity"></i> Overview</h2>
+            <div class="home-section-sub" id="homeScopeLine">—</div>
+          </div>
+
+          <div class="stats home-kpis" id="homeKpis">
+            <a class="stat home-kpi" href="/tasks" data-block="tasks">
+              <div class="stat__label">My tasks</div>
+              <div class="stat__value" id="kpiTasksMain">—</div>
+              <div class="home-kpi-sub" id="kpiTasksSub">—</div>
+            </a>
+
+            <a class="stat home-kpi" href="/orders" data-block="orders">
+              <div class="stat__label">Current orders</div>
+              <div class="stat__value" id="kpiOrdersMain">—</div>
+              <div class="home-kpi-sub" id="kpiOrdersSub">—</div>
+            </a>
+
+            <a class="stat home-kpi" href="/orders/requested" data-block="requested">
+              <div class="stat__label">Operations orders</div>
+              <div class="stat__value" id="kpiRequestedMain">—</div>
+              <div class="home-kpi-sub" id="kpiRequestedSub">—</div>
+            </a>
+
+            <a class="stat home-kpi" href="/stocktaking" data-block="stock">
+              <div class="stat__label">Stocktaking</div>
+              <div class="stat__value" id="kpiStockMain">—</div>
+              <div class="home-kpi-sub" id="kpiStockSub">—</div>
+            </a>
+
+            <a class="stat home-kpi" href="/expenses" data-block="expenses">
+              <div class="stat__label">Expenses</div>
+              <div class="stat__value" id="kpiExpensesMain">—</div>
+              <div class="home-kpi-sub" id="kpiExpensesSub">—</div>
+            </a>
+          </div>
+        </section>
+
+        <!-- Grid -->
+        <section class="home-grid" aria-label="Details">
+
+          <!-- Tasks list -->
+          <section class="card home-list-card" data-block="tasks" aria-label="Next tasks">
+            <div class="card-header">
+              <div>
+                <h2>Next tasks</h2>
+                <div class="card-subtitle" id="tasksSubtitle">—</div>
+              </div>
+              <a class="btn btn-primary btn-sm" href="/tasks">Open</a>
+            </div>
+            <div class="home-list" id="homeTasksList"></div>
+          </section>
+
+          <!-- Orders list -->
+          <section class="card home-list-card" data-block="orders" aria-label="Recent orders">
+            <div class="card-header">
+              <div>
+                <h2>Recent orders</h2>
+                <div class="card-subtitle" id="ordersSubtitle">—</div>
+              </div>
+              <a class="btn btn-primary btn-sm" href="/orders">Open</a>
+            </div>
+            <div class="home-list" id="homeOrdersList"></div>
+          </section>
+
+          <!-- Quick actions -->
+          <section class="card home-actions" aria-label="Quick actions">
+            <div class="card-header">
+              <div>
+                <h2>Quick actions</h2>
+                <div class="card-subtitle">Shortcuts based on your access</div>
+              </div>
+            </div>
+
+            <div class="home-actions-grid" id="homeActions"></div>
+          </section>
+
+          <!-- Scope -->
+          <section class="card home-scope" aria-label="Your scope">
+            <div class="card-header">
+              <div>
+                <h2>Your scope</h2>
+                <div class="card-subtitle">Department, position & available pages</div>
+              </div>
+              <a class="btn btn-primary btn-sm" href="/account">Account</a>
+            </div>
+
+            <div class="home-scope-body">
+              <div class="home-scope-row">
+                <div class="home-scope-k">Department</div>
+                <div class="home-scope-v" id="scopeDept">—</div>
+              </div>
+              <div class="home-scope-row">
+                <div class="home-scope-k">Position</div>
+                <div class="home-scope-v" id="scopePos">—</div>
+              </div>
+
+              <div class="home-scope-chips" id="scopeChips"></div>
+            </div>
+          </section>
+
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>feather.replace();</script>
+  <script src="/js/common-ui.js"></script>
+  <script src="/js/home.js"></script>
+</body>
+</html>
