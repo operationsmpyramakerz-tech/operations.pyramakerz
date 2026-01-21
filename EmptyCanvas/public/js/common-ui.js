@@ -546,6 +546,135 @@ if (document.querySelector('.sidebar')) {
   ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
   ensureLink({ href: '/tasks', label: 'Tasks', icon: 'check-square' });
 
+  // ========================================================================
+  // Unified header (Tasks-like):
+  // - Gradient header background handled in CSS (style.css)
+  // - Layout: Greeting (left) | Page title (center) | Search (right)
+  // - Search collapses to an icon and expands with animation on click
+  // Works across all pages that use `.main-header`.
+  // ========================================================================
+  function upgradeMainHeaders(){
+    const headers = document.querySelectorAll('.main-header');
+    if (!headers.length) return;
+
+    headers.forEach((header) => {
+      const row1 = header.querySelector('.header-row1');
+      if (!row1) return;
+
+      // Ensure wrappers exist
+      let left = row1.querySelector('.left');
+      if (!left) {
+        left = document.createElement('div');
+        left.className = 'left';
+        row1.prepend(left);
+      }
+
+      let right = row1.querySelector('.right');
+      if (!right) {
+        right = document.createElement('div');
+        right.className = 'right';
+        row1.appendChild(right);
+      }
+
+      // Center title container
+      let center = row1.querySelector('.header-center');
+      if (!center) {
+        center = document.createElement('div');
+        center.className = 'header-center';
+        row1.insertBefore(center, right);
+      }
+
+      // Move the page title into the center (prefer row2 title)
+      const title =
+        header.querySelector('.header-row2 .page-title') ||
+        header.querySelector('.page-title');
+
+      if (title && !center.contains(title)) {
+        center.appendChild(title);
+      }
+
+      // Move searchbar to the right column (if present)
+      const search = row1.querySelector('.searchbar');
+      if (search && !right.contains(search)) {
+        // remove old inline margins (some pages have margin-left:8px)
+        try { search.style.marginLeft = '0'; } catch {}
+        right.appendChild(search);
+      }
+
+      // Remove the second header row if it became empty
+      const row2 = header.querySelector('.header-row2');
+      if (row2 && row2.children.length === 0) {
+        try { row2.remove(); } catch {}
+      }
+
+      row1.classList.add('header-row1--three');
+    });
+  }
+
+  function setupCollapsibleHeaderSearch(){
+    const bars = Array.from(document.querySelectorAll('.main-header .searchbar'));
+    if (!bars.length) return;
+
+    bars.forEach((bar) => {
+      const input = bar.querySelector('input');
+      if (!input) return;
+
+      // Keep it opened if there is already a value
+      if ((input.value || '').trim()) {
+        bar.classList.add('is-open');
+      }
+
+      // Open on click (icon-only -> full input)
+      if (!bar.dataset.collapsibleBound) {
+        bar.dataset.collapsibleBound = '1';
+
+        bar.addEventListener('click', () => {
+          if (!bar.classList.contains('is-open')) {
+            bar.classList.add('is-open');
+          }
+          // Always focus the input when the bar is clicked
+          setTimeout(() => {
+            try { input.focus(); } catch {}
+          }, 0);
+        });
+
+        input.addEventListener('focus', () => {
+          bar.classList.add('is-open');
+        });
+
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            try { input.blur(); } catch {}
+            if (!(input.value || '').trim()) bar.classList.remove('is-open');
+          }
+        });
+
+        input.addEventListener('blur', () => {
+          // Small delay to allow clicks inside the bar
+          setTimeout(() => {
+            if (document.activeElement && bar.contains(document.activeElement)) return;
+            if (!(input.value || '').trim()) bar.classList.remove('is-open');
+          }, 120);
+        });
+      }
+    });
+
+    // Close empty search bars when clicking outside
+    document.addEventListener('click', (e) => {
+      bars.forEach((bar) => {
+        const input = bar.querySelector('input');
+        if (!input) return;
+        if (bar.contains(e.target)) return;
+        if (document.activeElement && bar.contains(document.activeElement)) return;
+        if (!(input.value || '').trim()) bar.classList.remove('is-open');
+      });
+    });
+  }
+
+  upgradeMainHeaders();
+  setupCollapsibleHeaderSearch();
+
   ensureGreetingAndPages();
 
   window.addEventListener('user:updated', () => {
