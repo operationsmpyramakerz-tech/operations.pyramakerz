@@ -388,7 +388,7 @@ if (document.querySelector('.sidebar')) {
   };
 
   // ★ Inject links once so they exist for show/hide (لو مش موجودين في الـ HTML)
-  function ensureLink({ href, label, icon }) {
+  function ensureLink({ href, label, icon, prepend = false, beforeHref = '' }) {
     const nav = document.querySelector('.sidebar .nav-list, .sidebar nav ul, .sidebar ul');
     if (!nav) return;
     if (nav.querySelector(`a[href="${href}"]`)) return;
@@ -399,7 +399,17 @@ if (document.querySelector('.sidebar')) {
     a.href = href;
     a.innerHTML = `<i data-feather="${icon}"></i><span class="nav-label">${label}</span>`;
     li.appendChild(a);
-    nav.appendChild(li);
+
+    // Insert position controls
+    const before = beforeHref ? nav.querySelector(`a[href="${beforeHref}"]`)?.closest('li') : null;
+    if (before) {
+      nav.insertBefore(li, before);
+    } else if (prepend && nav.firstChild) {
+      nav.insertBefore(li, nav.firstChild);
+    } else {
+      nav.appendChild(li);
+    }
+
     if (window.feather) feather.replace();
   }
 
@@ -540,6 +550,8 @@ if (document.querySelector('.sidebar')) {
   applyInitial();
 
   // لو عندك لينكات بتتعمل inject في صفحات معينة:
+  // Home should appear for everyone (not tied to permissions)
+  ensureLink({ href: '/home', label: 'Home', icon: 'home', prepend: true });
   ensureLink({ href: '/orders/sv-orders', label: 'S.V schools orders', icon: 'award' });
   ensureLink({ href: '/damaged-assets', label: 'Damaged Assets', icon: 'alert-octagon' });
   ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
