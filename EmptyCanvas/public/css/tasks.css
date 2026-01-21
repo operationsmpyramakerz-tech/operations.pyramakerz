@@ -69,6 +69,57 @@ body.tasks-v2 .tasks-v2-topbar{
   justify-content: space-between;
 }
 
+body.tasks-v2 .tasks-v2-actions{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body.tasks-v2 .tasks-v2-dropdown-wrap{ position: relative; }
+
+body.tasks-v2 .tasks-v2-dropdown{
+  position: absolute;
+  top: 52px;
+  right: 0;
+  width: 230px;
+  background: #fff;
+  border-radius: 18px;
+  padding: 8px;
+  box-shadow: 0 22px 50px rgba(0,0,0,0.28);
+  z-index: 30;
+}
+
+body.tasks-v2 .tasks-v2-dropdown[hidden]{ display:none; }
+
+body.tasks-v2 .tasks-v2-dropdown-item{
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 10px 10px;
+  border-radius: 14px;
+  font-weight: 900;
+  font-size: 13px;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+body.tasks-v2 .tasks-v2-dropdown-item:hover{
+  background: #F3F4F6;
+}
+
+body.tasks-v2 .tasks-v2-dropdown-item.is-active{
+  background: rgba(212,91,68,0.14);
+}
+
+body.tasks-v2 .tasks-v2-dropdown-sep{
+  height: 1px;
+  background: #E5E7EB;
+  margin: 6px 6px;
+}
+
 body.tasks-v2 .tasks-v2-icon-btn{
   width: 44px;
   height: 44px;
@@ -198,6 +249,13 @@ body.tasks-v2 .tasks-v2-list{
   padding: 18px 18px 22px;
   display: grid;
   gap: 14px;
+}
+
+body.tasks-v2 .tv2-empty{
+  padding: 14px 6px;
+  text-align: center;
+  font-weight: 900;
+  color: rgba(255,255,255,0.82);
 }
 
 /* Highlight (yellow) */
