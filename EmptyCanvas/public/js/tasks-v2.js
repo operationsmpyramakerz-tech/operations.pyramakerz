@@ -160,6 +160,7 @@
 
     const LS_FILTER = "tasksV2.filter";
     const LS_DAY = "tasksV2.day";
+    const LS_SORT = "tasksV2.sort";
 
     let deptUsers = [];
     let meId = "";
@@ -175,9 +176,17 @@
       tasks: [],
       selectedTaskId: "",
       selectedTaskUrl: "",
+      // sort: 'priority' | 'delivery' | 'created'
+      sortKey: "delivery",
     };
 
     let monthPickerYear = new Date().getFullYear();
+
+    // List action elements (rendered inside the list, so references are refreshed after each render)
+    let newTaskBtnEl = null;
+    let sortBtnEl = null;
+    let sortMenuEl = null;
+    let sortDocCloseBound = false;
 
     // Detail screen is a separate "page".
     // We toggle it by adding/removing a class on <body>.
@@ -242,6 +251,7 @@
     function openMonthPicker() {
       if (!monthPickerEl) return;
       closeMenu();
+      closeSortMenu();
 
       const cur = parseIsoDayToLocalDate(state.selectedDay) || new Date();
       monthPickerYear = cur.getFullYear();
@@ -285,6 +295,45 @@
       return "All Tasks";
     }
 
+    // ---- Sort dropdown (inside list) ----
+    function isSortMenuOpen() {
+      return !!(sortMenuEl && sortMenuEl.hidden === false);
+    }
+
+    function closeSortMenu() {
+      if (!sortMenuEl || !sortBtnEl) return;
+      sortMenuEl.hidden = true;
+      sortBtnEl.setAttribute("aria-expanded", "false");
+    }
+
+    function openSortMenu() {
+      if (!sortMenuEl || !sortBtnEl) return;
+      // avoid having both menus open at once
+      closeMenu();
+      closeMonthPicker();
+
+      sortMenuEl.hidden = false;
+      sortBtnEl.setAttribute("aria-expanded", "true");
+    }
+
+    function toggleSortMenu() {
+      if (!sortMenuEl) return;
+      if (sortMenuEl.hidden) openSortMenu();
+      else closeSortMenu();
+    }
+
+    function bindSortDocCloseOnce() {
+      if (sortDocCloseBound) return;
+      sortDocCloseBound = true;
+
+      document.addEventListener("click", (e) => {
+        if (!isSortMenuOpen()) return;
+        const t = e.target;
+        if (t && (sortMenuEl?.contains(t) || sortBtnEl?.contains(t))) return;
+        closeSortMenu();
+      });
+    }
+
     function closeMenu() {
       if (!filterMenu || !filterBtn) return;
       filterMenu.hidden = true;
@@ -293,6 +342,7 @@
 
     function openMenu() {
       if (!filterMenu || !filterBtn) return;
+      closeSortMenu();
       filterMenu.hidden = false;
       filterBtn.setAttribute("aria-expanded", "true");
     }
@@ -315,7 +365,108 @@
 
       renderFilterMenu();
       closeMenu();
+      closeSortMenu();
       loadTasks();
+    }
+
+    function restoreSortFromStorage() {
+      let v = "delivery";
+      try {
+        v = String(localStorage.getItem(LS_SORT) || "delivery");
+      } catch {}
+
+      if (v === "priority" || v === "delivery" || v === "created") {
+        state.sortKey = v;
+      } else {
+        state.sortKey = "delivery";
+      }
+    }
+
+    function setSort(key) {
+      const v = String(key || "").trim();
+      if (v !== "priority" && v !== "delivery" && v !== "created") return;
+      state.sortKey = v;
+      try {
+        localStorage.setItem(LS_SORT, v);
+      } catch {}
+      closeSortMenu();
+      renderTasksList();
+    }
+
+    function priorityRank(name) {
+      const s = String(name || "").toLowerCase();
+      if (!s) return 0;
+      if (s.includes("urgent") || s.includes("critical")) return 4;
+      if (s.includes("high")) return 3;
+      if (s.includes("medium")) return 2;
+      if (s.includes("low")) return 1;
+      return 0;
+    }
+
+    function sortTasks(tasks) {
+      const arr = Array.isArray(tasks) ? tasks.slice() : [];
+
+      const byDueAsc = (a, b) => {
+        const ad = isoDayFromAny(a?.dueDate);
+        const bd = isoDayFromAny(b?.dueDate);
+        if (!ad && !bd) return 0;
+        if (!ad) return 1;
+        if (!bd) return -1;
+        if (ad < bd) return -1;
+        if (ad > bd) return 1;
+        return 0;
+      };
+
+      const byCreatedDesc = (a, b) => {
+        const at = String(a?.createdTime || "");
+        const bt = String(b?.createdTime || "");
+        if (!at && !bt) return 0;
+        if (!at) return 1;
+        if (!bt) return -1;
+        if (at < bt) return 1;
+        if (at > bt) return -1;
+        return 0;
+      };
+
+      if (state.sortKey === "priority") {
+        arr.sort((a, b) => {
+          const pa = priorityRank(a?.priority?.name);
+          const pb = priorityRank(b?.priority?.name);
+          if (pa !== pb) return pb - pa;
+          const d = byDueAsc(a, b);
+          if (d !== 0) return d;
+          return byCreatedDesc(a, b);
+        });
+        return arr;
+      }
+
+      if (state.sortKey === "created") {
+        arr.sort((a, b) => {
+          const c = byCreatedDesc(a, b);
+          if (c !== 0) return c;
+          return byDueAsc(a, b);
+        });
+        return arr;
+      }
+
+      // default: delivery date
+      arr.sort((a, b) => {
+        const d = byDueAsc(a, b);
+        if (d !== 0) return d;
+        return byCreatedDesc(a, b);
+      });
+      return arr;
+    }
+
+    function formatDueLabel(isoDay) {
+      const d = isoDay ? parseIsoDayToLocalDate(isoDay) : null;
+      if (!d) return "No due date";
+      try {
+        const md = d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+        return `Due ${md}`;
+      } catch {
+        return "Due";
+      }
     }
 
     function renderFilterMenu() {
@@ -416,6 +567,90 @@
       state.assigneeId = "";
     }
 
+    function restoreSortFromStorage() {
+      let v = "delivery";
+      try {
+        v = String(localStorage.getItem(LS_SORT) || "delivery");
+      } catch {}
+
+      if (v === "priority" || v === "delivery" || v === "created") {
+        state.sortKey = v;
+        return;
+      }
+
+      state.sortKey = "delivery";
+    }
+
+    function setSort(key) {
+      const k = String(key || "").trim();
+      if (!k) return;
+      if (k !== "priority" && k !== "delivery" && k !== "created") return;
+
+      state.sortKey = k;
+      try {
+        localStorage.setItem(LS_SORT, k);
+      } catch {}
+
+      closeSortMenu();
+      renderTasksList();
+    }
+
+    function priorityRank(name) {
+      const s = String(name || "").toLowerCase();
+      if (!s) return 0;
+      if (s.includes("critical")) return 4;
+      if (s.includes("urgent")) return 4;
+      if (s.includes("high")) return 3;
+      if (s.includes("medium")) return 2;
+      if (s.includes("low")) return 1;
+      return 0;
+    }
+
+    function sortTasks(list) {
+      const arr = Array.isArray(list) ? list.slice() : [];
+
+      const dueKey = (t) => isoDayFromAny(t?.dueDate) || "";
+      const createdKey = (t) => String(t?.createdTime || "");
+
+      const cmpDueAsc = (a, b) => {
+        const da = dueKey(a);
+        const db = dueKey(b);
+        if (!da && !db) return 0;
+        if (!da) return 1;
+        if (!db) return -1;
+        return da.localeCompare(db);
+      };
+
+      const cmpCreatedDesc = (a, b) => {
+        const ca = createdKey(a);
+        const cb = createdKey(b);
+        if (!ca && !cb) return 0;
+        if (!ca) return 1;
+        if (!cb) return -1;
+        // ISO datetime strings compare lexicographically
+        return cb.localeCompare(ca);
+      };
+
+      if (state.sortKey === "created") {
+        arr.sort((a, b) => cmpCreatedDesc(a, b) || cmpDueAsc(a, b));
+        return arr;
+      }
+
+      if (state.sortKey === "priority") {
+        arr.sort((a, b) => {
+          const pa = priorityRank(a?.priority?.name);
+          const pb = priorityRank(b?.priority?.name);
+          if (pa !== pb) return pb - pa;
+          return cmpDueAsc(a, b) || cmpCreatedDesc(a, b);
+        });
+        return arr;
+      }
+
+      // Default: Delivery Date
+      arr.sort((a, b) => cmpDueAsc(a, b) || cmpCreatedDesc(a, b));
+      return arr;
+    }
+
     function pickInitialDayFromTasks(tasks) {
       const dueDays = Array.from(
         new Set(
@@ -469,7 +704,42 @@
       state.weekStart = nextWeek;
 
       renderCalendar();
-      renderTasksList();
+
+      // By request: show all tasks (do NOT filter by selected day).
+      // Selecting a day only helps navigation.
+      if (!(opts && opts.noScroll)) {
+        scrollToDayInList(iso);
+      }
+    }
+
+    function scrollToDayInList(dayIso) {
+      if (!gridEl) return;
+      const iso = isoDayFromAny(dayIso);
+      if (!iso) return;
+
+      let first = null;
+      try {
+        gridEl.querySelectorAll("[data-due-day]").forEach((el) => {
+          if (first) return;
+          const v = el.getAttribute("data-due-day");
+          if (v === iso) first = el;
+        });
+      } catch {
+        // fallback: no-op
+      }
+      if (!first) return;
+
+      try {
+        first.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch {
+        // fallback
+        try {
+          first.scrollIntoView(true);
+        } catch {}
+      }
+
+      first.classList.add("tv2-card--jump");
+      setTimeout(() => first.classList.remove("tv2-card--jump"), 1000);
     }
 
     function renderCalendar() {
@@ -493,10 +763,21 @@
         const d = addDays(weekStart, i);
         const iso = isoDayFromAny(d);
         const num = d.getDate();
+        let dow = "";
+        try {
+          dow = d.toLocaleDateString("en-US", { weekday: "short" });
+        } catch {
+          dow = "";
+        }
         const active = iso === state.selectedDay;
         const hasTask = dueSet.has(iso);
         btns.push(
-          `<button class="tasks-v2-day${hasTask ? " has-task" : ""}${active ? " is-active" : ""}" type="button" role="tab" aria-selected="${active ? "true" : "false"}" data-day="${iso}">${num}</button>`
+          `<button class="tasks-v2-day${hasTask ? " has-task" : ""}${active ? " is-active" : ""}" type="button" role="tab" aria-selected="${active ? "true" : "false"}" aria-label="${escapeHtml(
+            `${dow} ${num}`
+          )}" data-day="${iso}">
+            <span class="tasks-v2-day__dow">${escapeHtml(dow)}</span>
+            <span class="tasks-v2-day__num">${num}</span>
+          </button>`
         );
       }
 
@@ -569,13 +850,7 @@
       if (!gridEl) return;
 
       const tasks = Array.isArray(state.tasks) ? state.tasks : [];
-      const anyDue = tasks.some((t) => !!isoDayFromAny(t?.dueDate));
-
-      const dayKey = state.selectedDay;
-
-      const visible = anyDue
-        ? tasks.filter((t) => isoDayFromAny(t?.dueDate) === dayKey)
-        : tasks;
+      const visible = sortTasks(tasks);
 
       // Keep selection only if it still exists in the current visible list
       if (state.selectedTaskId && !visible.some((t) => t.id === state.selectedTaskId)) {
@@ -590,26 +865,51 @@
         closeDetailView();
       }
 
-      const count = visible.length;
-      const dateLabel = anyDue ? formatFullDate(parseIsoDayToLocalDate(dayKey) || new Date()) : "";
-      const subLine = anyDue
-        ? `${dateLabel} • ${count} task${count === 1 ? "" : "s"}`
-        : `${count} task${count === 1 ? "" : "s"}`;
+      const sortItems = [
+        { key: "priority", label: "By Priority Level" },
+        { key: "delivery", label: "By Delivery Date" },
+        { key: "created", label: "By Created time" },
+      ];
 
-      const highlightHTML = `
-        <article class="tv2-highlight" aria-label="Tasks summary">
-          <div class="tv2-highlight__txt">
-            <div class="tv2-highlight__title">${escapeHtml(currentFilterLabel())}</div>
-            <div class="tv2-highlight__sub">${escapeHtml(subLine)}</div>
+      const sortMenuHTML = sortItems
+        .map((it) => {
+          const active = it.key === state.sortKey ? "is-active" : "";
+          return `
+            <button class="tasks-v2-dropdown-item ${active}" type="button" role="menuitem" data-sort="${escapeHtml(it.key)}">
+              <span>${escapeHtml(it.label)}</span>
+            </button>
+          `;
+        })
+        .join("");
+
+      const actionsHTML = `
+        <div class="tv2-actionsbar" aria-label="List actions">
+          <button class="tv2-newtask-btn" type="button" id="tasksV2NewTaskBtn" aria-label="New task">
+            <span class="tv2-newtask-plus">+</span>
+            <span>New task</span>
+          </button>
+
+          <div class="tv2-sort-wrap">
+            <button
+              class="tv2-sort-btn"
+              type="button"
+              id="tasksV2SortBtn"
+              aria-label="Sort"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <i data-feather="arrow-up-down"></i>
+            </button>
+            <div class="tasks-v2-dropdown" id="tasksV2SortMenu" role="menu" aria-label="Sort tasks" hidden>
+              ${sortMenuHTML}
+            </div>
           </div>
-          <div class="tv2-circle tv2-circle--dark" aria-hidden="true">
-            <i data-feather="check"></i>
-          </div>
-        </article>
+        </div>
       `;
 
       if (!visible.length) {
-        gridEl.innerHTML = highlightHTML + `<div class="tv2-empty">No tasks for this day</div>`;
+        gridEl.innerHTML = actionsHTML + `<div class="tv2-empty">No tasks</div>`;
+        wireListActions();
         if (window.feather) window.feather.replace();
         return;
       }
@@ -623,11 +923,12 @@
 
           const subBits = [];
           if (t?.createdBy) subBits.push(`Created by ${t.createdBy}`);
-          if (t?.completion !== null && t?.completion !== undefined && t?.completion !== "") {
-            const n = Number(t.completion);
-            if (Number.isFinite(n)) subBits.push(`${Math.round(n)}%`);
-          }
           const sub = subBits.join(" • ") || "";
+
+          const completionNum = Number(t?.completion);
+          const pct = Number.isFinite(completionNum) ? Math.min(100, Math.max(0, Math.round(completionNum))) : 0;
+          const dueIso = isoDayFromAny(t?.dueDate);
+          const dueLabel = formatDueLabel(dueIso);
 
           const tags = [];
           if (t?.priority?.name) tags.push(`<span class="tv2-tag">${escapeHtml(t.priority.name)}</span>`);
@@ -638,7 +939,9 @@
           const selected = t.id === state.selectedTaskId ? " is-selected" : "";
 
           return `
-            <article class="tv2-card${selected}" data-task-id="${escapeHtml(t.id)}" aria-label="${escapeHtml(t.title || "Task")}">
+            <article class="tv2-card${selected}" data-task-id="${escapeHtml(t.id)}" data-due-day="${escapeHtml(
+            dueIso
+          )}" aria-label="${escapeHtml(t.title || "Task")}">
               <div class="tv2-card__top">
                 <div class="tv2-time">${escapeHtml(top)}</div>
                 ${avatars}
@@ -646,6 +949,14 @@
 
               <div class="tv2-card__title">${escapeHtml(t.title || "Untitled")}</div>
               <div class="tv2-card__sub">${escapeHtml(sub)}</div>
+
+              <div class="tv2-progress-row" aria-label="Progress">
+                <div class="tv2-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
+                  <div class="tv2-progress__fill" style="width:${pct}%"></div>
+                  <div class="tv2-progress__pct">${pct}%</div>
+                </div>
+                <div class="tv2-progress__due">${escapeHtml(dueLabel)}</div>
+              </div>
 
               <div class="tv2-card__bottom">
                 <div class="tv2-tags" aria-hidden="true">${tags.join("")}</div>
@@ -658,7 +969,9 @@
         })
         .join("");
 
-      gridEl.innerHTML = highlightHTML + cards;
+      gridEl.innerHTML = actionsHTML + cards;
+
+      wireListActions();
 
       // Bind card clicks
       gridEl.querySelectorAll("[data-task-id]").forEach((card) => {
@@ -682,6 +995,87 @@
           });
         }
       });
+
+      if (window.feather) window.feather.replace();
+    }
+
+    // List actions (New task + Sort) are re-rendered with the list, so we wire them after every render.
+    async function createNewTask() {
+      closeMenu();
+      closeSortMenu();
+      const title = window.prompt("Task title");
+      if (title === null) return;
+      const t = String(title || "").trim();
+      if (!t) return;
+
+      try {
+        const payload = { title: t };
+        // Default due date = currently selected day (helps the calendar UI)
+        if (state.selectedDay) payload.dueDate = state.selectedDay;
+
+        const r = await fetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!r.ok) throw new Error("Failed to create task");
+        const data = await r.json();
+        if (window.toast) window.toast.success("Task created");
+
+        await loadTasks({ keepDay: true });
+
+        // Optional: auto-open the created task details
+        if (data?.id) {
+          try {
+            await selectTask(String(data.id), { open: true });
+          } catch {}
+        }
+      } catch (e) {
+        console.error(e);
+        if (window.toast) window.toast.error("Failed to create task");
+      }
+    }
+
+    function wireListActions() {
+      if (!gridEl) return;
+
+      sortBtnEl = gridEl.querySelector("#tasksV2SortBtn");
+      sortMenuEl = gridEl.querySelector("#tasksV2SortMenu");
+      newTaskBtnEl = gridEl.querySelector("#tasksV2NewTaskBtn");
+
+      if (sortMenuEl) sortMenuEl.hidden = true;
+      if (sortBtnEl) sortBtnEl.setAttribute("aria-expanded", "false");
+
+      if (newTaskBtnEl) {
+        newTaskBtnEl.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          createNewTask();
+        });
+      }
+
+      if (sortBtnEl) {
+        sortBtnEl.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleSortMenu();
+        });
+      }
+
+      if (sortMenuEl) {
+        sortMenuEl.querySelectorAll("[data-sort]").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const key = String(btn.getAttribute("data-sort") || "");
+            setSort(key);
+          });
+        });
+      }
+
+      // Close sort menu when clicking anywhere else
+      bindSortDocCloseOnce();
 
       if (window.feather) window.feather.replace();
     }
@@ -826,7 +1220,7 @@
       }
     }
 
-    async function loadTasks() {
+    async function loadTasks(opts) {
       showListLoading(gridEl, "Loading tasks");
 
       // Always start from the list screen when reloading tasks
@@ -855,8 +1249,15 @@
         const data = await r.json();
         state.tasks = Array.isArray(data?.tasks) ? data.tasks : [];
 
-        state.selectedDay = pickInitialDayFromTasks(state.tasks);
-        setSelectedDay(state.selectedDay);
+        // Keep current day if requested (e.g. after creating a task)
+        if (opts && opts.keepDay && state.selectedDay) {
+          setSelectedDay(state.selectedDay, { noScroll: true });
+        } else {
+          state.selectedDay = pickInitialDayFromTasks(state.tasks);
+          setSelectedDay(state.selectedDay, { noScroll: true });
+        }
+
+        renderTasksList();
       } catch (e) {
         console.error(e);
         showListError(gridEl, "Failed to load tasks");
@@ -884,6 +1285,7 @@
         if (e.key === "Escape") {
           if (isMonthPickerOpen()) closeMonthPicker();
           else if (document.body.classList.contains("tv2-detail-open")) closeDetailView();
+          else if (sortMenuEl && !sortMenuEl.hidden) closeSortMenu();
           else closeMenu();
           return;
         }
@@ -970,8 +1372,10 @@
       await loadAccountPhoto();
       await loadUsers();
       restoreFilterFromStorage();
+      restoreSortFromStorage();
       renderFilterMenu();
       closeMenu();
+      closeSortMenu();
       renderTaskDetailsEmpty();
       await loadTasks();
     })();
