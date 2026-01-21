@@ -126,39 +126,39 @@
               </div>
             </section>
 
-            <!-- Right screen (details) -->
-            <section class="tasks-v2-panel tasks-v2-panel--detail" aria-label="Task details">
-              <div class="tasks-v2-sheet">
-                <div class="tasks-v2-sheet__top">
-                  <button class="tasks-v2-icon-btn tasks-v2-icon-btn--light" type="button" aria-label="Close" id="taskDetailCloseBtn">
-                    <i data-feather="x"></i>
-                  </button>
-
-                  <button class="tasks-v2-icon-btn tasks-v2-icon-btn--light" type="button" aria-label="Open in Notion" id="taskDetailOpenNotionBtn">
-                    <i data-feather="edit-2"></i>
-                  </button>
-                </div>
-
-                <div class="tasks-v2-time-pill" id="taskDetailTimePill">—</div>
-
-                <h2 class="tasks-v2-detail-title" id="taskDetailTitle">Select a task</h2>
-                <p class="tasks-v2-detail-sub" id="taskDetailSub">Choose a task from the left list.</p>
-
-                <div class="tv2-avatars tv2-avatars--center" aria-label="Participants" id="taskDetailAvatars"></div>
-
-                <div class="tasks-v2-plan-heading">Plan</div>
-
-                <div class="tv2-plan" id="taskDetailBody">
-                  <div class="tv2-plan-item">
-                    <div class="tv2-plan-item__txt">No task selected</div>
-                    <div class="tv2-plan-item__time">—</div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
           </div>
         </div>
+
+        <!-- Task details "page" (opens when a task is clicked) -->
+        <section class="tasks-v2-panel tasks-v2-panel--detail" aria-label="Task details">
+          <div class="tasks-v2-sheet">
+            <div class="tasks-v2-sheet__top">
+              <button class="tasks-v2-icon-btn tasks-v2-icon-btn--light" type="button" aria-label="Close" id="taskDetailCloseBtn">
+                <i data-feather="x"></i>
+              </button>
+
+              <button class="tasks-v2-icon-btn tasks-v2-icon-btn--light" type="button" aria-label="Open in Notion" id="taskDetailOpenNotionBtn">
+                <i data-feather="edit-2"></i>
+              </button>
+            </div>
+
+            <div class="tasks-v2-time-pill" id="taskDetailTimePill">—</div>
+
+            <h2 class="tasks-v2-detail-title" id="taskDetailTitle">Select a task</h2>
+            <p class="tasks-v2-detail-sub" id="taskDetailSub">Choose a task from the left list.</p>
+
+            <div class="tv2-avatars tv2-avatars--center" aria-label="Participants" id="taskDetailAvatars"></div>
+
+            <div class="tasks-v2-plan-heading">Plan</div>
+
+            <div class="tv2-plan" id="taskDetailBody">
+              <div class="tv2-plan-item">
+                <div class="tv2-plan-item__txt">No task selected</div>
+                <div class="tv2-plan-item__time">—</div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
   </div>
