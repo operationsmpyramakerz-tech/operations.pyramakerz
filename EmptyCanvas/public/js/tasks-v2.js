@@ -168,6 +168,16 @@
       selectedTaskUrl: "",
     };
 
+    // Detail screen is a separate "page".
+    // We toggle it by adding/removing a class on <body>.
+    function openDetailView() {
+      document.body.classList.add("tv2-detail-open");
+    }
+
+    function closeDetailView() {
+      document.body.classList.remove("tv2-detail-open");
+    }
+
     // Calendar swipe handlers should only be bound once (renderCalendar re-renders buttons).
     let calendarSwipeBound = false;
     let calendarTouchStartX = null;
@@ -432,18 +442,17 @@
         ? tasks.filter((t) => isoDayFromAny(t?.dueDate) === dayKey)
         : tasks;
 
-      // Auto-select first visible task
-      if (visible.length) {
-        if (!state.selectedTaskId || !visible.some((t) => t.id === state.selectedTaskId)) {
-          state.selectedTaskId = visible[0].id;
-          state.selectedTaskUrl = visible[0].url || "";
-          // Load detail async (no await)
-          selectTask(state.selectedTaskId);
-        }
-      } else {
+      // Keep selection only if it still exists in the current visible list
+      if (state.selectedTaskId && !visible.some((t) => t.id === state.selectedTaskId)) {
         state.selectedTaskId = "";
         state.selectedTaskUrl = "";
         renderTaskDetailsEmpty();
+      }
+
+      // If no tasks for the selected day, clear details and ensure we are on the list screen
+      if (!visible.length) {
+        renderTaskDetailsEmpty();
+        closeDetailView();
       }
 
       const count = visible.length;
@@ -521,7 +530,7 @@
         const id = card.getAttribute("data-task-id");
         if (!id) return;
 
-        card.addEventListener("click", () => selectTask(id));
+        card.addEventListener("click", () => selectTask(id, { open: true }));
 
         // Arrow button: open Notion if available (or just select)
         const openBtn = card.querySelector("button.tv2-circle--dark");
@@ -533,7 +542,7 @@
             if (t?.url) {
               window.open(t.url, "_blank", "noopener");
             } else {
-              selectTask(id);
+              selectTask(id, { open: true });
             }
           });
         }
@@ -653,8 +662,9 @@
       if (window.feather) window.feather.replace();
     }
 
-    async function selectTask(id) {
+    async function selectTask(id, opts) {
       if (!id) return;
+      const open = !!(opts && opts.open);
       state.selectedTaskId = id;
 
       // Update URL cache from list
@@ -663,6 +673,11 @@
 
       renderTasksList();
       renderTaskDetailsLoading();
+
+      if (open) {
+        closeMenu();
+        openDetailView();
+      }
 
       try {
         const r = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store" });
@@ -678,6 +693,9 @@
 
     async function loadTasks() {
       showListLoading(gridEl, "Loading tasks");
+
+      // Always start from the list screen when reloading tasks
+      closeDetailView();
 
       // Reset selection when changing scope
       state.selectedTaskId = "";
@@ -728,7 +746,14 @@
       });
 
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeMenu();
+        if (e.key === "Escape") {
+          if (document.body.classList.contains("tv2-detail-open")) {
+            closeDetailView();
+          } else {
+            closeMenu();
+          }
+          return;
+        }
 
         // Keyboard day navigation
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -745,10 +770,7 @@
 
     if (detailCloseBtn) {
       detailCloseBtn.addEventListener("click", () => {
-        state.selectedTaskId = "";
-        state.selectedTaskUrl = "";
-        renderTasksList();
-        renderTaskDetailsEmpty();
+        closeDetailView();
       });
     }
 
