@@ -745,19 +745,25 @@ function requirePage(pageName) {
 // --- Page Serving Routes --- //
 
 app.get("/login", (req, res) => {
-  if (req.session?.authenticated)
-    return res.redirect(firstAllowedPath(req.session.allowedPages || ALL_PAGES));
+  // ✅ Home is the default landing for all authenticated users
+  if (req.session?.authenticated) return res.redirect("/home");
   res.sendFile(path.join(__dirname, "..", "public", "login.html"));
 });
 
 app.get("/", (req, res) => {
-  if (req.session?.authenticated)
-    return res.redirect(firstAllowedPath(req.session.allowedPages || ALL_PAGES));
+  // ✅ Home is the default landing for all authenticated users
+  if (req.session?.authenticated) return res.redirect("/home");
   res.sendFile(path.join(__dirname, "..", "public", "login.html"));
 });
 
 app.get("/dashboard", requireAuth, (req, res) => {
-  res.redirect(firstAllowedPath(req.session.allowedPages || ALL_PAGES));
+  // ✅ Keep /dashboard as a stable redirect target
+  res.redirect("/home");
+});
+
+// Home (visible for all authenticated users)
+app.get("/home", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "home.html"));
 });
 
 app.get("/orders", requireAuth, requirePage("Current Orders"), (req, res) => {
@@ -10602,6 +10608,41 @@ app.post("/api/notifications/read-all", requireAuth, async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to mark all read" });
   }
 });
+
+/**
+ * Debug endpoint — create a test in-app notification + (if configured) a push notification.
+ * Open it while logged in: /api/notifications/test
+ */
+app.get("/api/notifications/test", requireAuth, async (req, res) => {
+  try {
+    const userId = await getSessionUserNotionId(req);
+    if (!userId) return res.status(404).json({ error: "User not found" });
+
+    const notif = {
+      id: _randId("test"),
+      type: "test",
+      title: "Test notification",
+      body: "This is a test notification from the server ✅",
+      url: "/home",
+      ts: Date.now(),
+      read: false,
+    };
+
+    await _addNotification(userId, notif);
+
+    const push = await _sendPushToUser(userId, {
+      title: "Operations",
+      body: "✅ Push notifications working (test)",
+      url: "/home",
+    });
+
+    res.json({ success: true, notif, push });
+  } catch (e) {
+    console.error("notifications test error:", e?.message || e);
+    res.status(500).json({ success: false, error: "test failed" });
+  }
+});
+
 
 // ---- API: push subscribe/unsubscribe & public key ----
 
