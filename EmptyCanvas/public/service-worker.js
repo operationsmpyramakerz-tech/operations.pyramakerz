@@ -1,4 +1,4 @@
-const CACHE_NAME = "ops-static-v1";
+const CACHE_NAME = "ops-static-v2";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -53,5 +53,61 @@ self.addEventListener("fetch", (event) => {
       // لو موجود كاش رجّعه فورًا (سريع) + حدّث في الخلفية
       return cached || fetchPromise;
     })
+  );
+});
+
+
+// -------------------------------
+// Push Notifications (Web Push)
+// -------------------------------
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    try {
+      data = { body: event.data ? event.data.text() : "" };
+    } catch {
+      data = {};
+    }
+  }
+
+  const title = data.title || "Operations";
+  const body = data.body || "New update available";
+  const url = data.url || "/dashboard";
+
+  const options = {
+    body,
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    data: { url },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification?.data?.url || "/dashboard";
+
+  event.waitUntil(
+    (async () => {
+      const allClients = await clients.matchAll({ type: "window", includeUncontrolled: true });
+
+      for (const client of allClients) {
+        try {
+          // If there's already a window open, focus it and navigate
+          if ("focus" in client) {
+            await client.focus();
+            if ("navigate" in client) await client.navigate(url);
+            return;
+          }
+        } catch {}
+      }
+
+      if (clients.openWindow) {
+        return clients.openWindow(url);
+      }
+    })()
   );
 });
