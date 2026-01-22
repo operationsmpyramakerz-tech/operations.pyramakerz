@@ -388,7 +388,7 @@ if (document.querySelector('.sidebar')) {
   };
 
   // ★ Inject links once so they exist for show/hide (لو مش موجودين في الـ HTML)
-  function ensureLink({ href, label, icon, prepend = false, beforeHref = '' }) {
+  function ensureLink({ href, label, icon }) {
     const nav = document.querySelector('.sidebar .nav-list, .sidebar nav ul, .sidebar ul');
     if (!nav) return;
     if (nav.querySelector(`a[href="${href}"]`)) return;
@@ -399,17 +399,7 @@ if (document.querySelector('.sidebar')) {
     a.href = href;
     a.innerHTML = `<i data-feather="${icon}"></i><span class="nav-label">${label}</span>`;
     li.appendChild(a);
-
-    // Insert position controls
-    const before = beforeHref ? nav.querySelector(`a[href="${beforeHref}"]`)?.closest('li') : null;
-    if (before) {
-      nav.insertBefore(li, before);
-    } else if (prepend && nav.firstChild) {
-      nav.insertBefore(li, nav.firstChild);
-    } else {
-      nav.appendChild(li);
-    }
-
+    nav.appendChild(li);
     if (window.feather) feather.replace();
   }
 
@@ -550,8 +540,6 @@ if (document.querySelector('.sidebar')) {
   applyInitial();
 
   // لو عندك لينكات بتتعمل inject في صفحات معينة:
-  // Home should appear for everyone (not tied to permissions)
-  ensureLink({ href: '/home', label: 'Home', icon: 'home', prepend: true });
   ensureLink({ href: '/orders/sv-orders', label: 'S.V schools orders', icon: 'award' });
   ensureLink({ href: '/damaged-assets', label: 'Damaged Assets', icon: 'alert-octagon' });
   ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
@@ -771,3 +759,377 @@ if (document.querySelector('.sidebar')) {
     );
   };
 })();
+
+
+// --------------------------------------------
+// Notifications UI + Push subscription (PWA)
+// --------------------------------------------
+document.addEventListener("DOMContentLoaded", () => {
+  try {
+    initNotificationsWidget();
+  } catch (e) {
+    console.warn("[notifications] init failed", e);
+  }
+});
+
+function initNotificationsWidget() {
+  // Avoid duplicates
+  if (document.getElementById("notifBellBtn")) return;
+
+  const mount =
+    document.querySelector(".main-header .header-row1 .right") ||
+    document.querySelector(".main-header .header-row1") ||
+    document.querySelector(".tasks-v2-actions") ||
+    null;
+
+  if (!mount) return;
+
+  const wrap = document.createElement("div");
+  wrap.className = "notif-wrap";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "notifBellBtn";
+  btn.className = "notif-bell-btn";
+  btn.setAttribute("aria-label", "Notifications");
+  btn.innerHTML = `
+    <i data-feather="bell"></i>
+    <span class="notif-badge" id="notifBadge" hidden>0</span>
+  `;
+
+  const panel = document.createElement("div");
+  panel.id = "notifPanel";
+  panel.className = "notif-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "Notifications");
+  panel.hidden = true;
+
+  panel.innerHTML = `
+    <div class="notif-panel__header">
+      <div class="notif-panel__title">Notifications</div>
+      <div class="notif-panel__actions">
+        <button type="button" class="notif-action-btn" id="notifMarkAllBtn">Mark all read</button>
+      </div>
+    </div>
+
+    <div class="notif-panel__push" id="notifPushRow"></div>
+
+    <div class="notif-panel__list" id="notifList">
+      <div class="notif-empty">Loading…</div>
+    </div>
+
+    <div class="notif-panel__footer">
+      <a class="notif-footer-link" href="/dashboard">Open dashboard</a>
+    </div>
+  `;
+
+  wrap.appendChild(btn);
+  wrap.appendChild(panel);
+
+  // For header right area: insert before account button
+  if (mount.classList.contains("right") || mount.classList.contains("topbar-right")) {
+    mount.insertBefore(wrap, mount.firstChild);
+  } else {
+    mount.appendChild(wrap);
+  }
+
+  if (window.feather) {
+    try { window.feather.replace(); } catch {}
+  }
+
+  // Handlers
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    panel.hidden = !panel.hidden;
+
+    if (!panel.hidden) {
+      await refreshNotifications(true);
+      await refreshPushRow();
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    if (panel.hidden) return;
+    const target = e.target;
+    if (!target) return;
+    if (wrap.contains(target)) return;
+    panel.hidden = true;
+  });
+
+  document.getElementById("notifMarkAllBtn")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await markAllRead();
+    await refreshNotifications(true);
+  });
+
+  // Initial badge load + polling
+  refreshNotifications(false);
+  setInterval(() => refreshNotifications(false), 60 * 1000);
+}
+
+async function refreshNotifications(renderList) {
+  const badge = document.getElementById("notifBadge");
+  const listEl = document.getElementById("notifList");
+
+  try {
+    const resp = await fetch("/api/notifications?limit=25", {
+      credentials: "include",
+      headers: { "Accept": "application/json" },
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data || data.success === false) throw new Error(data.error || "Failed");
+
+    const unread = Number(data.unreadCount || 0);
+    if (badge) {
+      if (unread > 0) {
+        badge.hidden = false;
+        badge.textContent = unread > 99 ? "99+" : String(unread);
+      } else {
+        badge.hidden = true;
+        badge.textContent = "0";
+      }
+    }
+
+    if (renderList && listEl) {
+      renderNotificationsList(listEl, Array.isArray(data.items) ? data.items : []);
+    }
+  } catch (e) {
+    if (renderList && listEl) {
+      listEl.innerHTML = `<div class="notif-empty">Couldn’t load notifications</div>`;
+    }
+  }
+}
+
+function renderNotificationsList(listEl, items) {
+  if (!items.length) {
+    listEl.innerHTML = `<div class="notif-empty">No notifications yet</div>`;
+    return;
+  }
+
+  listEl.innerHTML = "";
+  for (const n of items) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "notif-item" + (n && !n.read ? " is-unread" : "");
+    item.dataset.id = n.id || "";
+
+    const title = escapeHtml(n.title || "Update");
+    const body = escapeHtml(n.body || "");
+    const ts = typeof n.ts === "number" ? n.ts : Date.now();
+    const time = formatTime(ts);
+
+    item.innerHTML = `
+      <div class="notif-item__top">
+        <div class="notif-item__title">${title}</div>
+        <div class="notif-item__time">${time}</div>
+      </div>
+      ${body ? `<div class="notif-item__body">${body}</div>` : ""}
+    `;
+
+    item.addEventListener("click", async () => {
+      const id = item.dataset.id;
+      const url = (n && n.url) ? String(n.url) : "/dashboard";
+
+      if (id) {
+        try {
+          await fetch("/api/notifications/read", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id }),
+          });
+        } catch {}
+      }
+
+      // Navigate
+      window.location.href = url || "/dashboard";
+    });
+
+    listEl.appendChild(item);
+  }
+}
+
+async function markAllRead() {
+  try {
+    await fetch("/api/notifications/read-all", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  } catch {}
+}
+
+// -------------------
+// Push subscription UI
+// -------------------
+async function refreshPushRow() {
+  const row = document.getElementById("notifPushRow");
+  if (!row) return;
+
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+    row.innerHTML = `<div class="notif-push-msg">Push notifications are not supported on this device.</div>`;
+    return;
+  }
+
+  // iOS requirement: needs to be installeds: PWA installed to Home Screen (Safari)
+  const perm = Notification.permission;
+
+  let subscribed = false;
+  let sub = null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    sub = await reg.pushManager.getSubscription();
+    subscribed = !!sub;
+  } catch {}
+
+  // Fetch server public key status (to show better errors)
+  let serverEnabled = false;
+  let publicKey = "";
+  try {
+    const r = await fetch("/api/push/vapid-public-key", { credentials: "include" });
+    const d = await r.json().catch(() => ({}));
+    serverEnabled = !!d.enabled;
+    publicKey = String(d.publicKey || "");
+  } catch {}
+
+  if (!serverEnabled) {
+    row.innerHTML = `
+      <div class="notif-push-msg">
+        Push is not configured on the server (missing VAPID keys).
+      </div>
+    `;
+    return;
+  }
+
+  if (perm === "denied") {
+    row.innerHTML = `
+      <div class="notif-push-msg">
+        Notifications are blocked in the browser settings.
+      </div>
+    `;
+    return;
+  }
+
+  if (subscribed) {
+    row.innerHTML = `
+      <div class="notif-push-row">
+        <div class="notif-push-status">Push notifications: <b>ON</b></div>
+        <button type="button" class="notif-push-btn danger" id="notifDisablePush">Disable</button>
+      </div>
+    `;
+
+    document.getElementById("notifDisablePush")?.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await disablePush();
+      await refreshPushRow();
+    });
+    return;
+  }
+
+  row.innerHTML = `
+    <div class="notif-push-row">
+      <div class="notif-push-status">Push notifications: <b>OFF</b></div>
+      <button type="button" class="notif-push-btn" id="notifEnablePush">Enable</button>
+    </div>
+  `;
+
+  document.getElementById("notifEnablePush")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await enablePush(publicKey);
+    await refreshPushRow();
+  });
+}
+
+async function enablePush(publicKey) {
+  if (!publicKey) {
+    alert("Push is not configured (missing VAPID public key).");
+    return;
+  }
+
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") {
+    alert("You need to allow notifications to enable push.");
+    return;
+  }
+
+  const reg = await navigator.serviceWorker.ready;
+
+  // Convert VAPID key
+  const appServerKey = urlBase64ToUint8Array(publicKey);
+
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: appServerKey,
+  });
+
+  // Save on server
+  await fetch("/api/push/subscribe", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subscription: sub }),
+  });
+}
+
+async function disablePush() {
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (!sub) return;
+
+  const endpoint = sub.endpoint;
+
+  try {
+    await sub.unsubscribe();
+  } catch {}
+
+  try {
+    await fetch("/api/push/unsubscribe", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    });
+  } catch {}
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+function formatTime(ts) {
+  try {
+    const d = new Date(ts);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    if (sameDay) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function escapeHtml(str) {
+  return String(str || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
