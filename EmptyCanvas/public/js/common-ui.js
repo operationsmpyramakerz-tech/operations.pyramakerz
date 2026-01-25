@@ -5,6 +5,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // هنضيفه هنا كـ safety (وكمان هنضيفه في الـ HTML body كـ default).
   document.body.classList.add('permissions-loading');
 
+  // Page-specific body class (used by CSS to tune some pages like Home/Notifications)
+  // Examples: /home => page-home, /expenses/users => page-expenses-users
+  try {
+    const p = String(window.location?.pathname || "/").replace(/\/+$/, "") || "/";
+    const slug = (p === "/") ? "root" : p.split("/").filter(Boolean).join("-");
+    document.body.classList.add(`page-${slug}`);
+  } catch {}
+
   const logoutBtn     = document.getElementById('logoutBtn');
   let menuToggle    = null;     // injected on mobile
   let sidebarToggle = document.getElementById('sidebar-toggle');  // removed (logo is the toggle now)
@@ -97,7 +105,8 @@ document.addEventListener('DOMContentLoaded', () => {
       lead.className = 'gh-lead-btn';
       lead.id = 'ghLeadBtn';
       lead.setAttribute('aria-label', 'Menu');
-      lead.innerHTML = `<i data-feather="star"></i>`;
+      // Match the reference UI (asterisk-like icon)
+      lead.innerHTML = `<i data-feather="asterisk"></i>`;
 
       // On mobile: toggle the sidebar overlay
       lead.addEventListener('click', (e) => {
@@ -969,6 +978,7 @@ function initNotificationsWidget() {
     <div class="notif-panel__header">
       <div class="notif-panel__title">Notifications</div>
       <div class="notif-panel__actions">
+        <a class="notif-action-link" href="/notifications" id="notifSeeAllLink">See All</a>
         <button type="button" class="notif-action-btn" id="notifMarkAllBtn">Mark all read</button>
       </div>
     </div>
@@ -980,7 +990,7 @@ function initNotificationsWidget() {
     </div>
 
     <div class="notif-panel__footer">
-      <a class="notif-footer-link" href="/dashboard">Open dashboard</a>
+      <a class="notif-footer-link" href="/notifications">Open notifications</a>
     </div>
   `;
 
