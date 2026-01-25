@@ -76,7 +76,7 @@ body{
 
 /* Sidebar header: keep it minimal */
 .sidebar-header{
-  padding: 14px 12px !important;
+  padding: 12px 10px !important;
   border-bottom: none !important;
   justify-content: center !important;
 }
@@ -103,22 +103,27 @@ body{
 
 /* Sidebar profile (inserted by common-ui.js) -> compact */
 .sidebar-profile{
-  padding: 10px 12px !important;
+  padding: 8px 10px !important;
   border-bottom: none !important;
   justify-content: center !important;
 }
 .sidebar-profile__meta{ display: none !important; }
 .sidebar-profile__avatar{ width: 44px; height: 44px; border-radius: 18px !important; }
 
-.sidebar-nav{ padding: 10px 10px 14px !important; }
+.sidebar-nav{
+  padding: 8px 10px 12px !important;
+  /* User requested: show all icons without an internal scrollbar */
+  overflow-y: hidden !important;
+  padding-right: 0 !important;
+}
 .nav-label{ display: none !important; }
 
 .nav-link{
   justify-content: center !important;
-  padding: 13px 10px !important;
-  border-radius: 22px !important;
+  padding: 11px 10px !important;
+  border-radius: 20px !important;
   color: rgba(255,255,255,0.72) !important;
-  margin-bottom: 10px !important;
+  margin-bottom: 8px !important;
   background: transparent !important;
 }
 
@@ -138,13 +143,13 @@ body{
 }
 
 .sidebar-footer{
-  padding: 14px 12px !important;
+  padding: 12px 10px !important;
   border-top: none !important;
 }
 .sidebar-footer .logout-btn{
-  width: 54px;
-  height: 54px;
-  border-radius: 20px;
+  width: 50px;
+  height: 50px;
+  border-radius: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -581,6 +586,12 @@ body{
    ========================================================= */
 
 .notif-wrap{ position: relative; }
+
+/* Mounted on <body> via JS (portal) so it never breaks the header layout */
+.notif-panel--portal{
+  position: fixed !important;
+  z-index: 999999 !important;
+}
 
 .notif-panel{
   top: 44px;
