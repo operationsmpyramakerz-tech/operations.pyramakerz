@@ -845,6 +845,11 @@ app.get("/account", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "account.html"));
 });
 
+// Notifications page (in-app notification center)
+app.get("/notifications", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "notifications.html"));
+});
+
 // Funds page
 app.get("/funds", requireAuth, requirePage("Funds"), (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "funds.html"));
