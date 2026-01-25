@@ -8077,7 +8077,20 @@ app.get(
 );
 
 app.post("/api/expenses/cash-out", async (req, res) => {
-  const { fundsType, reason, date, from, to, amount, kilometer, screenshotDataUrl, screenshotName } = req.body;
+  const {
+    fundsType,
+    reason,
+    date,
+    from,
+    to,
+    amount,
+    kilometer,
+    // New (multiple uploads)
+    screenshots,
+    // Backward compat (single upload)
+    screenshotDataUrl,
+    screenshotName,
+  } = req.body;
 
   try {
     const teamMemberPageId = await getCurrentUserRelationPage(req);
@@ -8125,12 +8138,39 @@ app.post("/api/expenses/cash-out", async (req, res) => {
         number: Number(kilometer) || 0
       };
     }
-// Optional Screenshot (Notion property: "Screenshot" - Files & media)
-if (screenshotDataUrl) {
-  const filename = (screenshotName && String(screenshotName).trim()) || `screenshot-${Date.now()}.png`;
-  const url = await uploadToBlobFromBase64(screenshotDataUrl, filename);
-  props["Screenshot"] = { files: [makeExternalFile(filename, url)] };
-}
+    // Optional screenshots (Notion property: "Screenshot" - Files & media)
+    // Support multiple images, and keep backward-compat with the old single-image payload.
+    const filesToAttach = [];
+
+    // 1) New payload: screenshots: [{ name, dataUrl }]
+    if (Array.isArray(screenshots) && screenshots.length) {
+      for (let i = 0; i < screenshots.length; i++) {
+        const s = screenshots[i] || {};
+        const dataUrl = s.dataUrl || s.screenshotDataUrl || "";
+        if (!dataUrl) continue;
+
+        const originalName = String(s.name || s.filename || "receipt.png").trim() || "receipt.png";
+        // Ensure unique blob pathname (avoid overwriting existing objects)
+        const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+        const filename = `receipt-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
+
+        const url = await uploadToBlobFromBase64(dataUrl, filename);
+        filesToAttach.push(makeExternalFile(originalName, url));
+      }
+    }
+
+    // 2) Old payload: screenshotDataUrl + screenshotName
+    if (!filesToAttach.length && screenshotDataUrl) {
+      const originalName = (screenshotName && String(screenshotName).trim()) || `receipt-${Date.now()}.png`;
+      const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+      const filename = `receipt-${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
+      const url = await uploadToBlobFromBase64(screenshotDataUrl, filename);
+      filesToAttach.push(makeExternalFile(originalName, url));
+    }
+
+    if (filesToAttach.length) {
+      props["Screenshot"] = { files: filesToAttach };
+    }
     await notion.pages.create({
       parent: { database_id: process.env.Expenses_Database },
       properties: props
@@ -8432,6 +8472,28 @@ app.get("/api/expenses", async (req, res) => {
       cashInFromTitleMap.set(id, t);
     }
 
+    // Last settled time: find the most recent "Settled my account" record for this user.
+    let lastSettledAt = null;
+    try {
+      for (const pg of results) {
+        const p = pg?.properties || {};
+        const ft = p?.["Funds Type"]?.select?.name || "";
+        if (String(ft).trim() !== "Settled my account") continue;
+
+        const ct = pg?.created_time;
+        if (!ct) continue;
+
+        if (!lastSettledAt) {
+          lastSettledAt = ct;
+          continue;
+        }
+
+        const a = new Date(lastSettledAt).getTime();
+        const b = new Date(ct).getTime();
+        if (Number.isFinite(b) && (!Number.isFinite(a) || b > a)) lastSettledAt = ct;
+      }
+    } catch {}
+
     const formatted = results.map((page) => {
       const props = page.properties || {};
 
@@ -8453,18 +8515,24 @@ app.get("/api/expenses", async (req, res) => {
         cashInFrom = names.join(", ");
       }
 
-      // Optional screenshot (Notion property: "Screenshot" - files)
-      let screenshotUrl = "";
-      let screenshotName = "";
+      // Optional screenshots (Notion property: "Screenshot" - files)
+      const screenshots = [];
       const screenshotProp = props?.["Screenshot"];
       if (screenshotProp?.type === "files") {
-        const f = (screenshotProp.files || [])[0];
-        if (f) {
-          screenshotName = f.name || "";
-          if (f.type === "external") screenshotUrl = f.external?.url || "";
-          if (f.type === "file") screenshotUrl = f.file?.url || "";
+        for (const f of (screenshotProp.files || [])) {
+          if (!f) continue;
+          let url = "";
+          if (f.type === "external") url = f.external?.url || "";
+          if (f.type === "file") url = f.file?.url || "";
+          url = String(url || "").trim();
+          if (!url) continue;
+          screenshots.push({ name: f.name || "", url });
         }
       }
+
+      // Backward compat: keep a single screenshotUrl/name (first)
+      const screenshotUrl = screenshots[0]?.url || "";
+      const screenshotName = screenshots[0]?.name || "";
 
       return {
         id: page.id,
@@ -8477,12 +8545,13 @@ app.get("/api/expenses", async (req, res) => {
         cashIn: props["Cash in"]?.number || 0,
         cashOut: props["Cash out"]?.number || 0,
         cashInFrom,
+        screenshots,
         screenshotUrl,
         screenshotName,
       };
     });
 
-    res.json({ success: true, items: formatted });
+    res.json({ success: true, items: formatted, lastSettledAt });
 
   } catch (err) {
     console.error("Expenses load error:", err.body || err);
@@ -8664,18 +8733,24 @@ app.get(
           cashInFrom = names.join(", ");
         }
 
-        // Optional screenshot (Notion property: "Screenshot" - files)
-        let screenshotUrl = "";
-        let screenshotName = "";
+        // Optional screenshots (Notion property: "Screenshot" - files)
+        const screenshots = [];
         const screenshotProp = props?.["Screenshot"];
         if (screenshotProp?.type === "files") {
-          const f = (screenshotProp.files || [])[0];
-          if (f) {
-            screenshotName = f.name || "";
-            if (f.type === "external") screenshotUrl = f.external?.url || "";
-            if (f.type === "file") screenshotUrl = f.file?.url || "";
+          for (const f of (screenshotProp.files || [])) {
+            if (!f) continue;
+            let url = "";
+            if (f.type === "external") url = f.external?.url || "";
+            if (f.type === "file") url = f.file?.url || "";
+            url = String(url || "").trim();
+            if (!url) continue;
+            screenshots.push({ name: f.name || "", url });
           }
         }
+
+        // Backward compat: keep a single screenshotUrl/name (first)
+        const screenshotUrl = screenshots[0]?.url || "";
+        const screenshotName = screenshots[0]?.name || "";
 
         return {
           id: page.id,
@@ -8688,6 +8763,7 @@ app.get(
           cashIn: props["Cash in"]?.number || 0,
           cashOut: props["Cash out"]?.number || 0,
           cashInFrom,
+          screenshots,
           screenshotUrl,
           screenshotName,
         };
