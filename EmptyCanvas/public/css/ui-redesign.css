@@ -175,11 +175,12 @@ body{
 
 /* Row1 = green bar */
 .main-header .header-row1{
-  background: linear-gradient(135deg, var(--ui-green) 0%, #0B351D 100%) !important;
-  border-radius: 30px !important;
+  background: linear-gradient(135deg, var(--ui-green) 0%, #072F1A 100%) !important;
+  border-radius: 36px !important;
   padding: 12px 14px !important;
   border: none !important;
-  box-shadow: 0 18px 44px rgba(17,24,39,0.25) !important;
+  box-shadow: 0 20px 52px rgba(17,24,39,0.28) !important;
+  min-height: 76px;
 }
 
 .main-header .header-row1 .left{
@@ -208,18 +209,66 @@ body{
 .gh-lead-btn:active{ transform: translateY(0); }
 .gh-lead-btn svg{ width: 22px; height: 22px; color: #0B351D; }
 
-/* Wave group */
+/* Wave group (match the reference green header) */
 .gh-wave{
+  /* height of the pill (also used to place the bottom notch via box-shadow) */
+  --wave-h: 52px;
+  /* The notch color should match the darker header background behind the wave */
+  --notch-bg: #0B351D;
+
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  height: 50px;
-  background: rgba(45,107,59,0.95);
+  gap: 10px;
+  padding: 6px 12px;
+  height: var(--wave-h);
+  background: rgba(45,107,59,0.98);
   border-radius: 999px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
-  max-width: 680px;
-  width: min(680px, 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.10),
+    0 16px 44px rgba(0,0,0,0.22);
+  max-width: 720px;
+  width: min(720px, 100%);
+  position: relative;
+  overflow: visible;
+}
+
+/* "Wave" notches (top + bottom) — cuts are created by drawing circles in the background color */
+.gh-wave::before,
+.gh-wave::after{
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: 999px;
+  background: var(--notch-bg);
+  opacity: 1;
+}
+
+/* Notch between search and bell */
+.gh-wave::before{
+  width: 34px;
+  height: 34px;
+  top: calc(-17px + 2px);
+  /* Center the notch in the gap between search and bell */
+  left: calc(100% - 112px);
+  transform: translateX(-50%);
+  box-shadow: 0 var(--wave-h) 0 var(--notch-bg);
+}
+
+/* Notch between bell and avatar */
+.gh-wave::after{
+  width: 30px;
+  height: 30px;
+  top: calc(-15px + 2px);
+  /* Center the notch in the gap between bell and avatar */
+  left: calc(100% - 58px);
+  transform: translateX(-50%);
+  box-shadow: 0 var(--wave-h) 0 var(--notch-bg);
+}
+
+/* Ensure content stays above the notch layers */
+.gh-wave > *{
+  position: relative;
+  z-index: 1;
 }
 
 /* Make the searchbar blend inside wave */
@@ -227,34 +276,69 @@ body{
   flex: 1 1 auto;
   width: auto !important;
   max-width: none !important;
-  height: 38px !important;
+  height: 40px !important;
   border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  padding: 0 8px !important;
+  background: rgba(70, 140, 76, 0.92) !important; /* lighter green inside */
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08) !important;
+  padding: 0 16px 0 14px !important;
   border-radius: 999px !important;
+  gap: 10px !important;
 }
-.gh-wave .searchbar i{ color: rgba(255,255,255,0.85) !important; }
+.gh-wave .searchbar i{ display: none !important; }
+
+/* Reference UI shows a small white dot at the left of the search segment */
+.gh-wave .searchbar::before{
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.95);
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.08);
+}
 .gh-wave .searchbar input{
   color: rgba(255,255,255,0.92) !important;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 .gh-wave .searchbar input::placeholder{
-  color: rgba(255,255,255,0.62) !important;
-  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.68) !important;
+  letter-spacing: 0.14em;
 }
 
 /* Notification bell button inside wave */
 .gh-wave .notif-bell-btn{
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: 999px;
   border: none;
-  background: rgba(17,64,36,0.55);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
+  background: transparent;
+  box-shadow: none;
+  position: relative;
+  display: grid;
+  place-items: center;
 }
 .gh-wave .notif-bell-btn i,
 .gh-wave .notif-bell-btn svg{ color: rgba(255,255,255,0.92) !important; }
+
+/* Badge positioned like a small overlay */
+.notif-badge{
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #F43F5E;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.28);
+}
 
 /* Avatar (account-mini) -> circle */
 .gh-wave .account-mini{
@@ -262,9 +346,9 @@ body{
   height: 40px;
   border-radius: 999px;
   padding: 0 !important;
-  background: rgba(17,64,36,0.55) !important;
-  border: none !important;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
+  background: transparent !important;
+  border: 2px solid rgba(255,255,255,0.22) !important;
+  box-shadow: 0 10px 22px rgba(0,0,0,0.22);
   overflow: hidden;
 }
 .gh-wave .account-mini .label{ display: none !important; }
@@ -276,6 +360,19 @@ body{
   box-shadow: none;
 }
 .gh-wave .account-mini .ico-circle img{ width: 26px; height: 26px; }
+
+/* "See all" action link inside the notification panel header */
+.notif-action-link{
+  text-decoration: none;
+  font-weight: 800;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(226,232,240,0.8);
+  background: #F8FAFC;
+  color: #0F172A;
+}
+.notif-action-link:hover{ filter: brightness(0.98); }
 
 /* Panel drop-down position tweak */
 .notif-panel{

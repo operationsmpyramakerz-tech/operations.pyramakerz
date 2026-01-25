@@ -296,3 +296,64 @@
 [data-block].is-hidden {
   display: none !important;
 }
+
+/* =====================================================
+   Dashboard Fit-To-Screen (Desktop)
+   - Make the whole Home dashboard visible without scrolling the page.
+   - Lists/actions/scope become internally scrollable if they overflow.
+   (Triggered via common-ui.js: body.page-home)
+   ===================================================== */
+
+@media (min-width: 1024px){
+  .page-home .app-container{
+    height: calc(100vh - 44px); /* matches UI shell margins in ui-redesign.css */
+  }
+
+  .page-home .main-content{
+    height: 100%;
+  }
+
+  .page-home main.container-full-width{
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 18px;
+  }
+
+  .page-home .home-card{
+    padding: 16px;
+  }
+
+  .page-home .home-section-head{
+    margin-bottom: 10px;
+  }
+
+  /* Slightly tighter KPIs so they fit in less height */
+  .page-home .home-kpis{
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .page-home .home-grid{
+    flex: 1 1 auto;
+    overflow: hidden;
+    margin-top: 12px;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .page-home .home-grid > .card{
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .page-home .home-list,
+  .page-home .home-actions-grid,
+  .page-home .home-scope-body{
+    overflow: auto;
+    min-height: 0;
+    padding-bottom: 8px;
+  }
+}
