@@ -1014,10 +1014,16 @@ function initNotificationsWidget() {
 
   const panel = document.createElement("div");
   panel.id = "notifPanel";
-  panel.className = "notif-panel";
+  // NOTE: we mount the panel as a portal (on <body>) so it doesn't
+  // affect the header layout and doesn't get clipped by containers.
+  panel.className = "notif-panel notif-panel--portal";
   panel.setAttribute("role", "dialog");
   panel.setAttribute("aria-label", "Notifications");
   panel.hidden = true;
+
+  // Force overlay positioning (even if legacy CSS changes)
+  panel.style.position = 'fixed';
+  panel.style.zIndex = '999999';
 
   panel.innerHTML = `
     <div class="notif-center-shell">
@@ -1041,12 +1047,53 @@ function initNotificationsWidget() {
   `;
 
   wrap.appendChild(btn);
-  wrap.appendChild(panel);
 
   // Insert before user avatar if available
   const user = mount.querySelector('.header-user') || mount.querySelector('a.account-mini');
   if (user) mount.insertBefore(wrap, user);
   else mount.appendChild(wrap);
+
+  // Portal mount (dropdown should NOT live inside the header)
+  document.body.appendChild(panel);
+
+  // Positioning helpers
+  function positionNotifPanel() {
+    if (panel.hidden) return;
+    try {
+      const rect = btn.getBoundingClientRect();
+      const gap = 12;
+
+      // Prefer anchoring to the bell button (right aligned)
+      const top = rect.bottom + gap;
+      const right = Math.max(14, Math.round(window.innerWidth - rect.right));
+
+      panel.style.top = `${Math.round(top)}px`;
+      panel.style.right = `${right}px`;
+      panel.style.left = 'auto';
+
+      // Keep inside viewport
+      const pRect = panel.getBoundingClientRect();
+      if (pRect.left < 14) {
+        panel.style.left = '14px';
+        panel.style.right = 'auto';
+      }
+
+      // Prevent the panel from going beyond the bottom of the viewport
+      const maxH = Math.max(240, Math.round(window.innerHeight - top - 16));
+      panel.style.maxHeight = `${maxH}px`;
+    } catch {}
+  }
+
+  let _notifPosRaf = 0;
+  function requestNotifPanelPosition() {
+    if (panel.hidden) return;
+    if (_notifPosRaf) cancelAnimationFrame(_notifPosRaf);
+    _notifPosRaf = requestAnimationFrame(positionNotifPanel);
+  }
+
+  // Keep it aligned on resize/scroll
+  window.addEventListener('resize', requestNotifPanelPosition);
+  window.addEventListener('scroll', requestNotifPanelPosition, true);
 
   if (window.feather) {
     try { window.feather.replace(); } catch {}
@@ -1057,9 +1104,13 @@ function initNotificationsWidget() {
     e.preventDefault();
     e.stopPropagation();
 
-    panel.hidden = !panel.hidden;
+    const willOpen = panel.hidden;
+    panel.hidden = !willOpen;
 
-    if (!panel.hidden) {
+    if (willOpen) {
+      // Make sure we are positioned before rendering
+      requestNotifPanelPosition();
+
       // Reset view each time we open
       const st = getNotifState();
       st.showAll = false;
@@ -1067,6 +1118,9 @@ function initNotificationsWidget() {
       syncNotifTabs();
       syncNotifSeeAll();
       await refreshNotifications(true);
+
+      // Re-position after content renders (height may change)
+      requestNotifPanelPosition();
     }
   });
 
@@ -1074,8 +1128,14 @@ function initNotificationsWidget() {
     if (panel.hidden) return;
     const target = e.target;
     if (!target) return;
-    if (wrap.contains(target)) return;
+    if (btn.contains(target) || panel.contains(target)) return;
     panel.hidden = true;
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !panel.hidden) {
+      panel.hidden = true;
+    }
   });
 
   document.getElementById("notifSeeAllBtn")?.addEventListener("click", (e) => {
@@ -1137,7 +1197,8 @@ function syncNotifSeeAll(){
 }
 
 function notifScope(ts){
-  const t = typeof ts === 'number' ? ts : Date.now();
+  const num = Number(ts);
+  const t = Number.isFinite(num) ? num : Date.now();
   const now = new Date();
   const d = new Date(t);
 
@@ -1156,7 +1217,8 @@ function notifScope(ts){
 }
 
 function formatAgo(ts){
-  const t = typeof ts === 'number' ? ts : Date.now();
+  const num = Number(ts);
+  const t = Number.isFinite(num) ? num : Date.now();
   const diff = Math.max(0, Date.now() - t);
   const sec = Math.floor(diff / 1000);
   const min = Math.floor(sec / 60);
@@ -1490,4 +1552,14 @@ function escapeHtml(str) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+// Escape text for safe usage inside HTML attributes.
+// (We keep it simple because we only need it for <img src="..."> and similar.)
+function escapeAttr(str) {
+  // escapeHtml already escapes &, <, >, " and '
+  return escapeHtml(str)
+    .replaceAll("`", "&#096;")
+    .replaceAll("\n", " ")
+    .replaceAll("\r", " ");
 }
