@@ -225,7 +225,7 @@ function renderUserExpenses(items, totalEl, listEl) {
       : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it.reason || "")}</div>`;
 
     const line2 = (!isIn && (it.from || it.to))
-      ? `<div class="expense-person">${escapeHtml(it.from || "")}${it.to ? " → " + escapeHtml(it.to) : ""}</div>`
+      ? `<div class="expense-person">${escapeHtml(it.from || "")}${it.to ? " ← " + escapeHtml(it.to) : ""}</div>`
       : "";
 
     const screenshotHtml = (!isIn && it.screenshotUrl)
