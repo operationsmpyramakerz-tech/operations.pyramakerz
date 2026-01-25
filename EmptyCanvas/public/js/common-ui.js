@@ -25,7 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // UI Redesign helpers
   // - Sidebar tooltips when labels are hidden
   // - Ensure every page has a main header
-  // - Convert the existing header to the new green style
+  // - Convert the existing header to the "Dashboard" topbar style
+  //   (title + search + bell + user)
   // =====================================================
 
   function ensureNavTooltips(){
@@ -87,9 +88,11 @@ document.addEventListener('DOMContentLoaded', () => {
     main.insertBefore(header, main.firstChild);
   }
 
-  function ensureGreenHeaderLayout(){
+  function ensureDashboardHeaderLayout(){
     const header = document.querySelector('.main-header');
     if (!header) return;
+
+    header.classList.add('dash-header');
 
     const row1 = header.querySelector('.header-row1');
     if (!row1) return;
@@ -97,67 +100,58 @@ document.addEventListener('DOMContentLoaded', () => {
     const left = row1.querySelector('.left') || row1;
     const right = row1.querySelector('.right') || row1;
 
-    // 1) Lead round button (left)
-    let lead = left.querySelector('.gh-lead-btn');
-    if (!lead) {
-      lead = document.createElement('button');
-      lead.type = 'button';
-      lead.className = 'gh-lead-btn';
-      lead.id = 'ghLeadBtn';
-      lead.setAttribute('aria-label', 'Menu');
-      // Match the reference UI (asterisk-like icon)
-      lead.innerHTML = `<i data-feather="asterisk"></i>`;
+    // Remove old injected green header nodes if they exist (from older builds)
+    try { left.querySelectorAll('.gh-lead-btn').forEach(n => n.remove()); } catch {}
+    try { header.querySelectorAll('.gh-wave').forEach(n => n.remove()); } catch {}
 
-      // On mobile: toggle the sidebar overlay
-      lead.addEventListener('click', (e) => {
-        if (!isMobile()) return;
-        toggleSidebar(e);
-      });
+    // Page title text: prefer existing page-title
+    const pageTitleEl = header.querySelector('.header-row2 .page-title') || header.querySelector('.page-title');
+    const pageTitleText = (pageTitleEl && pageTitleEl.textContent) ? String(pageTitleEl.textContent).trim() : (document.title || 'Dashboard').trim();
 
-      // Put it first in the left area
-      left.insertBefore(lead, left.firstChild);
+    // Ensure left title exists
+    let dashTitle = left.querySelector('.dash-title');
+    if (!dashTitle) {
+      dashTitle = document.createElement('div');
+      dashTitle.className = 'dash-title';
+      left.insertBefore(dashTitle, left.firstChild);
     }
+    dashTitle.textContent = pageTitleText || 'Dashboard';
 
-    // 2) Wave container (right)
-    let wave = right.querySelector('.gh-wave');
-    if (!wave) {
-      wave = document.createElement('div');
-      wave.className = 'gh-wave';
-      wave.id = 'ghWave';
-      right.insertBefore(wave, right.firstChild);
-    }
+    // Hide the old greeting pill (kept in DOM for old pages, but not part of the new header)
+    const greeting = left.querySelector('.greeting-pill');
+    if (greeting) greeting.style.display = 'none';
 
-    // 3) Searchbar: reuse existing if present to preserve page-specific JS
+    // Ensure searchbar exists; move it into the left group
     const existingSearch = header.querySelector('.searchbar');
-    if (existingSearch && existingSearch.parentElement !== wave) {
-      wave.insertBefore(existingSearch, wave.firstChild);
+    if (existingSearch && existingSearch.parentElement !== left) {
+      left.appendChild(existingSearch);
     }
 
-    if (!wave.querySelector('.searchbar')) {
+    if (!left.querySelector('.searchbar')) {
       const sb = document.createElement('div');
       sb.className = 'searchbar';
-      sb.id = 'ghSearchbar';
       sb.setAttribute('role', 'search');
       sb.innerHTML = `
         <i data-feather="search"></i>
-        <input type="search" placeholder="SEARCH" aria-label="Search" />
+        <input type="search" placeholder="Search" aria-label="Search" />
       `;
-      wave.insertBefore(sb, wave.firstChild);
+      left.appendChild(sb);
     }
 
-    // 4) Notifications: if already mounted elsewhere, move inside the wave
+    // Move notif + user to the right group if they exist already
     const notifWrap = header.querySelector('.notif-wrap');
-    if (notifWrap && notifWrap.parentElement !== wave) {
-      wave.appendChild(notifWrap);
+    if (notifWrap && notifWrap.parentElement !== right) {
+      right.insertBefore(notifWrap, right.firstChild);
     }
 
-    // 5) Account (avatar): move inside the wave
-    const acc = header.querySelector('.account-mini');
-    if (acc && acc.parentElement !== wave) {
-      wave.appendChild(acc);
+    const user = header.querySelector('.header-user') || header.querySelector('a.account-mini');
+    if (user && user.parentElement !== right) {
+      right.appendChild(user);
     }
 
-    // Feather re-render for injected icons
+    // Hide row2 completely (page title is now in the top row)
+    header.classList.add('dash-hide-row2');
+
     if (window.feather) {
       try { window.feather.replace(); } catch {}
     }
@@ -284,6 +278,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     }
+  }
+
+  function shortDisplayName(name){
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return 'User';
+    if (parts.length === 1) return parts[0];
+    const last = parts[parts.length - 1] || '';
+    const lastInitial = last ? String(last[0]).toUpperCase() : '';
+    return `${parts[0]} ${lastInitial}`.trim();
+  }
+
+  function renderHeaderUser({ name = '', photoUrl = '' } = {}){
+    const header = document.querySelector('.main-header');
+    if (!header) return;
+
+    const right = header.querySelector('.header-row1 .right') || header.querySelector('.header-row1') || header;
+    if (!right) return;
+
+    const safeName = String(name || '').trim() || getCachedName() || 'User';
+    const displayName = shortDisplayName(safeName);
+
+    // Prefer an existing link (account-mini) so we don't duplicate
+    let link = header.querySelector('a.header-user') || header.querySelector('a.account-mini');
+
+    if (!link) {
+      link = document.createElement('a');
+      link.href = '/account';
+      link.setAttribute('aria-label', 'Account');
+      right.appendChild(link);
+    }
+
+    link.classList.remove('account-mini');
+    link.classList.add('header-user');
+    link.href = '/account';
+    link.title = safeName;
+
+    const initials = initialsFromName(safeName) || '';
+    const avatarHtml = photoUrl
+      ? `<img class="header-user__img" src="${escapeAttr(photoUrl)}" alt="${escapeAttr(safeName)}" />`
+      : `<div class="header-user__fallback" aria-hidden="true">${escapeHtml(initials)}</div>`;
+
+    link.innerHTML = `
+      <span class="header-user__avatar">${avatarHtml}</span>
+      <span class="header-user__name">${escapeHtml(displayName)}</span>
+    `;
   }
 
   function ensureSettingsLink(){
@@ -425,7 +464,6 @@ if (document.querySelector('.sidebar')) {
     sidebarToggle = null;
   }
   ensureSidebarProfile();
-  relocateAccountLink();
   ensureSettingsLink();
   if (window.feather) feather.replace();
 }
@@ -581,6 +619,8 @@ if (document.querySelector('.sidebar')) {
       renderGreeting(cached);
       // also prefill sidebar profile quickly from cache (then refresh from API)
       renderSidebarProfile({ name: cached });
+      // also prefill header user (then refresh from API)
+      renderHeaderUser({ name: cached });
     }
 
     try {
@@ -601,6 +641,12 @@ if (document.querySelector('.sidebar')) {
         name: name || cached || '',
         position: data.position || '',
         department: data.department || '',
+        photoUrl: data.photoUrl || ''
+      });
+
+      // Header user (avatar + short name)
+      renderHeaderUser({
+        name: name || cached || '',
         photoUrl: data.photoUrl || ''
       });
 
@@ -699,9 +745,9 @@ if (document.querySelector('.sidebar')) {
   // Init
   applyInitial();
 
-  // UI Redesign: ensure header exists + convert it to the green style
+  // UI Redesign: ensure header exists + convert it to the Dashboard topbar style
   ensureMainHeaderExists();
-  ensureGreenHeaderLayout();
+  ensureDashboardHeaderLayout();
 
   // لو عندك لينكات بتتعمل inject في صفحات معينة:
     // Home should appear for everyone (not tied to permissions)
@@ -946,7 +992,6 @@ function initNotificationsWidget() {
   if (document.getElementById("notifBellBtn")) return;
 
   const mount =
-    document.querySelector(".main-header .gh-wave") ||
     document.querySelector(".main-header .header-row1 .right") ||
     document.querySelector(".main-header .header-row1") ||
     document.querySelector(".tasks-v2-actions") ||
@@ -975,41 +1020,33 @@ function initNotificationsWidget() {
   panel.hidden = true;
 
   panel.innerHTML = `
-    <div class="notif-panel__header">
-      <div class="notif-panel__title">Notifications</div>
-      <div class="notif-panel__actions">
-        <a class="notif-action-link" href="/notifications" id="notifSeeAllLink">See All</a>
-        <button type="button" class="notif-action-btn" id="notifMarkAllBtn">Mark all read</button>
+    <div class="notif-center-shell">
+      <div class="notif-center-card">
+        <div class="notif-center-head">
+          <div class="notif-center-title">AI Notification Center</div>
+          <button type="button" class="notif-center-seeall" id="notifSeeAllBtn">See All</button>
+        </div>
+
+        <div class="notif-center-tabs" role="tablist" aria-label="Notification filters">
+          <button type="button" class="notif-tab is-active" role="tab" aria-selected="true" data-scope="today">Today</button>
+          <button type="button" class="notif-tab" role="tab" aria-selected="false" data-scope="week">This Week</button>
+          <button type="button" class="notif-tab" role="tab" aria-selected="false" data-scope="earlier">Earlier</button>
+        </div>
+
+        <div class="notif-panel__list" id="notifList">
+          <div class="notif-empty">Loading…</div>
+        </div>
       </div>
-    </div>
-
-    <div class="notif-panel__push" id="notifPushRow"></div>
-
-    <div class="notif-panel__list" id="notifList">
-      <div class="notif-empty">Loading…</div>
-    </div>
-
-    <div class="notif-panel__footer">
-      <a class="notif-footer-link" href="/notifications">Open notifications</a>
     </div>
   `;
 
   wrap.appendChild(btn);
   wrap.appendChild(panel);
 
-  // If we have the new green wave container, place the bell between search and avatar
-  if (mount.classList && mount.classList.contains("gh-wave")) {
-    const acc = mount.querySelector('.account-mini');
-    if (acc) mount.insertBefore(wrap, acc);
-    else mount.appendChild(wrap);
-  }
-  // For legacy header right area: insert before other actions
-  else if (mount.classList && (mount.classList.contains("right") || mount.classList.contains("topbar-right"))) {
-    mount.insertBefore(wrap, mount.firstChild);
-  }
-  else {
-    mount.appendChild(wrap);
-  }
+  // Insert before user avatar if available
+  const user = mount.querySelector('.header-user') || mount.querySelector('a.account-mini');
+  if (user) mount.insertBefore(wrap, user);
+  else mount.appendChild(wrap);
 
   if (window.feather) {
     try { window.feather.replace(); } catch {}
@@ -1023,8 +1060,13 @@ function initNotificationsWidget() {
     panel.hidden = !panel.hidden;
 
     if (!panel.hidden) {
+      // Reset view each time we open
+      const st = getNotifState();
+      st.showAll = false;
+      st.activeTab = st.activeTab || 'today';
+      syncNotifTabs();
+      syncNotifSeeAll();
       await refreshNotifications(true);
-      await refreshPushRow();
     }
   });
 
@@ -1036,11 +1078,28 @@ function initNotificationsWidget() {
     panel.hidden = true;
   });
 
-  document.getElementById("notifMarkAllBtn")?.addEventListener("click", async (e) => {
+  document.getElementById("notifSeeAllBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    await markAllRead();
-    await refreshNotifications(true);
+    const st = getNotifState();
+    st.showAll = !st.showAll;
+    syncNotifSeeAll();
+    const listEl = document.getElementById('notifList');
+    if (listEl) renderNotificationsList(listEl, Array.isArray(st.items) ? st.items : []);
+  });
+
+  // Tabs
+  panel.querySelectorAll('.notif-tab')?.forEach((t) => {
+    t.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const scope = t.getAttribute('data-scope') || 'today';
+      const st = getNotifState();
+      st.activeTab = scope;
+      syncNotifTabs();
+      const listEl = document.getElementById('notifList');
+      if (listEl) renderNotificationsList(listEl, Array.isArray(st.items) ? st.items : []);
+    });
   });
 
   // Initial badge load + polling
@@ -1048,12 +1107,81 @@ function initNotificationsWidget() {
   setInterval(() => refreshNotifications(false), 60 * 1000);
 }
 
+function getNotifState(){
+  if (!window.__notifWidgetState) {
+    window.__notifWidgetState = {
+      activeTab: 'today',
+      showAll: false,
+      items: [],
+    };
+  }
+  return window.__notifWidgetState;
+}
+
+function syncNotifTabs(){
+  const st = getNotifState();
+  const active = st.activeTab || 'today';
+  document.querySelectorAll('#notifPanel .notif-tab').forEach((btn) => {
+    const scope = btn.getAttribute('data-scope') || 'today';
+    const on = scope === active;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+
+function syncNotifSeeAll(){
+  const st = getNotifState();
+  const btn = document.getElementById('notifSeeAllBtn');
+  if (!btn) return;
+  btn.textContent = st.showAll ? 'Collapse' : 'See All';
+}
+
+function notifScope(ts){
+  const t = typeof ts === 'number' ? ts : Date.now();
+  const now = new Date();
+  const d = new Date(t);
+
+  // Today
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (t >= todayStart) return 'today';
+
+  // This week (Mon → now)
+  const day = now.getDay(); // 0 Sun, 1 Mon...
+  const diffToMon = (day === 0 ? 6 : day - 1);
+  const weekStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMon);
+  const weekStart = new Date(weekStartDate.getFullYear(), weekStartDate.getMonth(), weekStartDate.getDate()).getTime();
+  if (t >= weekStart) return 'week';
+
+  return 'earlier';
+}
+
+function formatAgo(ts){
+  const t = typeof ts === 'number' ? ts : Date.now();
+  const diff = Math.max(0, Date.now() - t);
+  const sec = Math.floor(diff / 1000);
+  const min = Math.floor(sec / 60);
+  const hr  = Math.floor(min / 60);
+  const day = Math.floor(hr / 24);
+  if (day >= 1) return `${day}d ago`;
+  if (hr >= 1) return `${hr}h ago`;
+  if (min >= 1) return `${min}m ago`;
+  return 'just now';
+}
+
+function pickNotifIcon(n){
+  const title = String(n?.title || '').toLowerCase();
+  if (title.includes('task')) return 'check-circle';
+  if (title.includes('stock')) return 'archive';
+  if (title.includes('order')) return 'package';
+  return 'bell';
+}
+
 async function refreshNotifications(renderList) {
   const badge = document.getElementById("notifBadge");
   const listEl = document.getElementById("notifList");
 
   try {
-    const resp = await fetch("/api/notifications?limit=25", {
+    const resp = await fetch("/api/notifications?limit=60", {
       credentials: "include",
       headers: { "Accept": "application/json" },
     });
@@ -1072,8 +1200,14 @@ async function refreshNotifications(renderList) {
       }
     }
 
+    const st = getNotifState();
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    st.items = rawItems
+      .slice()
+      .sort((a, b) => (Number(b?.ts || 0) - Number(a?.ts || 0)));
+
     if (renderList && listEl) {
-      renderNotificationsList(listEl, Array.isArray(data.items) ? data.items : []);
+      renderNotificationsList(listEl, st.items);
     }
   } catch (e) {
     if (renderList && listEl) {
@@ -1083,51 +1217,97 @@ async function refreshNotifications(renderList) {
 }
 
 function renderNotificationsList(listEl, items) {
-  if (!items.length) {
-    listEl.innerHTML = `<div class="notif-empty">No notifications yet</div>`;
+  const st = getNotifState();
+  const scope = st.activeTab || 'today';
+
+  const scoped = Array.isArray(items)
+    ? items.filter((n) => notifScope(n?.ts) === scope)
+    : [];
+
+  if (!scoped.length) {
+    listEl.innerHTML = `<div class="notif-empty">No notifications</div>`;
     return;
   }
 
+  const visible = st.showAll ? scoped : scoped.slice(0, 3);
+
+  // Disable "See All" when there isn't anything more to show
+  const seeAllBtn = document.getElementById('notifSeeAllBtn');
+  if (seeAllBtn) {
+    const canExpand = scoped.length > 3;
+    seeAllBtn.disabled = !canExpand;
+    seeAllBtn.style.opacity = canExpand ? '1' : '0.55';
+    seeAllBtn.style.cursor = canExpand ? 'pointer' : 'default';
+  }
+
   listEl.innerHTML = "";
-  for (const n of items) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "notif-item" + (n && !n.read ? " is-unread" : "");
-    item.dataset.id = n.id || "";
+  for (const n of visible) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'notif-row' + (n && !n.read ? ' is-unread' : '');
+    row.dataset.id = n.id || '';
+    row.dataset.url = (n && n.url) ? String(n.url) : '';
 
-    const title = escapeHtml(n.title || "Update");
-    const body = escapeHtml(n.body || "");
-    const ts = typeof n.ts === "number" ? n.ts : Date.now();
-    const time = formatTime(ts);
+    const title = escapeHtml(n?.title || 'Update');
+    const body = escapeHtml(n?.body || '');
+    const ts = typeof n?.ts === 'number' ? n.ts : Date.now();
+    const time = formatAgo(ts);
+    const icon = pickNotifIcon(n);
+    const showDot = !(n && n.read);
 
-    item.innerHTML = `
-      <div class="notif-item__top">
-        <div class="notif-item__title">${title}</div>
-        <div class="notif-item__time">${time}</div>
+    row.innerHTML = `
+      <div class="notif-row__ico"><i data-feather="${escapeAttr(icon)}"></i></div>
+      <div class="notif-row__content">
+        <div class="notif-row__title">
+          <span class="notif-dot ${showDot ? '' : 'is-hidden'}" aria-hidden="true"></span>
+          ${title}
+        </div>
+        ${body ? `<div class="notif-row__body">${body}</div>` : ''}
       </div>
-      ${body ? `<div class="notif-item__body">${body}</div>` : ""}
+      <div class="notif-row__time">${escapeHtml(time)}</div>
     `;
 
-    item.addEventListener("click", async () => {
-      const id = item.dataset.id;
-      const url = (n && n.url) ? String(n.url) : "/dashboard";
+    row.addEventListener('click', async () => {
+      const id = row.dataset.id;
+      const url = row.dataset.url;
 
       if (id) {
         try {
-          await fetch("/api/notifications/read", {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
+          await fetch('/api/notifications/read', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id }),
+          });
+        } catch {}
+
+        // optimistic local update
+        try {
+          const s = getNotifState();
+          s.items = (Array.isArray(s.items) ? s.items : []).map((x) => {
+            if (!x || x.id !== id) return x;
+            return { ...x, read: true };
           });
         } catch {}
       }
 
-      // Navigate
-      window.location.href = url || "/dashboard";
+      // Refresh badge in the background
+      try { refreshNotifications(false); } catch {}
+
+      // Close the dropdown
+      const panel = document.getElementById('notifPanel');
+      if (panel) panel.hidden = true;
+
+      if (url) {
+        window.location.href = url;
+      }
     });
 
-    listEl.appendChild(item);
+    listEl.appendChild(row);
+  }
+
+  if (window.feather) {
+    try { window.feather.replace(); } catch {}
   }
 }
 
