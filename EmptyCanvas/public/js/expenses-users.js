@@ -15,6 +15,40 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
+// ---------------------------------
+// Receipts rendering (multiple images)
+// ---------------------------------
+function getReceiptImages(it) {
+  if (Array.isArray(it?.screenshots) && it.screenshots.length) {
+    return it.screenshots
+      .map((s) => ({ name: s?.name || "", url: s?.url || "" }))
+      .filter((s) => !!String(s.url || "").trim());
+  }
+
+  const url = String(it?.screenshotUrl || "").trim();
+  if (!url) return [];
+  return [{ name: String(it?.screenshotName || "Receipt"), url }];
+}
+
+function renderReceiptImagesHtml(it) {
+  const shots = getReceiptImages(it);
+  if (!shots.length) return "";
+
+  return `
+    <div class="expense-screenshots">
+      ${shots
+        .map((s) => {
+          const u = escapeHtml(s.url);
+          const n = escapeHtml(s.name || "Receipt");
+          return `<a class="expense-screenshot-link" href="${u}" target="_blank" rel="noopener noreferrer">
+                    <img class="expense-screenshot-thumb" src="${u}" alt="${n}" />
+                  </a>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 
 function formatGBP(value) {
   const n = Number(value || 0);
@@ -228,11 +262,7 @@ function renderUserExpenses(items, totalEl, listEl) {
       ? `<div class="expense-person">${escapeHtml(it.from || "")}${it.to ? " ← " + escapeHtml(it.to) : ""}</div>`
       : "";
 
-    const screenshotHtml = (!isIn && it.screenshotUrl)
-      ? `<a class="expense-screenshot-link" href="${escapeHtml(it.screenshotUrl)}" target="_blank" rel="noopener noreferrer">
-            <img class="expense-screenshot-thumb" src="${escapeHtml(it.screenshotUrl)}" alt="Receipt screenshot" />
-         </a>`
-      : "";
+    const screenshotHtml = (!isIn) ? renderReceiptImagesHtml(it) : "";
 
     const div = document.createElement("div");
     div.className = "expense-item";

@@ -159,6 +159,56 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
+// ---------------------------------
+// Receipts rendering (multiple images)
+// ---------------------------------
+function getReceiptImages(it) {
+  // New API: it.screenshots = [{ name, url }]
+  if (Array.isArray(it?.screenshots) && it.screenshots.length) {
+    return it.screenshots
+      .map((s) => ({ name: s?.name || "", url: s?.url || "" }))
+      .filter((s) => !!String(s.url || "").trim());
+  }
+
+  // Backward-compat: it.screenshotUrl + it.screenshotName
+  const url = String(it?.screenshotUrl || "").trim();
+  if (!url) return [];
+  return [{ name: String(it?.screenshotName || "Receipt"), url }];
+}
+
+function renderReceiptImagesHtml(it) {
+  const shots = getReceiptImages(it);
+  if (!shots.length) return "";
+
+  return `
+    <div class="expense-screenshots">
+      ${shots
+        .map((s) => {
+          const u = escapeHtml(s.url);
+          const n = escapeHtml(s.name || "Receipt");
+          return `<a class="expense-screenshot-link" href="${u}" target="_blank" rel="noopener noreferrer">
+                    <img class="expense-screenshot-thumb" src="${u}" alt="${n}" />
+                  </a>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function formatLastSettledAt(iso) {
+  const raw = String(iso || "").trim();
+  if (!raw) return "—";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /* =============================
    LOAD FUNDS TYPES FROM SERVER
    ============================= */
@@ -329,15 +379,6 @@ function closeCashOutModal() {
     if (modal) modal.style.display = "none";
 }
 
-function fileToDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);     // data:*/*;base64,...
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
-
 /* =============================
    SUBMIT CASH IN
    ============================= */
@@ -442,11 +483,22 @@ async function submitCashOut() {
       body.amount = Number(document.getElementById("co_cash")?.value || 0);
     }
 
-    // Screenshot (optional)
-    const file = fileInput?.files?.[0];
-    if (file) {
-      body.screenshotName = file.name;
-      body.screenshotDataUrl = await fileToDataURL(file);
+    // Screenshots (optional) — allow multiple images
+    const files = Array.from(fileInput?.files || []);
+    if (files.length) {
+      const MAX_FILES = 6; // safety (request body size)
+      if (files.length > MAX_FILES) {
+        showToast(`You can upload up to ${MAX_FILES} images.`, "error");
+        return;
+      }
+
+      body.screenshots = [];
+      for (const f of files) {
+        if (!f) continue;
+        const dataUrl = await fileToDataURL(f);
+        if (!dataUrl) continue;
+        body.screenshots.push({ name: f.name, dataUrl });
+      }
     }
 
     const res = await fetch("/api/expenses/cash-out", {
@@ -492,8 +544,18 @@ function setupScreenshotUploadUI() {
   btn.addEventListener("click", () => input.click());
 
   input.addEventListener("change", () => {
-    const file = input.files && input.files[0];
-    nameEl.textContent = file ? file.name : "No file chosen";
+    const files = Array.from(input.files || []);
+    if (!files.length) {
+      nameEl.textContent = "No file chosen";
+      return;
+    }
+
+    if (files.length === 1) {
+      nameEl.textContent = files[0]?.name || "1 file selected";
+      return;
+    }
+
+    nameEl.textContent = `${files.length} files selected`;
   });
 }
 
@@ -569,6 +631,13 @@ async function loadExpenses() {
             return;
         }
 
+        // Last settled time (under the "Settled my account" button)
+        const lastSettledEl = document.getElementById("lastSettledTime");
+        if (lastSettledEl) {
+            const ts = formatLastSettledAt(data.lastSettledAt);
+            lastSettledEl.textContent = `Last settled time: ${ts}`;
+        }
+
         const items = data.items;
 
         // ============================
@@ -632,11 +701,7 @@ async function loadExpenses() {
                   ? `<div class="expense-person">${escapeHtml(it.from || "")} → ${escapeHtml(it.to || "")}</div>`
                   : "";
 
-                const screenshotHtml = (!isIn && it.screenshotUrl)
-                  ? `<a class="expense-screenshot-link" href="${escapeHtml(it.screenshotUrl)}" target="_blank" rel="noopener noreferrer">
-                        <img class="expense-screenshot-thumb" src="${escapeHtml(it.screenshotUrl)}" alt="Receipt screenshot" />
-                      </a>`
-                  : "";
+                const screenshotHtml = (!isIn) ? renderReceiptImagesHtml(it) : "";
 
                 html += `
                 <div class="expense-item">
@@ -806,11 +871,7 @@ function openAllExpensesModal() {
                 const line2 = (!isIn && (it.from || it.to))
                   ? `<div class="expense-person">${escapeHtml(it.from || "")} ← ${escapeHtml(it.to || "")}</div>`
                   : "";
-                const screenshotHtml = (!isIn && it.screenshotUrl)
-                  ? `<a class="expense-screenshot-link" href="${escapeHtml(it.screenshotUrl)}" target="_blank" rel="noopener noreferrer">
-                        <img class="expense-screenshot-thumb" src="${escapeHtml(it.screenshotUrl)}" alt="Receipt screenshot" />
-                      </a>`
-                  : "";
+                const screenshotHtml = (!isIn) ? renderReceiptImagesHtml(it) : "";
 
                 list.innerHTML += `
                     <div class="expense-item">
