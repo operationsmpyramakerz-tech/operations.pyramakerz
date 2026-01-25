@@ -13,6 +13,147 @@ document.addEventListener('DOMContentLoaded', () => {
   const CACHE_ALLOWED  = 'allowedPages';     // sessionStorage key
   const isMobile = () => window.innerWidth <= 768;
 
+  // =====================================================
+  // UI Redesign helpers
+  // - Sidebar tooltips when labels are hidden
+  // - Ensure every page has a main header
+  // - Convert the existing header to the new green style
+  // =====================================================
+
+  function ensureNavTooltips(){
+    document.querySelectorAll('.sidebar .nav-link').forEach((a) => {
+      try {
+        const lbl = a.querySelector('.nav-label');
+        const text = (lbl && lbl.textContent) ? String(lbl.textContent).trim() : '';
+        if (text && !a.getAttribute('title')) a.setAttribute('title', text);
+      } catch {}
+    });
+  }
+
+  function ensureMainHeaderExists(){
+    // Some pages (e.g. tasks.html) intentionally shipped without a main header.
+    // The redesign requires a consistent header on all pages.
+    if (document.querySelector('.main-header')) return;
+
+    const main = document.querySelector('.main-content');
+    if (!main) return;
+
+    const header = document.createElement('header');
+    header.className = 'main-header';
+
+    const row1 = document.createElement('div');
+    row1.className = 'header-row1';
+
+    const left = document.createElement('div');
+    left.className = 'left';
+
+    const right = document.createElement('div');
+    right.className = 'right topbar-right';
+
+    // Account shortcut (will be restyled as avatar in the green header)
+    const acc = document.createElement('a');
+    acc.className = 'account-mini';
+    acc.href = '/account';
+    acc.title = 'My account';
+    acc.setAttribute('aria-label', 'My account');
+    acc.innerHTML = `
+      <span class="ico-circle"><img src="/images/logo.png" alt="Logo" /></span>
+      <span class="label">My account</span>
+    `;
+
+    right.appendChild(acc);
+    row1.appendChild(left);
+    row1.appendChild(right);
+
+    const row2 = document.createElement('div');
+    row2.className = 'header-row2';
+    const h1 = document.createElement('h1');
+    h1.className = 'page-title';
+    h1.textContent = (document.title || 'Dashboard').trim();
+    row2.appendChild(h1);
+
+    header.appendChild(row1);
+    header.appendChild(row2);
+
+    // Insert at the top of main content
+    main.insertBefore(header, main.firstChild);
+  }
+
+  function ensureGreenHeaderLayout(){
+    const header = document.querySelector('.main-header');
+    if (!header) return;
+
+    const row1 = header.querySelector('.header-row1');
+    if (!row1) return;
+
+    const left = row1.querySelector('.left') || row1;
+    const right = row1.querySelector('.right') || row1;
+
+    // 1) Lead round button (left)
+    let lead = left.querySelector('.gh-lead-btn');
+    if (!lead) {
+      lead = document.createElement('button');
+      lead.type = 'button';
+      lead.className = 'gh-lead-btn';
+      lead.id = 'ghLeadBtn';
+      lead.setAttribute('aria-label', 'Menu');
+      lead.innerHTML = `<i data-feather="star"></i>`;
+
+      // On mobile: toggle the sidebar overlay
+      lead.addEventListener('click', (e) => {
+        if (!isMobile()) return;
+        toggleSidebar(e);
+      });
+
+      // Put it first in the left area
+      left.insertBefore(lead, left.firstChild);
+    }
+
+    // 2) Wave container (right)
+    let wave = right.querySelector('.gh-wave');
+    if (!wave) {
+      wave = document.createElement('div');
+      wave.className = 'gh-wave';
+      wave.id = 'ghWave';
+      right.insertBefore(wave, right.firstChild);
+    }
+
+    // 3) Searchbar: reuse existing if present to preserve page-specific JS
+    const existingSearch = header.querySelector('.searchbar');
+    if (existingSearch && existingSearch.parentElement !== wave) {
+      wave.insertBefore(existingSearch, wave.firstChild);
+    }
+
+    if (!wave.querySelector('.searchbar')) {
+      const sb = document.createElement('div');
+      sb.className = 'searchbar';
+      sb.id = 'ghSearchbar';
+      sb.setAttribute('role', 'search');
+      sb.innerHTML = `
+        <i data-feather="search"></i>
+        <input type="search" placeholder="SEARCH" aria-label="Search" />
+      `;
+      wave.insertBefore(sb, wave.firstChild);
+    }
+
+    // 4) Notifications: if already mounted elsewhere, move inside the wave
+    const notifWrap = header.querySelector('.notif-wrap');
+    if (notifWrap && notifWrap.parentElement !== wave) {
+      wave.appendChild(notifWrap);
+    }
+
+    // 5) Account (avatar): move inside the wave
+    const acc = header.querySelector('.account-mini');
+    if (acc && acc.parentElement !== wave) {
+      wave.appendChild(acc);
+    }
+
+    // Feather re-render for injected icons
+    if (window.feather) {
+      try { window.feather.replace(); } catch {}
+    }
+  }
+
   // ====== Sidebar Branding + Profile + Settings ======
   function ensureSidebarBranding(){
     const header = document.querySelector('.sidebar .sidebar-header');
@@ -549,6 +690,10 @@ if (document.querySelector('.sidebar')) {
   // Init
   applyInitial();
 
+  // UI Redesign: ensure header exists + convert it to the green style
+  ensureMainHeaderExists();
+  ensureGreenHeaderLayout();
+
   // لو عندك لينكات بتتعمل inject في صفحات معينة:
     // Home should appear for everyone (not tied to permissions)
   ensureLink({ href: '/home', label: 'Home', icon: 'home', prepend: true });
@@ -557,6 +702,9 @@ ensureLink({ href: '/orders/sv-orders', label: 'S.V schools orders', icon: 'awar
   ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
   ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
   ensureLink({ href: '/tasks', label: 'Tasks', icon: 'check-square' });
+
+  // UI Redesign: sidebar tooltips (labels are hidden in the new style)
+  ensureNavTooltips();
 
   ensureGreetingAndPages();
 
@@ -789,6 +937,7 @@ function initNotificationsWidget() {
   if (document.getElementById("notifBellBtn")) return;
 
   const mount =
+    document.querySelector(".main-header .gh-wave") ||
     document.querySelector(".main-header .header-row1 .right") ||
     document.querySelector(".main-header .header-row1") ||
     document.querySelector(".tasks-v2-actions") ||
@@ -838,10 +987,17 @@ function initNotificationsWidget() {
   wrap.appendChild(btn);
   wrap.appendChild(panel);
 
-  // For header right area: insert before account button
-  if (mount.classList.contains("right") || mount.classList.contains("topbar-right")) {
+  // If we have the new green wave container, place the bell between search and avatar
+  if (mount.classList && mount.classList.contains("gh-wave")) {
+    const acc = mount.querySelector('.account-mini');
+    if (acc) mount.insertBefore(wrap, acc);
+    else mount.appendChild(wrap);
+  }
+  // For legacy header right area: insert before other actions
+  else if (mount.classList && (mount.classList.contains("right") || mount.classList.contains("topbar-right"))) {
     mount.insertBefore(wrap, mount.firstChild);
-  } else {
+  }
+  else {
     mount.appendChild(wrap);
   }
 
