@@ -354,6 +354,28 @@
       transform: translateY(0px) scale(0.98);
     }
 
+    /* Last settled time text (under Settled my account) */
+    .last-settled{
+      margin-top: 0.55rem;
+      font-size: 0.9rem;
+      font-weight: 650;
+      color: rgba(255,255,255,0.85);
+      opacity: 0.95;
+    }
+
+    /* Multiple receipt thumbnails */
+    .expense-screenshots{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 0.55rem;
+    }
+    .expense-screenshots .expense-screenshot-link{ margin-top: 0; }
+    .expense-screenshots .expense-screenshot-thumb{ margin-top: 0; }
+    .expense-screenshots .expense-screenshot-link{
+      margin-top: 0; /* handled by container */
+    }
+
     /* Modern screenshot upload control */
     .upload-control{ width:100%; }
     .upload-input{
@@ -832,6 +854,9 @@
 
   <!-- Settled my account CTA -->
   <button id="settleAccountBtn" class="settle-btn" type="button">Settled my account</button>
+
+  <!-- Last settled time (filled by JS) -->
+  <div id="lastSettledTime" class="last-settled">Last settled time: —</div>
 </div>
 
 <!-- Title + View All button -->
@@ -907,7 +932,7 @@
 <div class="form-group">
   <label for="co_screenshot" class="field-label"><i data-feather="image"></i> Screenshot <span class="opt-tag">(Optional)</span></label>
   <div class="upload-control">
-    <input id="co_screenshot" class="upload-input" type="file" accept="image/*" />
+    <input id="co_screenshot" class="upload-input" type="file" accept="image/*" multiple />
     <div class="upload-row">
       <button id="co_screenshot_btn" type="button" class="upload-btn">
         <i data-feather="upload"></i>
@@ -916,7 +941,7 @@
       <span id="co_screenshot_name" class="upload-filename">No file chosen</span>
     </div>
   </div>
-  <small class="help">Upload a receipt screenshot (JPG/PNG).</small>
+  <small class="help">Upload receipt screenshots (JPG/PNG).</small>
 </div>
       
       <label class="field-label"><i data-feather="minus-circle"></i> Cash out <span class="opt-tag">(Optional)</span></label>
