@@ -845,9 +845,10 @@ app.get("/account", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "account.html"));
 });
 
-// Notifications page (in-app notification center)
+// Notifications are shown as a dropdown window (bell icon) on every page.
+// Keep this route for backward compatibility and redirect to Home.
 app.get("/notifications", requireAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "notifications.html"));
+  res.redirect("/home");
 });
 
 // Funds page
