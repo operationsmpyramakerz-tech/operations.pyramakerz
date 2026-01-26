@@ -577,11 +577,6 @@ body.sidebar-collapsed .main-content{
 }
 
 /* Search */
-/* Inline searchbar is kept in DOM for page logic, but hidden when we use the floating search. */
-body.use-floating-search .main-header .searchbar{
-  display: none !important;
-}
-
 .main-header .searchbar{
   flex: 0 1 460px;
   max-width: 560px;
@@ -595,104 +590,6 @@ body.use-floating-search .main-header .searchbar{
   background: #FFFFFF;
   box-shadow: 0 10px 24px rgba(15,23,42,0.06);
   margin: 0 !important;
-}
-
-/* Search icon (next to the bell) */
-.search-toggle-btn{
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  border: 1px solid rgba(226,232,240,0.92) !important;
-  background: #FFFFFF !important;
-  box-shadow: 0 10px 24px rgba(15,23,42,0.06);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.search-toggle-btn:hover{
-  background: rgba(15,23,42,0.03) !important;
-}
-
-.search-toggle-btn i,
-.search-toggle-btn svg{
-  width: 18px;
-  height: 18px;
-  color: #0F172A !important;
-}
-
-/* Floating search overlay */
-.floating-search{
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-}
-
-.floating-search::before{
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: transparent;
-}
-
-.floating-search__panel{
-  position: absolute;
-  left: 50%;
-  top: 80px;
-  transform: translateX(0);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 14px;
-  height: 46px;
-  border-radius: 999px;
-  border: 1px solid rgba(226,232,240,0.92);
-  background: #FFFFFF;
-  box-shadow: 0 18px 40px rgba(15,23,42,0.14);
-}
-
-.floating-search__ico,
-.floating-search__panel svg{
-  width: 18px;
-  height: 18px;
-  color: #94A3B8;
-}
-
-.floating-search__panel input{
-  width: 100%;
-  border: none !important;
-  outline: none !important;
-  background: transparent !important;
-  font-size: 14px;
-  color: #0F172A;
-}
-
-.floating-search__panel input::placeholder{
-  color: #9CA3AF;
-  font-weight: 600;
-}
-
-.floating-search__close{
-  border: none !important;
-  background: transparent !important;
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.floating-search__close:hover{
-  background: rgba(15,23,42,0.05) !important;
-}
-
-.floating-search__close svg{
-  width: 18px;
-  height: 18px;
-  color: #0F172A;
 }
 
 .main-header .searchbar i,
@@ -952,4 +849,59 @@ body.use-floating-search .main-header .searchbar{
 
 @media (max-width: 480px){
   .notif-panel{ width: 92vw; }
+}
+
+
+/* --------------------------------------------
+   Search icon button + floating search bar
+   -------------------------------------------- */
+.search-icon-btn{
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px; /* circular */
+  border: 1px solid rgba(0,0,0,0.06);
+  background: #fff;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.search-icon-btn .search-icon-svg{
+  display: block;
+  color: #0f172a;
+}
+
+.search-icon-btn:active{
+  transform: translateY(1px);
+}
+
+.floating-search-panel{
+  min-width: 320px;
+  max-width: 520px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.18);
+  backdrop-filter: blur(12px);
+}
+
+.floating-search-inner{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.9);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+.floating-search-inner input{
+  border: none;
+  outline: none;
+  width: 100%;
+  font-size: 14px;
+  background: transparent;
 }
