@@ -372,17 +372,10 @@ body.sidebar-collapsed .main-content{
   border-radius: 999px !important;
   gap: 10px !important;
 }
-.gh-wave .searchbar i{ display: none !important; }
-
-/* Reference UI shows a small white dot at the left of the search segment */
-.gh-wave .searchbar::before{
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.95);
-  flex: 0 0 auto;
-  box-shadow: 0 0 0 4px rgba(255,255,255,0.08);
+.gh-wave .searchbar i,
+.gh-wave .searchbar svg{
+  display: inline-flex !important;
+  color: rgba(255,255,255,0.92) !important;
 }
 .gh-wave .searchbar input{
   color: rgba(255,255,255,0.92) !important;
