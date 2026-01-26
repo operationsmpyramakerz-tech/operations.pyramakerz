@@ -1291,8 +1291,13 @@ function initFloatingSearchWidget() {
   btn.className = "search-icon-btn";
   btn.setAttribute("aria-label", "Search");
   btn.style.color = "#1f2d4d";
-  btn.innerHTML = '<i data-feather="search" aria-hidden="true"></i>';
-  if (window.feather) { try { window.feather.replace(); } catch {} }
+  // Use the SAME icon used inside the floating searchbar (SVG) so it always renders.
+  btn.innerHTML = `
+    <svg class="search-icon-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" role="img">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.5" fill="none" />
+      <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+    </svg>
+  `;
   document.body.classList.add("has-floating-search");
 
   // Panel (portal)
