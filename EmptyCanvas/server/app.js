@@ -845,6 +845,11 @@ app.get("/account", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "account.html"));
 });
 
+// How it works (help page — available for all authenticated users)
+app.get("/how-it-works", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "how-it-works.html"));
+});
+
 // Notifications are shown as a dropdown window (bell icon) on every page.
 // Keep this route for backward compatibility and redirect to Home.
 app.get("/notifications", requireAuth, (req, res) => {
