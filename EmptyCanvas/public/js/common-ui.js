@@ -110,12 +110,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const pageTitleText = (pageTitleEl && pageTitleEl.textContent) ? String(pageTitleEl.textContent).trim() : (document.title || 'Dashboard').trim();
 
     // Ensure left title exists
+    // ✅ Requirement: "ال logo icon ... تكون شمال العنوان مش يمين"
+    // We want the header logo button (#menu-toggle) to appear BEFORE the title.
     let dashTitle = left.querySelector('.dash-title');
+    const menuBtn = left.querySelector('#menu-toggle');
+
     if (!dashTitle) {
       dashTitle = document.createElement('div');
       dashTitle.className = 'dash-title';
-      left.insertBefore(dashTitle, left.firstChild);
+
+      // If the logo toggle exists, insert the title after it.
+      if (menuBtn && menuBtn.parentElement === left) {
+        left.insertBefore(dashTitle, menuBtn.nextSibling);
+      } else {
+        left.insertBefore(dashTitle, left.firstChild);
+      }
     }
+
+    // Enforce final order: [menu-toggle] [title] [search]
+    if (menuBtn && menuBtn.parentElement === left && dashTitle && dashTitle.parentElement === left) {
+      if (menuBtn.nextSibling !== dashTitle) {
+        left.insertBefore(menuBtn, dashTitle);
+      }
+    }
+
     dashTitle.textContent = pageTitleText || 'Dashboard';
 
     // Hide the old greeting pill (kept in DOM for old pages, but not part of the new header)
@@ -214,36 +232,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const sidebar = document.querySelector('.sidebar');
     if (!sidebar) return null;
 
-    let profile = sidebar.querySelector('.sidebar-profile');
-    if (profile) return profile;
-
-    const nav = sidebar.querySelector('.sidebar-nav');
-    if (!nav) return null;
-
-    profile = document.createElement('div');
-    profile.className = 'sidebar-profile';
-    // NOTE: The avatar is intentionally a BUTTON.
-    // The user asked for “مكان الصورة يكون زرار يفتح/يقفل الداشبورد”.
-    profile.innerHTML = `
-      <button type="button" class="sidebar-profile__avatar sidebar-profile__toggle" aria-label="Toggle dashboard" title="Toggle dashboard">
-        <img class="sidebar-profile__img" alt="Profile photo" loading="lazy" />
-        <div class="sidebar-profile__fallback" aria-hidden="true"></div>
-      </button>
-      <div class="sidebar-profile__meta">
-        <div class="sidebar-profile__name" data-sidebar-name>...</div>
-        <div class="sidebar-profile__role" data-sidebar-role></div>
-      </div>
-    `;
-
-    sidebar.insertBefore(profile, nav);
-
-    // Bind dashboard toggle on the avatar button (once).
-    const toggleBtn = profile.querySelector('.sidebar-profile__toggle');
-    if (toggleBtn && !toggleBtn.dataset.boundToggle) {
-      toggleBtn.dataset.boundToggle = '1';
-      toggleBtn.addEventListener('click', toggleSidebar);
-    }
-    return profile;
+    // ✅ New requirement:
+    // "عاوز اشيل الصورة اللي في ال sidebar خالص"
+    // We intentionally do NOT inject the sidebar profile/avatar anymore.
+    // If an older build injected it before, remove it.
+    try {
+      const existing = sidebar.querySelector('.sidebar-profile');
+      if (existing) existing.remove();
+    } catch {}
+    return null;
   }
 
   function initialsFromName(name){
