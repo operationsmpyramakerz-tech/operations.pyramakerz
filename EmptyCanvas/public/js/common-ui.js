@@ -1269,6 +1269,7 @@ function initFloatingSearchWidget() {
       <path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
     </svg>
   `;
+  document.body.classList.add("has-floating-search");
 
   // Panel (portal)
   let panel = document.getElementById("floatingSearchPanel");
