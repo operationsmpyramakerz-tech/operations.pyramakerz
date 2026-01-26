@@ -853,18 +853,23 @@ body.has-floating-search .main-header .searchbar{
    Search icon button + floating search bar
    -------------------------------------------- */
 .search-icon-btn{
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 9999px; /* circular */
   border: none;
   background: #fff;
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.18);
+  /* Reference style: white circular button with a soft drop shadow */
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   color: #1f2d4d;
   transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.search-icon-btn:hover{
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.20);
 }
 
 .search-icon-btn .search-icon-svg{
@@ -882,6 +887,7 @@ body.has-floating-search .main-header .searchbar{
 
 .search-icon-btn:active{
   transform: translateY(1px);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.18);
 }
 
 .floating-search-panel{
@@ -911,4 +917,85 @@ body.has-floating-search .main-header .searchbar{
   width: 100%;
   font-size: 14px;
   background: transparent;
+}
+
+
+/* --------------------------------------------
+   User dropdown (avatar → drop window)
+   Matches the reference card menu style.
+   -------------------------------------------- */
+.user-menu-panel--portal{
+  position: fixed !important;
+  z-index: 999999 !important;
+}
+
+.user-menu-panel{
+  width: 290px;
+  max-width: calc(100vw - 28px);
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.user-menu-shell{
+  background: #FFFFFF;
+  border-radius: 28px;
+  padding: 14px;
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 26px 70px rgba(15, 23, 42, 0.18);
+}
+
+.user-menu-item{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #0F172A;
+  font-weight: 800;
+  font-size: 14px;
+  text-align: left;
+}
+
+.user-menu-item:hover{
+  background: rgba(15,23,42,0.05);
+}
+
+.user-menu-item.is-highlight{
+  background: rgba(15,23,42,0.06);
+}
+
+.user-menu-item .umi-ico{
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(243,244,246,0.95);
+  color: #6B7280;
+  flex: 0 0 auto;
+}
+
+.user-menu-item .umi-label{
+  flex: 1 1 auto;
+}
+
+.user-menu-item .umi-tail{
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: #9CA3AF;
+  flex: 0 0 auto;
+}
+
+.user-menu-sep{
+  height: 1px;
+  background: rgba(226,232,240,0.85);
+  margin: 10px 8px;
 }
