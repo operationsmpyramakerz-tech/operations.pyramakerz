@@ -73,6 +73,11 @@ body{
     left: 14px !important;
     bottom: 14px !important;
   }
+
+
+  /* Keep the same gap on smaller desktop widths (match app-container padding: 14px) */
+  .main-content{ margin-left: calc(88px + 14px) !important; }
+
 }
 
 /* ---------- Sidebar ---------- */
@@ -247,7 +252,7 @@ body.sidebar-collapsed .sidebar{
 .main-content{
   padding-left: 0 !important;
   /* Leave room for the fixed sidebar (reduce the left gap a bit) */
-  margin-left: calc(88px + 5px) !important;
+  margin-left: calc(88px + 18px) !important;
   transition: margin-left .25s ease;
   background: var(--ui-surface);
   border-radius: var(--ui-radius-main);

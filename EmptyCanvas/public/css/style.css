@@ -969,7 +969,7 @@ body.co-modal-open{ overflow: hidden; }
 }
 @media (min-width: 769px){
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed); }
-  body.sidebar-mini .main-content { padding-left: var(--aside-w-collapsed); }
+  body.sidebar-mini .main-content { padding-left: 0; }
 
   body.sidebar-mini .sidebar-header h2 { display: none; }
   body.sidebar-mini .nav-label { display: none; }
@@ -1344,7 +1344,7 @@ body.sidebar-collapsed .main-content { padding-left: 0 !important; }
 /* Desktop: reserve only the mini-rail width (+ the 14px inset on each side = 28px)
    so the sidebar can expand as an overlay without pushing the content. */
 @media (min-width: 769px){
-  .main-content { padding-left: calc(var(--aside-w-collapsed) + 0px) !important; }
+  .main-content { padding-left: 0 !important; }
 }
 
 @media (min-width: 769px){
@@ -2066,7 +2066,7 @@ button.is-auto-busy::after {
 /* وضع mini على الديسكتوب */
 @media (min-width: 769px) {
   body.sidebar-mini .sidebar { width: var(--aside-w-collapsed) !important; }
-  body.sidebar-mini .main-content { padding-left: var(--aside-w-collapsed) !important; }
+  body.sidebar-mini .main-content { padding-left: 0 !important; }
 
   body.sidebar-mini .sidebar-header h2 { display: none; }
   body.sidebar-mini .nav-label { display: none !important; }
@@ -3536,7 +3536,7 @@ aside.sidebar {
 
   body:not(.sidebar-mini):not(.sidebar-collapsed) aside.sidebar + .main-content,
   body.sidebar-mini:not(.sidebar-collapsed) aside.sidebar + .main-content {
-    padding-left: calc(var(--aside-w-collapsed) + 0px) !important;
+    padding-left: 0 !important;
   }
 }
 
