@@ -803,144 +803,6 @@ if (document.querySelector('.sidebar')) {
   ensureMainHeaderExists();
   ensureDashboardHeaderLayout();
 
-  // UI Redesign: floating search (search icon next to the bell)
-  ;(function initFloatingSearch(){
-    try {
-      // Mark body so CSS can hide the inline searchbar (we'll use a floating one).
-      document.body.classList.add('use-floating-search');
-
-      const header = document.querySelector('.main-header');
-      if (!header) return;
-
-      const right = header.querySelector('.header-row1 .right') || header.querySelector('.topbar-right');
-      if (!right) return;
-
-      // Find the existing page search input (each page has its own id like #homeSearch, #ordersSearch ...)
-      const targetInput = header.querySelector('.searchbar input') || document.querySelector('.searchbar input');
-
-      // Create the search icon button
-      let btn = document.getElementById('searchToggleBtn');
-      if (!btn) {
-        btn = document.createElement('button');
-        btn.type = 'button';
-        btn.id = 'searchToggleBtn';
-        btn.className = 'search-toggle-btn';
-        btn.setAttribute('aria-label', 'Search');
-        btn.innerHTML = `<i data-feather="search"></i>`;
-
-        // Put it right before the notification bell if present
-        const bell = right.querySelector('#notifBellBtn') || right.querySelector('.notif-wrap') || null;
-        if (bell) right.insertBefore(btn, bell);
-        else right.prepend(btn);
-      }
-
-      // Build overlay
-      let overlay = document.getElementById('floatingSearchOverlay');
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'floatingSearchOverlay';
-        overlay.className = 'floating-search';
-        overlay.hidden = true;
-        overlay.innerHTML = `
-          <div class="floating-search__panel" role="dialog" aria-modal="false" aria-label="Search">
-            <i class="floating-search__ico" data-feather="search"></i>
-            <input id="floatingSearchInput" type="search" autocomplete="off" placeholder="Search" aria-label="Search" />
-            <button type="button" class="floating-search__close" aria-label="Close search"><i data-feather="x"></i></button>
-          </div>
-        `;
-        document.body.appendChild(overlay);
-      }
-
-      const panel = overlay.querySelector('.floating-search__panel');
-      const input = overlay.querySelector('#floatingSearchInput');
-      const closeBtn = overlay.querySelector('.floating-search__close');
-
-      function position(){
-        if (!panel || overlay.hidden) return;
-        const r = btn.getBoundingClientRect();
-        const pad = 12;
-        const vw = window.innerWidth;
-        const panelW = Math.min(560, vw - pad*2);
-        // Align panel to the right edge of the icon group
-        const rightEdge = Math.min(vw - pad, r.right + 6);
-        const left = Math.max(pad, rightEdge - panelW);
-        const top = Math.min(window.innerHeight - 80, r.bottom + 14);
-        panel.style.width = panelW + 'px';
-        panel.style.left = left + 'px';
-        panel.style.top = top + 'px';
-      }
-
-      function open(){
-        overlay.hidden = false;
-        overlay.classList.add('is-open');
-        // Sync placeholder/value from the page searchbar
-        try {
-          const ph = targetInput?.getAttribute('placeholder') || 'Search';
-          input.setAttribute('placeholder', ph);
-          input.value = targetInput?.value || '';
-        } catch {}
-        position();
-        requestAnimationFrame(() => { try { input.focus(); input.select(); } catch {} });
-      }
-
-      function close(){
-        overlay.classList.remove('is-open');
-        overlay.hidden = true;
-      }
-
-      function toggle(){
-        if (overlay.hidden) open();
-        else close();
-      }
-
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        toggle();
-      });
-
-      closeBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        close();
-      });
-
-      // Forward text to the page search input so existing page logic keeps working
-      input?.addEventListener('input', () => {
-        if (!targetInput) return;
-        targetInput.value = input.value;
-        try { targetInput.dispatchEvent(new Event('input', { bubbles: true })); } catch {}
-      });
-
-      // Close when clicking outside
-      const outsideClose = (e) => {
-        if (!panel) return;
-        if (!panel.contains(e.target)) close();
-      };
-      overlay.addEventListener('mousedown', outsideClose);
-      overlay.addEventListener('click', outsideClose);
-
-      // ESC to close
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !overlay.hidden) close();
-      });
-
-      // Reposition on resize/scroll
-      let raf = 0;
-      const schedulePos = () => {
-        if (raf) cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(position);
-      };
-      window.addEventListener('resize', schedulePos);
-      window.addEventListener('scroll', schedulePos, true);
-
-      if (window.feather) feather.replace();
-    } catch (e) {
-      // keep UI working even if search overlay fails
-      console.warn('[floating-search] init failed', e);
-    }
-  })();
-
   // لو عندك لينكات بتتعمل inject في صفحات معينة:
     // Home should appear for everyone (not tied to permissions)
   ensureLink({ href: '/home', label: 'Home', icon: 'home', prepend: true });
@@ -1177,6 +1039,12 @@ document.addEventListener("DOMContentLoaded", () => {
   } catch (e) {
     console.warn("[notifications] init failed", e);
   }
+
+  try {
+    initFloatingSearchWidget();
+  } catch (e) {
+    console.warn("[search] init failed", e);
+  }
 });
 
 function initNotificationsWidget() {
@@ -1358,6 +1226,116 @@ function initNotificationsWidget() {
   refreshNotifications(false);
   setInterval(() => refreshNotifications(false), 60 * 1000);
 }
+
+
+// --------------------------------------------
+// Floating Search (icon next to bell)
+// --------------------------------------------
+function initFloatingSearchWidget() {
+  // Avoid duplicates
+  let btn =
+    document.getElementById("searchIconBtn") ||
+    document.getElementById("headerSearchBtn") ||
+    document.querySelector(".search-icon-btn");
+
+  const mount =
+    document.querySelector(".main-header .header-row1 .right") ||
+    document.querySelector(".main-header .header-row1") ||
+    document.querySelector(".tasks-v2-actions") ||
+    null;
+
+  if (!mount) return;
+
+  // Create button if needed
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "searchIconBtn";
+    // Insert before bell if exists, otherwise prepend
+    const bell = document.getElementById("notifBellBtn") || mount.querySelector(".notif-bell-btn");
+    if (bell && bell.parentElement === mount) {
+      mount.insertBefore(btn, bell);
+    } else {
+      mount.insertBefore(btn, mount.firstChild);
+    }
+  }
+
+  // Enforce style + icon (fix: icon sometimes not visible due to missing feather replace)
+  btn.className = "search-icon-btn";
+  btn.setAttribute("aria-label", "Search");
+  btn.innerHTML = `
+    <svg class="search-icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/>
+      <path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  `;
+
+  // Panel (portal)
+  let panel = document.getElementById("floatingSearchPanel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "floatingSearchPanel";
+    panel.className = "floating-search-panel";
+    panel.hidden = true;
+    panel.innerHTML = `
+      <div class="floating-search-inner">
+        <svg class="search-icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/>
+          <path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <input id="floatingSearchInput" type="search" placeholder="Search" aria-label="Search" />
+      </div>
+    `;
+    document.body.appendChild(panel);
+  }
+
+  const input = panel.querySelector("#floatingSearchInput");
+
+  function positionPanel() {
+    const r = btn.getBoundingClientRect();
+    // Place below the header, aligned with the button
+    const top = Math.max(12, r.bottom + 10);
+    const right = Math.max(12, window.innerWidth - r.right);
+    panel.style.position = "fixed";
+    panel.style.top = `${top}px`;
+    panel.style.right = `${right}px`;
+    panel.style.zIndex = "999999";
+  }
+
+  function openPanel() {
+    positionPanel();
+    panel.hidden = false;
+    setTimeout(() => { try { input && input.focus(); } catch {} }, 0);
+  }
+
+  function closePanel() {
+    panel.hidden = true;
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (panel.hidden) openPanel();
+    else closePanel();
+  });
+
+  // Close on outside click / ESC
+  document.addEventListener("click", (e) => {
+    if (panel.hidden) return;
+    if (panel.contains(e.target) || btn.contains(e.target)) return;
+    closePanel();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closePanel();
+  });
+
+  window.addEventListener("resize", () => {
+    if (!panel.hidden) positionPanel();
+  });
+}
+
+
 
 function getNotifState(){
   if (!window.__notifWidgetState) {
