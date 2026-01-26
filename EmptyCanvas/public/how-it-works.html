@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#ffffff" />
+
+  <link rel="icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <script src="/pwa-register.js" defer></script>
+
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+  <title>How it works</title>
+
+  <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
+  <style>
+    body.permissions-loading .sidebar li { display: none !important; }
+  </style>
+
+  <link href="/css/style.css" rel="stylesheet" />
+  <link href="/css/ui-redesign.css" rel="stylesheet" />
+  <script src="https://unpkg.com/feather-icons"></script>
+</head>
+
+<body class="permissions-loading">
+  <script>
+    (function() {
+      try {
+        if (window.innerWidth > 768 && localStorage.getItem('ui.sidebarMini') === '1') {
+          document.body.classList.add('sidebar-mini');
+        }
+      } catch(e) {}
+    })();
+  </script>
+
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Dashboard</h2>
+        <button aria-expanded="true" aria-label="Toggle sidebar" class="sidebar-toggle" id="sidebar-toggle">
+          <i data-feather="chevrons-left"></i>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav">
+        <ul class="nav-list">
+          <li><a class="nav-link" href="/home"><i data-feather="home"></i><span class="nav-label">Home</span></a></li>
+          <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
+          <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
+          <li><a class="nav-link" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+          <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
+          <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+          <li><a class="nav-link" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
+          <li><a class="nav-link" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses Users</span></a></li>
+          <li><a class="nav-link" href="/b2b"><i data-feather="folder"></i><span class="nav-label">B2B</span></a></li>
+          <li><a class="nav-link" href="/tasks"><i data-feather="check-square"></i><span class="nav-label">Tasks</span></a></li>
+        </ul>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="logout-btn" id="logoutBtn"><i data-feather="log-out"></i> Logout</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="main-header">
+        <div class="header-row1">
+          <div class="left">
+            <div class="greeting-pill" aria-live="polite">
+              <span class="greeting-avatar">
+                <img src="/images/greeting-icon.png" alt="Hi icon" />
+              </span>
+              <div class="greet-text">
+                <div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
+                <div class="greet-sub">Quick guide</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="right topbar-right">
+            <a class="account-mini" href="/account" title="My account" aria-label="My account">
+              <span class="ico-circle"><img src="/images/logo.png" alt="Logo" /></span>
+              <span class="label">My account</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="header-row2">
+          <h1 class="page-title">How it works</h1>
+        </div>
+      </header>
+
+      <main class="container-full-width">
+        <section class="card" aria-label="How it works">
+          <div style="max-width: 860px;">
+            <h2 style="margin-top: 0;">How it works</h2>
+            <p style="margin-top: 0.35rem; color: #475569; line-height: 1.65;">
+              This dashboard is connected to your Notion databases and shows your day-to-day operations in one place.
+              Use the left sidebar to navigate between pages (Orders, Tasks, Expenses, etc.).
+            </p>
+
+            <div style="display: grid; gap: 12px; margin-top: 16px;">
+              <div style="padding: 14px; border-radius: 16px; background: rgba(15,23,42,0.03); border: 1px solid rgba(0,0,0,0.06);">
+                <strong>Search</strong>
+                <div style="color:#475569; margin-top: 6px; line-height:1.6;">
+                  Use the circular <strong>Search</strong> button in the top-right to open the quick search box.
+                </div>
+              </div>
+
+              <div style="padding: 14px; border-radius: 16px; background: rgba(15,23,42,0.03); border: 1px solid rgba(0,0,0,0.06);">
+                <strong>Notifications</strong>
+                <div style="color:#475569; margin-top: 6px; line-height:1.6;">
+                  Click the bell icon to view your latest notifications.
+                </div>
+              </div>
+
+              <div style="padding: 14px; border-radius: 16px; background: rgba(15,23,42,0.03); border: 1px solid rgba(0,0,0,0.06);">
+                <strong>Profile menu</strong>
+                <div style="color:#475569; margin-top: 6px; line-height:1.6;">
+                  Click your avatar (top-right) to open the profile menu where you can open <strong>My profile</strong> or <strong>Log out</strong>.
+                </div>
+              </div>
+            </div>
+
+            <p style="margin-top: 18px; color:#475569;">
+              If you'd like this page to include a full guide with screenshots, tell me what you want to explain and I’ll write it in the same style.
+            </p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>feather.replace();</script>
+  <script src="/js/common-ui.js"></script>
+</body>
+</html>
