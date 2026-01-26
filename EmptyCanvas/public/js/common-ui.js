@@ -1267,7 +1267,7 @@ function initFloatingSearchWidget() {
   btn.innerHTML = `
     <svg class="search-icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="#0f172a" stroke-width="2"/>
-      <path d="M16.5 16.5 21 21" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/>
+      <path d="M16.5 16.5 21 21" stroke="#000000" stroke-width="2" stroke-linecap="round"/>
     </svg>
   `;
   document.body.classList.add("has-floating-search");
@@ -1283,7 +1283,7 @@ function initFloatingSearchWidget() {
       <div class="floating-search-inner">
         <svg class="search-icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="#0f172a" stroke-width="2"/>
-          <path d="M16.5 16.5 21 21" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/>
+          <path d="M16.5 16.5 21 21" stroke="#000000" stroke-width="2" stroke-linecap="round"/>
         </svg>
         <input id="floatingSearchInput" type="search" placeholder="Search" aria-label="Search" />
       </div>
