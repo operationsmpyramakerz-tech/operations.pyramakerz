@@ -17,7 +17,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let menuToggle    = null;     // injected on mobile
   let sidebarToggle = document.getElementById('sidebar-toggle');  // removed (logo is the toggle now)
 
-  const KEY_MINI       = 'ui.sidebarMini';   // 1 = mini على الديسكتوب
+  const KEY_MINI       = 'ui.sidebarMini';   // 1 = mini على الديسكتوب (legacy)
+  const KEY_COLLAPSED  = 'ui.sidebarCollapsed'; // 1 = dashboard مغلق (drawer)
   const CACHE_ALLOWED  = 'allowedPages';     // sessionStorage key
   const isMobile = () => window.innerWidth <= 768;
 
@@ -221,11 +222,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     profile = document.createElement('div');
     profile.className = 'sidebar-profile';
+    // NOTE: The avatar is intentionally a BUTTON.
+    // The user asked for “مكان الصورة يكون زرار يفتح/يقفل الداشبورد”.
     profile.innerHTML = `
-      <div class="sidebar-profile__avatar">
+      <button type="button" class="sidebar-profile__avatar sidebar-profile__toggle" aria-label="Toggle dashboard" title="Toggle dashboard">
         <img class="sidebar-profile__img" alt="Profile photo" loading="lazy" />
         <div class="sidebar-profile__fallback" aria-hidden="true"></div>
-      </div>
+      </button>
       <div class="sidebar-profile__meta">
         <div class="sidebar-profile__name" data-sidebar-name>...</div>
         <div class="sidebar-profile__role" data-sidebar-role></div>
@@ -233,6 +236,13 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
 
     sidebar.insertBefore(profile, nav);
+
+    // Bind dashboard toggle on the avatar button (once).
+    const toggleBtn = profile.querySelector('.sidebar-profile__toggle');
+    if (toggleBtn && !toggleBtn.dataset.boundToggle) {
+      toggleBtn.dataset.boundToggle = '1';
+      toggleBtn.addEventListener('click', toggleSidebar);
+    }
     return profile;
   }
 
@@ -666,45 +676,82 @@ if (document.querySelector('.sidebar')) {
 
   // ====== Sidebar toggle ======
   function setAria(){
-    const expanded = isMobile()
-      ? !document.body.classList.contains('sidebar-collapsed')
-      : !document.body.classList.contains('sidebar-mini');
+    const expanded = !document.body.classList.contains('sidebar-collapsed');
     const sidebarLogoToggle = document.getElementById('sidebar-logo-toggle');
-    [menuToggle, sidebarLogoToggle].forEach(btn => btn && btn.setAttribute('aria-expanded', String(!!expanded)));
+    const profileToggle = document.querySelector('.sidebar-profile__toggle');
+    [menuToggle, sidebarLogoToggle, profileToggle]
+      .forEach(btn => btn && btn.setAttribute('aria-expanded', String(!!expanded)));
   }
 
   function applyInitial(){
-    if (isMobile()){
-      document.body.classList.remove('sidebar-mini');
-      // على الموبايل: السايدبار يكون مقفول افتراضياً (overlay)
-      // ويفتح فوق المحتوى بدون ما يزق الصفحة.
+    // We no longer rely on "sidebar-mini" for the dashboard toggle.
+    // The user wants open/close (drawer) behavior.
+    document.body.classList.remove('sidebar-mini');
+
+    if (isMobile()) {
+      // Mobile: closed by default (overlay drawer)
       document.body.classList.add('sidebar-collapsed');
     } else {
-      const pref = localStorage.getItem(KEY_MINI);
-      if (pref === '1') document.body.classList.add('sidebar-mini');
-      else document.body.classList.remove('sidebar-mini');
-      document.body.classList.remove('sidebar-collapsed');
+      // Desktop: read persisted preference (optional)
+      let pref = '0';
+      try { pref = String(localStorage.getItem(KEY_COLLAPSED) || '0'); } catch {}
+      if (pref === '1') document.body.classList.add('sidebar-collapsed');
+      else document.body.classList.remove('sidebar-collapsed');
     }
     setAria();
+  }
+
+  function scrollPageToTop(){
+    // User request: when the dashboard opens, jump to the start of the page content.
+    try {
+      // Prefer window scroll (the page itself scrolls)
+      if (typeof window.scrollTo === 'function') {
+        window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo(0, 0);
+      }
+    } catch {
+      try { window.scrollTo(0, 0); } catch {}
+    }
+
+    // Also reset inner scroll containers if any page uses them.
+    try {
+      const main = document.querySelector('.main-content');
+      if (main && typeof main.scrollTo === 'function') {
+        main.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+      }
+    } catch {}
   }
 
   function toggleSidebar(e){
     if (e){ e.preventDefault(); e.stopPropagation(); }
-    if (isMobile()){
-      document.body.classList.toggle('sidebar-collapsed');
-    } else {
-      document.body.classList.toggle('sidebar-mini');
-      localStorage.setItem(KEY_MINI, document.body.classList.contains('sidebar-mini') ? '1' : '0');
+    const wasCollapsed = document.body.classList.contains('sidebar-collapsed');
+    document.body.classList.toggle('sidebar-collapsed');
+    const isCollapsed = document.body.classList.contains('sidebar-collapsed');
+
+    // Persist on desktop only (mobile always starts collapsed)
+    if (!isMobile()) {
+      try { localStorage.setItem(KEY_COLLAPSED, isCollapsed ? '1' : '0'); } catch {}
     }
+
+    // Cleanup legacy state
+    document.body.classList.remove('sidebar-mini');
+    try { localStorage.removeItem(KEY_MINI); } catch {}
+
     setAria();
     if (window.feather) feather.replace();
+
+    // When opening: move user to top
+    if (wasCollapsed && !isCollapsed) {
+      scrollPageToTop();
+    }
   }
 
   menuToggle    && menuToggle.addEventListener('click', toggleSidebar);
 
   // ✅ Requested: close the dashboard when clicking outside it
   // - Mobile: closes the overlay sidebar
-  // - Desktop: collapses to mini sidebar
+  // - Desktop: closes the drawer
   document.addEventListener('click', (event) => {
     const insideSidebar = event.target.closest('.sidebar');
     const onToggles = event.target.closest('#menu-toggle') || event.target.closest('#sidebar-logo-toggle');
@@ -718,16 +765,22 @@ if (document.querySelector('.sidebar')) {
       return;
     }
 
-    // Desktop: collapse only if currently expanded
-    if (document.body.classList.contains('sidebar-mini')) return;
-    document.body.classList.add('sidebar-mini');
-    try { localStorage.setItem(KEY_MINI, '1'); } catch {}
+    // Desktop: close only if currently open
+    if (document.body.classList.contains('sidebar-collapsed')) return;
+    document.body.classList.add('sidebar-collapsed');
+    try { localStorage.setItem(KEY_COLLAPSED, '1'); } catch {}
+    // Cleanup legacy key
+    try { localStorage.removeItem(KEY_MINI); } catch {}
     setAria();
   });
 
   document.addEventListener('keydown', (e) => {
-    if (isMobile() && e.key === 'Escape' && !document.body.classList.contains('sidebar-collapsed')) {
+    if (e.key === 'Escape' && !document.body.classList.contains('sidebar-collapsed')) {
       document.body.classList.add('sidebar-collapsed');
+      if (!isMobile()) {
+        try { localStorage.setItem(KEY_COLLAPSED, '1'); } catch {}
+        try { localStorage.removeItem(KEY_MINI); } catch {}
+      }
       setAria();
     }
   });
@@ -738,7 +791,11 @@ if (document.querySelector('.sidebar')) {
     e.stopPropagation();
     try { await fetch('/api/logout', { method: 'POST', credentials: 'include' }); } catch(e) {}
     try { sessionStorage.clear(); } catch {}
-    try { localStorage.removeItem(KEY_MINI); localStorage.removeItem('username'); } catch {}
+    try {
+      localStorage.removeItem(KEY_MINI);
+      localStorage.removeItem(KEY_COLLAPSED);
+      localStorage.removeItem('username');
+    } catch {}
     window.location.href = '/login';
   });
 
