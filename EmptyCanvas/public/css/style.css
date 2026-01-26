@@ -3536,7 +3536,7 @@ aside.sidebar {
 
   body:not(.sidebar-mini):not(.sidebar-collapsed) aside.sidebar + .main-content,
   body.sidebar-mini:not(.sidebar-collapsed) aside.sidebar + .main-content {
-    padding-left: calc(var(--aside-w-collapsed) + 5px) !important;
+    padding-left: calc(var(--aside-w-collapsed) + 0px) !important;
   }
 }
 
