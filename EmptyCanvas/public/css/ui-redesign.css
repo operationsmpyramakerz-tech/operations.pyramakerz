@@ -58,20 +58,38 @@ body{
     border-radius: 0;
     padding: 14px;
   }
+
+  /* keep sidebar aligned with the edge padding on smaller screens */
+  .sidebar{
+    top: 14px !important;
+    left: 14px !important;
+    bottom: 14px !important;
+  }
 }
 
 /* ---------- Sidebar ---------- */
 .sidebar{
-  position: relative !important;
-  top: auto !important;
-  left: auto !important;
-  bottom: auto !important;
+  /* Fixed dashboard like the old layout: sidebar doesn't grow with page height */
+  position: fixed !important;
+  /* Align inside the centered shell (.app-container: max-width 1400, margin-top 22, padding 18) */
+  top: calc(22px + 18px) !important;
+  bottom: calc(22px + 18px) !important;
+  left: max(18px, calc(50% - 700px + 18px)) !important;
+
   width: 88px !important;
   border-radius: var(--ui-radius-side) !important;
   background: var(--ui-sidebar) !important;
   border: none !important;
   box-shadow: var(--ui-shadow-hard) !important;
   overflow: hidden;
+
+  /* Smooth open/close */
+  transition: transform .25s ease, opacity .25s ease;
+}
+
+/* When dashboard is closed */
+body.sidebar-collapsed .sidebar{
+  transform: translateX(calc(-100% - 24px)) !important;
 }
 
 /* Sidebar header: keep it minimal */
@@ -108,7 +126,22 @@ body{
   justify-content: center !important;
 }
 .sidebar-profile__meta{ display: none !important; }
-.sidebar-profile__avatar{ width: 44px; height: 44px; border-radius: 18px !important; }
+.sidebar-profile__avatar{
+  width: 44px;
+  height: 44px;
+  border-radius: 18px !important;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-profile__avatar:focus-visible{
+  outline: 2px solid rgba(255,255,255,0.35);
+  outline-offset: 3px;
+}
 
 .sidebar-nav{
   padding: 8px 10px 12px !important;
@@ -161,6 +194,9 @@ body{
 /* ---------- Main content surface ---------- */
 .main-content{
   padding-left: 0 !important;
+  /* Leave room for the fixed sidebar */
+  margin-left: calc(88px + 18px) !important;
+  transition: margin-left .25s ease;
   background: var(--ui-surface);
   border-radius: var(--ui-radius-main);
   overflow: hidden;
@@ -168,6 +204,10 @@ body{
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+body.sidebar-collapsed .main-content{
+  margin-left: 0 !important;
 }
 
 /* ---------- Header redesign ---------- */
@@ -425,11 +465,18 @@ body{
   }
 
   /* main content should fill under the shell padding */
-  .main-content{ border-radius: 26px; }
+  .main-content{ border-radius: 26px; margin-left: 0 !important; }
 
   .gh-wave{
     width: 100%;
     max-width: 100%;
+  }
+}
+
+/* Desktop: show the menu toggle only when the sidebar is closed, so it can be reopened */
+@media (min-width: 769px){
+  body.sidebar-collapsed #menu-toggle{
+    display: inline-flex !important;
   }
 }
 
