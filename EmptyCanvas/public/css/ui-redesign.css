@@ -863,11 +863,18 @@ body.has-floating-search .main-header .searchbar{
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  color: #0f172a;
 }
 
 .search-icon-btn .search-icon-svg{
   display: block;
-  color: #0f172a;
+  color: inherit;
+  stroke: currentColor;
+  fill: none;
+}
+
+.search-icon-btn .search-icon-svg path{
+  stroke: currentColor;
 }
 
 .search-icon-btn:active{
