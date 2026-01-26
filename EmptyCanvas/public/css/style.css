@@ -3529,8 +3529,13 @@ aside.sidebar {
 }
 
 @media (min-width: 769px){
-  body:not(.sidebar-mini) aside.sidebar + .main-content,
-  body.sidebar-mini aside.sidebar + .main-content {
+  /* When the sidebar is hidden, do NOT reserve left space */
+  body.sidebar-collapsed aside.sidebar + .main-content{
+    padding-left: 0 !important;
+  }
+
+  body:not(.sidebar-mini):not(.sidebar-collapsed) aside.sidebar + .main-content,
+  body.sidebar-mini:not(.sidebar-collapsed) aside.sidebar + .main-content {
     padding-left: calc(var(--aside-w-collapsed) + 28px) !important;
   }
 }

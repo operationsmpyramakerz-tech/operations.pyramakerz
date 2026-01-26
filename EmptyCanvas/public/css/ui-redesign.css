@@ -219,6 +219,7 @@ body.sidebar-collapsed .sidebar{
 }
 
 .sidebar-footer{
+  display: none !important;
   padding: 12px 10px !important;
   border-top: none !important;
 }
@@ -870,6 +871,17 @@ body.has-floating-search .main-header .searchbar{
 
 .search-icon-btn:hover{
   box-shadow: 0 20px 44px rgba(15, 23, 42, 0.20);
+}
+
+/* Feather icon inserted via JS (data-feather="search") */
+.search-icon-btn svg{
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.search-icon-btn svg *{
+  stroke-width: 2.6;
 }
 
 .search-icon-btn .search-icon-svg{
