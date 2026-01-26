@@ -853,8 +853,8 @@ body.has-floating-search .main-header .searchbar{
    Search icon button + floating search bar
    -------------------------------------------- */
 .search-icon-btn{
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   border-radius: 9999px; /* circular */
   border: none;
   background: #fff;
@@ -869,8 +869,8 @@ body.has-floating-search .main-header .searchbar{
 
 .search-icon-btn .search-icon-svg{
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   color: inherit;
   stroke: currentColor;
   fill: none;
