@@ -1344,7 +1344,7 @@ body.sidebar-collapsed .main-content { padding-left: 0 !important; }
 /* Desktop: reserve only the mini-rail width (+ the 14px inset on each side = 28px)
    so the sidebar can expand as an overlay without pushing the content. */
 @media (min-width: 769px){
-  .main-content { padding-left: calc(var(--aside-w-collapsed) + 28px) !important; }
+  .main-content { padding-left: calc(var(--aside-w-collapsed) + 5px) !important; }
 }
 
 @media (min-width: 769px){
