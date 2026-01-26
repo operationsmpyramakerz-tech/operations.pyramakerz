@@ -40,6 +40,14 @@ body{
 
 /* ---------- Shell (tablet-like frame) ---------- */
 .app-container{
+  /*
+    مهم:
+    الـ sidebar عندنا position:fixed.
+    وجود الـ .app-container كـ flex كان بيخلّي المسافة بين السايدبار و الـ main-content
+    تتضاعف على بعض الشاشات (Flex gap + main-content margin-left).
+    نخليه block عشان الإزاحة تبقى محسوبة مرة واحدة وبـ gap أصغر.
+  */
+  display: block !important;
   max-width: 1400px;
   margin: 22px auto;
   min-height: calc(100vh - 44px);
@@ -238,8 +246,8 @@ body.sidebar-collapsed .sidebar{
 /* ---------- Main content surface ---------- */
 .main-content{
   padding-left: 0 !important;
-  /* Leave room for the fixed sidebar */
-  margin-left: calc(88px + 18px) !important;
+  /* Leave room for the fixed sidebar (reduce the left gap a bit) */
+  margin-left: calc(88px + 14px) !important;
   transition: margin-left .25s ease;
   background: var(--ui-surface);
   border-radius: var(--ui-radius-main);
@@ -886,8 +894,8 @@ body.has-floating-search .main-header .searchbar{
 
 .search-icon-btn .search-icon-svg{
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   color: inherit;
   stroke: currentColor;
   fill: none;
