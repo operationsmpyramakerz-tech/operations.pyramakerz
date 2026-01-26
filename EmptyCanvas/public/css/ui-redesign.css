@@ -853,21 +853,24 @@ body.has-floating-search .main-header .searchbar{
    Search icon button + floating search bar
    -------------------------------------------- */
 .search-icon-btn{
-  width: 44px;
-  height: 44px;
+  width: 64px;
+  height: 64px;
   border-radius: 9999px; /* circular */
-  border: 1px solid rgba(0,0,0,0.06);
+  border: none;
   background: #fff;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.18);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #0f172a;
+  color: #1f2d4d;
+  transition: transform 150ms ease, box-shadow 150ms ease;
 }
 
 .search-icon-btn .search-icon-svg{
   display: block;
+  width: 28px;
+  height: 28px;
   color: inherit;
   stroke: currentColor;
   fill: none;
