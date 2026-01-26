@@ -1266,9 +1266,8 @@ function initFloatingSearchWidget() {
   btn.style.color = "#0f172a";
   btn.innerHTML = `
     <svg class="search-icon-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" role="img">
-      <circle cx="12" cy="12" r="11" fill="#0B0B0B" />
-      <circle cx="10.5" cy="10.5" r="4.5" stroke="#FFFFFF" stroke-width="2" fill="none" />
-      <path d="M14.1 14.1 17 17" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" />
+      <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none" />
+      <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
     </svg>
   `;
   document.body.classList.add("has-floating-search");
@@ -1283,9 +1282,8 @@ function initFloatingSearchWidget() {
     panel.innerHTML = `
       <div class="floating-search-inner">
         <svg class="search-icon-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" role="img">
-          <circle cx="12" cy="12" r="11" fill="#0B0B0B" />
-          <circle cx="10.5" cy="10.5" r="4.5" stroke="#FFFFFF" stroke-width="2" fill="none" />
-          <path d="M14.1 14.1 17 17" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" />
+          <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none" />
+          <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
         <input id="floatingSearchInput" type="search" placeholder="Search" aria-label="Search" />
       </div>
