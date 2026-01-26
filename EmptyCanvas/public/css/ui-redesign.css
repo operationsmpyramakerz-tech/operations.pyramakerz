@@ -119,29 +119,9 @@ body.sidebar-collapsed .sidebar{
   transform: scale(1) !important;
 }
 
-/* Sidebar profile (inserted by common-ui.js) -> compact */
-.sidebar-profile{
-  padding: 8px 10px !important;
-  border-bottom: none !important;
-  justify-content: center !important;
-}
-.sidebar-profile__meta{ display: none !important; }
-.sidebar-profile__avatar{
-  width: 44px;
-  height: 44px;
-  border-radius: 18px !important;
-  border: none;
-  background: transparent;
-  padding: 0;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.sidebar-profile__avatar:focus-visible{
-  outline: 2px solid rgba(255,255,255,0.35);
-  outline-offset: 3px;
-}
+/* Sidebar profile (avatar at the top of the sidebar)
+   ✅ New requirement: remove it completely */
+.sidebar-profile{ display: none !important; }
 
 .sidebar-nav{
   padding: 8px 10px 12px !important;
