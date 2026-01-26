@@ -1263,10 +1263,11 @@ function initFloatingSearchWidget() {
   // Enforce style + icon (fix: icon sometimes not visible due to missing feather replace)
   btn.className = "search-icon-btn";
   btn.setAttribute("aria-label", "Search");
+  btn.style.color = "#0f172a";
   btn.innerHTML = `
     <svg class="search-icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/>
-      <path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="#0f172a" stroke-width="2"/>
+      <path d="M16.5 16.5 21 21" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/>
     </svg>
   `;
   document.body.classList.add("has-floating-search");
@@ -1281,8 +1282,8 @@ function initFloatingSearchWidget() {
     panel.innerHTML = `
       <div class="floating-search-inner">
         <svg class="search-icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/>
-          <path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="#0f172a" stroke-width="2"/>
+          <path d="M16.5 16.5 21 21" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/>
         </svg>
         <input id="floatingSearchInput" type="search" placeholder="Search" aria-label="Search" />
       </div>
