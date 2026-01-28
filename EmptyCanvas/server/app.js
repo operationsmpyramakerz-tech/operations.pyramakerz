@@ -1179,6 +1179,58 @@ function _selectFromProp(prop) {
   return null;
 }
 
+function _checkboxFromProp(prop) {
+  if (!prop) return null;
+  try {
+    if (prop.type === "checkbox") return !!prop.checkbox;
+
+    if (prop.type === "formula") {
+      if (prop.formula?.type === "boolean") return !!prop.formula.boolean;
+      if (prop.formula?.type === "string") {
+        const s = String(prop.formula.string || "").trim().toLowerCase();
+        if (s === "true" || s === "yes" || s === "1") return true;
+        if (s === "false" || s === "no" || s === "0") return false;
+      }
+    }
+
+    if (prop.type === "rollup") {
+      const r = prop.rollup;
+      if (!r) return null;
+      if (r.type === "boolean") return !!r.boolean;
+      if (r.type === "array" && Array.isArray(r.array) && r.array.length) {
+        // If it's an array of checkboxes, consider it checked only if all are true.
+        const vals = r.array
+          .map((x) => {
+            if (x?.type === "checkbox") return !!x.checkbox;
+            if (x?.type === "boolean") return !!x.boolean;
+            return null;
+          })
+          .filter((v) => typeof v === "boolean");
+        if (!vals.length) return null;
+        return vals.every(Boolean);
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function _filesFromProp(prop) {
+  if (!prop) return [];
+  try {
+    if (prop.type !== "files" || !Array.isArray(prop.files)) return [];
+    return prop.files
+      .map((f) => {
+        if (!f) return null;
+        const name = String(f.name || "file");
+        if (f.type === "external" && f.external?.url) return { name, url: f.external.url };
+        if (f.type === "file" && f.file?.url) return { name, url: f.file.url };
+        return { name, url: "" };
+      })
+      .filter(Boolean);
+  } catch {}
+  return [];
+}
+
 function _formatUniqueId(prop) {
   if (!prop || prop.type !== "unique_id" || !prop.unique_id) return "";
   const prefix = prop.unique_id.prefix || "";
@@ -1248,6 +1300,117 @@ function _parseNumberProp(prop) {
     }
   } catch {}
   return null;
+}
+
+// -----------------------------------------------------------------------------
+// Tasks: inline "Task Points" table (child database inside each Task page)
+// -----------------------------------------------------------------------------
+// When a task is created, we create an inline database inside the task page.
+// This replaces the old "to_do" checklist blocks.
+const TASK_POINTS_TABLE = Object.freeze({
+  title: "Task Point",
+  checkbox: "Checkbox",
+  files: "Files & media",
+});
+
+async function createTaskPointsInlineDatabase({ parentPageId, taskTitle }) {
+  const safeTitle = String(taskTitle || "Task").trim() || "Task";
+  const pageId = String(parentPageId || "").trim();
+  if (!pageId) throw new Error("Missing parentPageId");
+
+  const basePayload = {
+    parent: { type: "page_id", page_id: pageId },
+    title: [{ type: "text", text: { content: safeTitle } }],
+    properties: {
+      [TASK_POINTS_TABLE.title]: { title: {} },
+      [TASK_POINTS_TABLE.checkbox]: { checkbox: {} },
+      [TASK_POINTS_TABLE.files]: { files: {} },
+    },
+  };
+
+  // Notion supports `is_inline` on create database in newer API versions.
+  // If it's not supported in the current workspace/version, retry without it.
+  try {
+    return await notion.databases.create({ ...basePayload, is_inline: true });
+  } catch (e) {
+    const msg = JSON.stringify(e?.body || e || "");
+    if (msg && msg.toLowerCase().includes("is_inline")) {
+      return await notion.databases.create(basePayload);
+    }
+    throw e;
+  }
+}
+
+function _findDatabasePropNameByType(dbProps, type) {
+  for (const [name, def] of Object.entries(dbProps || {})) {
+    if (def && def.type === type) return name;
+  }
+  return "";
+}
+
+async function queryTaskPointsFromDatabase(databaseId) {
+  const dbId = String(databaseId || "").trim();
+  if (!dbId) return null;
+
+  try {
+    const db = await notion.databases.retrieve({ database_id: dbId });
+    const props = db?.properties || {};
+
+    // Prefer the exact names we create, but gracefully fall back to type-based lookup.
+    const titleProp =
+      props?.[TASK_POINTS_TABLE.title]?.type === "title"
+        ? TASK_POINTS_TABLE.title
+        : _findDatabasePropNameByType(props, "title");
+    const checkboxProp =
+      props?.[TASK_POINTS_TABLE.checkbox]?.type === "checkbox"
+        ? TASK_POINTS_TABLE.checkbox
+        : _findDatabasePropNameByType(props, "checkbox");
+    const filesProp =
+      props?.[TASK_POINTS_TABLE.files]?.type === "files"
+        ? TASK_POINTS_TABLE.files
+        : _findDatabasePropNameByType(props, "files");
+
+    if (!titleProp) return null;
+
+    const rows = [];
+    let cursor = undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+      const r = await notion.databases.query({
+        database_id: dbId,
+        page_size: 100,
+        start_cursor: cursor,
+        sorts: [{ timestamp: "created_time", direction: "ascending" }],
+      });
+
+      for (const p of r.results || []) rows.push(p);
+      hasMore = !!r.has_more;
+      cursor = r.next_cursor || undefined;
+      if (!hasMore) break;
+    }
+
+    const todos = rows
+      .map((p) => {
+        const pp = p?.properties || {};
+        const text = _titleTextFromProp(pp?.[titleProp]) || "";
+        const checked = checkboxProp ? _checkboxFromProp(pp?.[checkboxProp]) : null;
+        const files = filesProp ? _filesFromProp(pp?.[filesProp]) : [];
+        return {
+          id: p.id,
+          text,
+          checked: checked === null ? false : !!checked,
+          files,
+        };
+      })
+      .filter((t) => String(t.text || "").trim());
+
+    return todos;
+  } catch (e) {
+    // Not fatal; task page may not have the inline DB or access may be restricted.
+    console.warn("[tasks] queryTaskPointsFromDatabase failed:", e?.body || e);
+    return null;
+  }
 }
 
 // Meta for building UI (priority options etc.)
@@ -1478,8 +1641,9 @@ app.get("/api/tasks/:id", requireAuth, requirePage("Tasks"), async (req, res) =>
       }
     }
 
-    // Pull to-do blocks (checklist) from page content (best-effort)
+    // Pull "Task Points" from the inline table (preferred) OR legacy to-do blocks (fallback)
     const todos = [];
+    const childDatabases = [];
     let cursor = undefined;
     let hasMore = true;
 
@@ -1496,11 +1660,45 @@ app.get("/api/tasks/:id", requireAuth, requirePage("Tasks"), async (req, res) =>
           const txt = Array.isArray(rt) ? rt.map((t) => t.plain_text).join("") : "";
           todos.push({ text: txt, checked: !!b.to_do?.checked });
         }
+
+        if (b.type === "child_database") {
+          childDatabases.push({
+            id: b.id,
+            title: b.child_database?.title || "",
+          });
+        }
       }
 
       hasMore = !!resp.has_more;
       cursor = resp.next_cursor || undefined;
       if (!hasMore) break;
+    }
+
+    // If a child database exists, try to read task points from it.
+    // - Prefer the database whose title matches the task title.
+    // - If empty, fall back to legacy to-do blocks.
+    let tableTodos = null;
+    if (childDatabases.length) {
+      const norm = (s) => String(s || "").trim().toLowerCase();
+      const want = norm(title);
+      const exact = childDatabases.find((d) => norm(d.title) === want);
+      const ordered = exact ? [exact, ...childDatabases.filter((d) => d !== exact)] : childDatabases;
+
+      for (const d of ordered) {
+        const t = await queryTaskPointsFromDatabase(d.id);
+        if (Array.isArray(t) && t.length) {
+          tableTodos = t;
+          break;
+        }
+        // Keep an empty array as a fallback if there are no legacy to-dos.
+        if (Array.isArray(t) && tableTodos === null) tableTodos = t;
+      }
+    }
+
+    let finalTodos = todos;
+    if (Array.isArray(tableTodos)) {
+      if (tableTodos.length) finalTodos = tableTodos;
+      else if (!todos.length) finalTodos = tableTodos;
     }
 
     return res.json({
@@ -1516,7 +1714,7 @@ app.get("/api/tasks/:id", requireAuth, requirePage("Tasks"), async (req, res) =>
       lastEditedTime: page.last_edited_time,
       createdBy,
       assignees,
-      todos,
+      todos: finalTodos,
     });
   } catch (e) {
     console.error("Task details error:", e?.body || e);
@@ -1612,7 +1810,9 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
       properties,
     });
 
-    // Optional: checklist items as Notion to_do blocks inside the task page
+    // Checklist → Inline "Task Points" table (child database) inside the task page.
+    // We still accept `checklist` from the UI, but we store the items as rows in the table
+    // instead of legacy Notion `to_do` blocks.
     const cleanTodos = (Array.isArray(checklist) ? checklist : [])
       .map((x) => {
         if (typeof x === "string") return x.trim();
@@ -1621,7 +1821,43 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
       })
       .filter(Boolean);
 
-    if (cleanTodos.length) {
+    let pointsDb = null;
+    try {
+      pointsDb = await createTaskPointsInlineDatabase({
+        parentPageId: created.id,
+        taskTitle: title,
+      });
+    } catch (err) {
+      console.warn("[tasks] createTaskPointsInlineDatabase failed:", err?.body || err);
+      pointsDb = null;
+    }
+
+    if (pointsDb && pointsDb.id && cleanTodos.length) {
+      const dbProps = pointsDb?.properties || {};
+      const titlePropName =
+        dbProps?.[TASK_POINTS_TABLE.title]?.type === "title"
+          ? TASK_POINTS_TABLE.title
+          : _findDatabasePropNameByType(dbProps, "title") || TASK_POINTS_TABLE.title;
+      const checkboxPropName =
+        dbProps?.[TASK_POINTS_TABLE.checkbox]?.type === "checkbox"
+          ? TASK_POINTS_TABLE.checkbox
+          : _findDatabasePropNameByType(dbProps, "checkbox") || TASK_POINTS_TABLE.checkbox;
+
+      for (const txt of cleanTodos.slice(0, 50)) {
+        try {
+          await notion.pages.create({
+            parent: { database_id: pointsDb.id },
+            properties: {
+              [titlePropName]: { title: [{ text: { content: txt } }] },
+              [checkboxPropName]: { checkbox: false },
+            },
+          });
+        } catch (e) {
+          console.warn("[tasks] failed to create task point row:", e?.body || e);
+        }
+      }
+    } else if (!pointsDb && cleanTodos.length) {
+      // Fallback (legacy): checklist items as Notion to_do blocks inside the task page
       const children = cleanTodos.slice(0, 50).map((txt) => ({
         object: "block",
         type: "to_do",
