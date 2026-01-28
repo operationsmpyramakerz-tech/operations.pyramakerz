@@ -1056,3 +1056,198 @@ body.tasks-v2 .tv2-btn:disabled{
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* =================================
+   Task Points Modal (Get Started style)
+   ================================= */
+
+body.tasks-v2 .tv2-points{
+  width: min(420px, 94vw);
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 30px 70px rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+
+body.tasks-v2 .tv2-points__header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(17,24,39,0.08);
+}
+
+body.tasks-v2 .tv2-points__headtxt{
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+body.tasks-v2 .tv2-points__title{
+  font-size: 14px;
+  font-weight: 900;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.tasks-v2 .tv2-points__meta{
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(17,24,39,0.60);
+}
+
+body.tasks-v2 .tv2-points__progress{
+  padding: 12px 16px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body.tasks-v2 .tv2-points__bar{
+  position: relative;
+  flex: 1 1 auto;
+  height: 10px;
+  background: rgba(17,24,39,0.10);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+body.tasks-v2 .tv2-points__barfill{
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: linear-gradient(90deg, #168116 0%, #168116 100%);
+  border-radius: 999px;
+  box-shadow: 0 0 18px rgba(79,255,224,0.40);
+}
+
+body.tasks-v2 .tv2-points__pct{
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(17,24,39,0.70);
+  min-width: 40px;
+  text-align: right;
+}
+
+body.tasks-v2 .tv2-points__list{
+  padding: 0 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(420px, 60vh);
+  overflow: auto;
+}
+
+body.tasks-v2 .tv2-point-row{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(17,24,39,0.10);
+  background: #fff;
+}
+
+body.tasks-v2 .tv2-point-row.is-readonly{
+  opacity: 0.75;
+}
+
+body.tasks-v2 .tv2-point-check{
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid rgba(17,24,39,0.30);
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  flex: 0 0 auto;
+}
+
+body.tasks-v2 .tv2-point-check:disabled{
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+body.tasks-v2 .tv2-point-check::after{
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 6px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg);
+  left: 5px;
+  top: 6px;
+  opacity: 0;
+}
+
+body.tasks-v2 .tv2-point-row.is-checked .tv2-point-check{
+  background: #168116;
+  border-color: #168116;
+}
+
+body.tasks-v2 .tv2-point-row.is-checked .tv2-point-check::after{
+  opacity: 1;
+}
+
+body.tasks-v2 .tv2-point-text{
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 900;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.tasks-v2 .tv2-point-actions{
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+body.tasks-v2 .tv2-point-upload{
+  border: 0;
+  background: rgba(17,24,39,0.06);
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #111827;
+  position: relative;
+}
+
+body.tasks-v2 .tv2-point-upload:disabled{
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+body.tasks-v2 .tv2-point-upload svg{
+  width: 18px;
+  height: 18px;
+}
+
+body.tasks-v2 .tv2-point-badge{
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #111827;
+  color: #fff;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 2px 6px;
+  line-height: 1;
+}
