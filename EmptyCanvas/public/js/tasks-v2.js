@@ -168,7 +168,8 @@
 
     let state = {
       // mode: 'all' | 'mine' | 'user'
-      mode: "all",
+      // Default view requested: Mine tasks
+      mode: "mine",
       assigneeId: "",
       selectedDay: "",
       weekStart: null,
@@ -542,9 +543,10 @@
     }
 
     function restoreFilterFromStorage() {
-      let v = "all";
+      // Default view requested: Mine tasks
+      let v = "mine";
       try {
-        v = String(localStorage.getItem(LS_FILTER) || "all");
+        v = String(localStorage.getItem(LS_FILTER) || "mine");
       } catch {}
 
       if (v === "mine") {
@@ -899,6 +901,7 @@
               aria-expanded="false"
             >
               <i data-feather="arrow-up-down"></i>
+              <span class="tv2-sort-label">Sort</span>
             </button>
             <div class="tasks-v2-dropdown" id="tasksV2SortMenu" role="menu" aria-label="Sort tasks" hidden>
               ${sortMenuHTML}
@@ -960,9 +963,6 @@
 
               <div class="tv2-card__bottom">
                 <div class="tv2-tags" aria-hidden="true">${tags.join("")}</div>
-                <button class="tv2-circle tv2-circle--dark" type="button" aria-label="Open">
-                  <i data-feather="arrow-up-right"></i>
-                </button>
               </div>
             </article>
           `;
@@ -979,21 +979,6 @@
         if (!id) return;
 
         card.addEventListener("click", () => selectTask(id, { open: true }));
-
-        // Arrow button: open Notion if available (or just select)
-        const openBtn = card.querySelector("button.tv2-circle--dark");
-        if (openBtn) {
-          openBtn.addEventListener("click", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const t = state.tasks.find((x) => x.id === id);
-            if (t?.url) {
-              window.open(t.url, "_blank", "noopener");
-            } else {
-              selectTask(id, { open: true });
-            }
-          });
-        }
       });
 
       if (window.feather) window.feather.replace();
