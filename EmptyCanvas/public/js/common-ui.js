@@ -1288,20 +1288,26 @@ function initFloatingSearchWidget() {
   }
 
   // Enforce style + icon (fix: icon sometimes not visible due to missing feather replace)
- // Enforce style + icon
-btn.className = "search-icon-btn";
-btn.setAttribute("aria-label", "Search");
-btn.setAttribute("title", "Search"); // 👈 (اختياري) Tooltip في الـ hover
-btn.style.color = "#1f2d4d";
+  btn.className = "search-icon-btn";
+  btn.setAttribute("aria-label", "Search");
+  // Also set a tooltip to match the UX of the bell/user actions.
+  btn.setAttribute("title", "Search");
 
-// ✅ خلي الأيقونة SVG مباشرة (مش <i data-feather>)
-btn.innerHTML = `
-  <svg class="search-icon-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" role="img">
-    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.5" fill="none" />
-    <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-  </svg>
-`;
+  // Some pages/themes might set button/icon colors globally.
+  // Force the icon color so it never renders "invisible".
+  try {
+    btn.style.setProperty("color", "#1f2d4d", "important");
+  } catch {
+    btn.style.color = "#1f2d4d";
+  }
 
+  // Use the SAME icon used inside the floating searchbar (SVG) so it always renders.
+  btn.innerHTML = `
+    <svg class="search-icon-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" role="img">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.5" fill="none" />
+      <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+    </svg>
+  `;
   document.body.classList.add("has-floating-search");
 
   // Panel (portal)
