@@ -1413,6 +1413,156 @@ async function queryTaskPointsFromDatabase(databaseId) {
   }
 }
 
+// Compute completion percentage from a list of todos/task-points.
+// - Returns an integer 0..100 on success.
+// - Returns null only if the input is not an array (caller can treat as "unknown").
+function _completionPercentFromTodos(todos) {
+  if (!Array.isArray(todos)) return null;
+  const total = todos.length;
+  if (!total) return 0;
+  const checked = todos.reduce((acc, t) => acc + (t && t.checked ? 1 : 0), 0);
+  return Math.max(0, Math.min(100, Math.round((checked / total) * 100)));
+}
+
+// Lightweight Task Points DB stats (avoids an extra databases.retrieve call).
+// Returns { total, checked, pct } or null on failure.
+async function _taskPointsStatsFromDatabaseFast(databaseId) {
+  const dbId = String(databaseId || "").trim();
+  if (!dbId) return null;
+
+  try {
+    let cursor = undefined;
+    let hasMore = true;
+    let total = 0;
+    let checked = 0;
+
+    while (hasMore) {
+      const r = await notion.databases.query({
+        database_id: dbId,
+        page_size: 100,
+        start_cursor: cursor,
+        sorts: [{ timestamp: "created_time", direction: "ascending" }],
+      });
+
+      for (const p of r.results || []) {
+        const props = p?.properties || {};
+
+        // Title cell (skip empty rows)
+        const titleProp =
+          props?.[TASK_POINTS_TABLE.title]?.type === "title"
+            ? props[TASK_POINTS_TABLE.title]
+            : Object.values(props).find((v) => v && v.type === "title");
+        const text = _titleTextFromProp(titleProp) || "";
+        if (!String(text).trim()) continue;
+
+        total += 1;
+
+        // Checkbox cell
+        const cbProp =
+          props?.[TASK_POINTS_TABLE.checkbox]?.type === "checkbox"
+            ? props[TASK_POINTS_TABLE.checkbox]
+            : Object.values(props).find((v) => v && v.type === "checkbox");
+        const isChecked = cbProp && cbProp.type === "checkbox" ? !!cbProp.checkbox : false;
+        if (isChecked) checked += 1;
+      }
+
+      hasMore = !!r.has_more;
+      cursor = r.next_cursor || undefined;
+      if (!hasMore) break;
+    }
+
+    const pct = total ? Math.max(0, Math.min(100, Math.round((checked / total) * 100))) : 0;
+    return { total, checked, pct };
+  } catch (e) {
+    console.warn("[tasks] _taskPointsStatsFromDatabaseFast failed:", e?.body || e);
+    return null;
+  }
+}
+
+// Best-effort completion percentage for a task page.
+// Prefers the inline "Task Points" table (child database) when present.
+// Falls back to legacy to_do blocks.
+const _TASK_COMPLETION_TTL_SEC = 15;
+async function getTaskCompletionPercentCached(pageId, taskTitle) {
+  const pid = String(pageId || "").trim();
+  if (!pid) return null;
+
+  const key = `cache:tasks:completion:${pid}:v2`;
+  return await cacheGetOrSet(key, _TASK_COMPLETION_TTL_SEC, async () => {
+    try {
+      const todos = [];
+      const childDatabases = [];
+      let cursor = undefined;
+      let hasMore = true;
+
+      while (hasMore) {
+        const resp = await notion.blocks.children.list({
+          block_id: pid,
+          page_size: 100,
+          start_cursor: cursor,
+        });
+
+        for (const b of resp.results || []) {
+          if (b.type === "to_do") {
+            const rt = b.to_do?.rich_text || [];
+            const txt = Array.isArray(rt) ? rt.map((t) => t.plain_text).join("") : "";
+            todos.push({ text: txt, checked: !!b.to_do?.checked });
+          }
+
+          if (b.type === "child_database") {
+            childDatabases.push({ id: b.id, title: b.child_database?.title || "" });
+          }
+        }
+
+        hasMore = !!resp.has_more;
+        cursor = resp.next_cursor || undefined;
+        if (!hasMore) break;
+      }
+
+      const legacyTodos = todos.filter((t) => String(t?.text || "").trim());
+
+      // Prefer the database whose title matches the task title.
+      // We only need completion stats here, so we query the DB directly (fast path).
+      let tableStats = null;
+      let sawEmptyTable = false;
+
+      if (childDatabases.length) {
+        const norm = (s) => String(s || "").trim().toLowerCase();
+        const want = norm(taskTitle);
+        const exact = childDatabases.find((d) => norm(d.title) === want);
+        const ordered = exact ? [exact, ...childDatabases.filter((d) => d !== exact)] : childDatabases;
+
+        for (const d of ordered) {
+          const st = await _taskPointsStatsFromDatabaseFast(d.id);
+          if (!st) continue;
+          tableStats = st;
+          if (st.total > 0) break;
+          sawEmptyTable = true;
+        }
+      }
+
+      // If we have a table with rows, use it.
+      if (tableStats && tableStats.total > 0) return tableStats.pct;
+
+      // If there is a table but it is empty, only use 0% if there are no legacy todos.
+      if (sawEmptyTable && !legacyTodos.length) return 0;
+
+      // Fallback: legacy to_do blocks
+      if (legacyTodos.length) return _completionPercentFromTodos(legacyTodos);
+
+      // If a child database exists but we couldn't read any stats (rate limit / permissions),
+      // treat completion as unknown so the caller can fall back to the Tasks DB property.
+      if (childDatabases.length && !tableStats) return null;
+
+      // No plan items
+      return 0;
+    } catch (e) {
+      console.warn("[tasks] getTaskCompletionPercentCached failed:", e?.body || e);
+      return null;
+    }
+  });
+}
+
 // Meta for building UI (priority options etc.)
 app.get("/api/tasks/meta", requireAuth, requirePage("Tasks"), async (req, res) => {
   res.set("Cache-Control", "no-store");
@@ -1602,6 +1752,27 @@ app.get("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
       if (!hasMore) break;
     }
 
+    // Completion % should reflect checked items inside the task page table (or legacy checklist).
+    // We compute it server-side so the UI can render cards without extra per-task HTTP calls.
+    try {
+      const titleById = new Map(all.map((t) => [t.id, t.title]));
+      const ids = all.map((t) => t.id).filter(Boolean);
+      // Keep concurrency conservative to reduce the chance of hitting Notion rate limits.
+      const pctMap = await mapWithConcurrency(ids, 3, async (pid) => {
+        const title = titleById.get(pid) || "";
+        return await getTaskCompletionPercentCached(pid, title);
+      });
+
+      for (const t of all) {
+        const pct = pctMap.get(t.id);
+        if (typeof pct === "number" && Number.isFinite(pct)) {
+          t.completion = pct;
+        }
+      }
+    } catch (e) {
+      console.warn("[tasks] completion percent enrichment failed:", e?.message || e);
+    }
+
     return res.json({ tasks: all });
   } catch (e) {
     console.error("Tasks list error:", e?.body || e);
@@ -1701,6 +1872,11 @@ app.get("/api/tasks/:id", requireAuth, requirePage("Tasks"), async (req, res) =>
       else if (!todos.length) finalTodos = tableTodos;
     }
 
+    // For the UI: completion should reflect checked items in the inline Task Points table.
+    // If there are no points, it becomes 0% (instead of relying on a manual DB property).
+    const computedCompletion = _completionPercentFromTodos(finalTodos);
+    const finalCompletion = typeof computedCompletion === "number" && Number.isFinite(computedCompletion) ? computedCompletion : completion;
+
     return res.json({
       id: page.id,
       url: page.url,
@@ -1709,7 +1885,7 @@ app.get("/api/tasks/:id", requireAuth, requirePage("Tasks"), async (req, res) =>
       priority,
       status,
       dueDate,
-      completion,
+      completion: finalCompletion,
       createdTime: page.created_time,
       lastEditedTime: page.last_edited_time,
       createdBy,
