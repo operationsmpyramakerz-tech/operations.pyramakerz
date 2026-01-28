@@ -978,7 +978,16 @@
         const id = card.getAttribute("data-task-id");
         if (!id) return;
 
-        card.addEventListener("click", () => selectTask(id, { open: true }));
+        card.addEventListener("click", () => {
+          // UX request:
+          // - Mine tasks (assignee = me): open a small Task Points window (check + upload per point)
+          // - Other scopes: keep the existing details view
+          if (state.mode === "mine") {
+            openTaskPointsForTask(id);
+          } else {
+            selectTask(id, { open: true });
+          }
+        });
       });
 
       if (window.feather) window.feather.replace();
@@ -999,6 +1008,18 @@
     let tv2NewTaskSubmitBtn = null;
     let tv2NewTaskCloseBtn = null;
     let tv2NewTaskEscWired = false;
+
+    // --- Task Points Modal (small window for assignee tasks) ---
+    let tv2PointsOverlay = null;
+    let tv2PointsTitleEl = null;
+    let tv2PointsCountEl = null;
+    let tv2PointsBarEl = null;
+    let tv2PointsBarFillEl = null;
+    let tv2PointsPctEl = null;
+    let tv2PointsListEl = null;
+    let tv2PointsCloseBtn = null;
+    let tv2PointsTask = null; // current task details
+    let tv2PointsTaskId = "";
 
     function tv2EnsureNewTaskModal() {
       if (tv2NewTaskOverlay) return;
@@ -1162,6 +1183,348 @@
       tv2NewTaskOverlay.hidden = true;
       tv2NewTaskOverlay.style.display = "none";
       document.body.classList.remove("tv2-modal-open");
+    }
+
+    // ===============================
+    // Task Points Modal (assignee UX)
+    // ===============================
+
+    function tv2EnsurePointsModal() {
+      if (tv2PointsOverlay) return;
+
+      tv2PointsOverlay = document.createElement("div");
+      tv2PointsOverlay.className = "tv2-modal-overlay tv2-points-overlay";
+      tv2PointsOverlay.id = "tv2PointsOverlay";
+      tv2PointsOverlay.hidden = true;
+      tv2PointsOverlay.style.display = "none";
+
+      tv2PointsOverlay.innerHTML = `
+        <div class="tv2-points" role="dialog" aria-modal="true" aria-labelledby="tv2PointsTitle">
+          <div class="tv2-points__header">
+            <div class="tv2-points__headtxt">
+              <div class="tv2-points__title" id="tv2PointsTitle">Task</div>
+              <div class="tv2-points__meta" id="tv2PointsCount">—</div>
+            </div>
+
+            <button class="tv2-modal-icon-btn" type="button" id="tv2PointsCloseBtn" aria-label="Close">
+              <span class="tv2-x" aria-hidden="true">×</span>
+            </button>
+          </div>
+
+          <div class="tv2-points__progress">
+            <div class="tv2-points__bar" id="tv2PointsBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="tv2-points__barfill" id="tv2PointsBarFill" style="width:0%"></div>
+            </div>
+            <div class="tv2-points__pct" id="tv2PointsPct">0%</div>
+          </div>
+
+          <div class="tv2-points__list" id="tv2PointsList"></div>
+        </div>
+      `;
+
+      document.body.appendChild(tv2PointsOverlay);
+
+      tv2PointsTitleEl = tv2PointsOverlay.querySelector("#tv2PointsTitle");
+      tv2PointsCountEl = tv2PointsOverlay.querySelector("#tv2PointsCount");
+      tv2PointsBarEl = tv2PointsOverlay.querySelector("#tv2PointsBar");
+      tv2PointsBarFillEl = tv2PointsOverlay.querySelector("#tv2PointsBarFill");
+      tv2PointsPctEl = tv2PointsOverlay.querySelector("#tv2PointsPct");
+      tv2PointsListEl = tv2PointsOverlay.querySelector("#tv2PointsList");
+      tv2PointsCloseBtn = tv2PointsOverlay.querySelector("#tv2PointsCloseBtn");
+
+      // Close by clicking outside
+      tv2PointsOverlay.addEventListener("click", (e) => {
+        if (e.target === tv2PointsOverlay) tv2ClosePointsModal();
+      });
+
+      if (tv2PointsCloseBtn) {
+        tv2PointsCloseBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          tv2ClosePointsModal();
+        });
+      }
+
+      if (window.feather) window.feather.replace();
+    }
+
+    function tv2OpenPointsModal() {
+      if (!tv2PointsOverlay) return;
+      tv2PointsOverlay.hidden = false;
+      tv2PointsOverlay.style.display = "flex";
+      document.body.classList.add("tv2-modal-open");
+    }
+
+    function tv2ClosePointsModal() {
+      if (!tv2PointsOverlay) return;
+      tv2PointsOverlay.hidden = true;
+      tv2PointsOverlay.style.display = "none";
+      document.body.classList.remove("tv2-modal-open");
+      tv2PointsTask = null;
+      tv2PointsTaskId = "";
+    }
+
+    function tv2RenderPointsLoading() {
+      if (tv2PointsTitleEl) tv2PointsTitleEl.textContent = "Loading...";
+      if (tv2PointsCountEl) tv2PointsCountEl.textContent = "—";
+      if (tv2PointsPctEl) tv2PointsPctEl.textContent = "";
+      if (tv2PointsBarEl) tv2PointsBarEl.setAttribute("aria-valuenow", "0");
+      if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = "0%";
+      if (tv2PointsListEl) {
+        tv2PointsListEl.innerHTML = `
+          <div class="modern-loading" role="status" aria-live="polite">
+            <div class="modern-loading__spinner" aria-hidden="true"></div>
+            <div class="modern-loading__text">Loading task points <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span></div>
+          </div>
+        `;
+      }
+    }
+
+    function tv2ComputePointsStats(todos) {
+      const list = Array.isArray(todos) ? todos.filter((t) => String(t?.text || "").trim()) : [];
+      const total = list.length;
+      const checked = list.reduce((acc, t) => acc + (t?.checked ? 1 : 0), 0);
+      const pct = total ? Math.max(0, Math.min(100, Math.round((checked / total) * 100))) : 0;
+      return { total, checked, pct };
+    }
+
+    function tv2UpdatePointsStatsUI() {
+      if (!tv2PointsTask) return;
+      const stats = tv2ComputePointsStats(tv2PointsTask.todos);
+
+      if (tv2PointsCountEl) {
+        tv2PointsCountEl.textContent = `${stats.checked} of ${stats.total} complete`;
+      }
+      if (tv2PointsPctEl) tv2PointsPctEl.textContent = `${stats.pct}%`;
+      if (tv2PointsBarEl) tv2PointsBarEl.setAttribute("aria-valuenow", String(stats.pct));
+      if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = `${stats.pct}%`;
+
+      // Sync completion on the selected task card in the list
+      const idx = state.tasks.findIndex((t) => t && t.id === tv2PointsTaskId);
+      if (idx !== -1) {
+        state.tasks[idx].completion = stats.pct;
+        renderTasksList();
+      }
+    }
+
+    async function tv2SetPointChecked(pointId, checked, rowEl) {
+      if (!pointId) return;
+      if (!tv2PointsTask || !Array.isArray(tv2PointsTask.todos)) return;
+
+      // Find item
+      const item = tv2PointsTask.todos.find((t) => String(t?.id || "") === String(pointId));
+      if (!item) return;
+
+      // Optimistic update
+      item.checked = !!checked;
+      if (rowEl) rowEl.classList.toggle("is-checked", !!checked);
+      tv2UpdatePointsStatsUI();
+
+      try {
+        const r = await fetch(`/api/task-points/${encodeURIComponent(pointId)}/check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checked: !!checked }),
+        });
+
+        if (!r.ok) {
+          const msg = await r.text().catch(() => "");
+          throw new Error(msg || "FAILED");
+        }
+
+        const data = await r.json().catch(() => ({}));
+        if (typeof data?.completionPct === "number" && Number.isFinite(data.completionPct)) {
+          // Align modal + cards with server-calculated completion
+          const pct = Math.max(0, Math.min(100, Math.round(Number(data.completionPct))));
+          if (tv2PointsTask) tv2PointsTask.completion = pct;
+          const idx = state.tasks.findIndex((t) => t && t.id === tv2PointsTaskId);
+          if (idx !== -1) {
+            state.tasks[idx].completion = pct;
+            renderTasksList();
+          }
+          // Update UI from the todos list (already updated) but ensure bar matches pct
+          if (tv2PointsPctEl) tv2PointsPctEl.textContent = `${pct}%`;
+          if (tv2PointsBarEl) tv2PointsBarEl.setAttribute("aria-valuenow", String(pct));
+          if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = `${pct}%`;
+        }
+      } catch (err) {
+        // Revert
+        item.checked = !checked;
+        if (rowEl) rowEl.classList.toggle("is-checked", !!item.checked);
+        tv2UpdatePointsStatsUI();
+        console.error(err);
+        if (window.toast) window.toast.error("Failed to update point");
+      }
+    }
+
+    async function tv2UploadPointAttachments(pointId, fileInputEl, uploadBtnEl) {
+      if (!pointId || !fileInputEl) return;
+      if (!fileInputEl.files || !fileInputEl.files.length) return;
+
+      let attachments = [];
+      try {
+        attachments = await tv2ReadFilesAsDataUrls(fileInputEl);
+      } catch (e) {
+        console.error(e);
+        if (window.toast) window.toast.error("Failed to read files");
+        return;
+      }
+
+      if (!attachments.length) return;
+
+      const prevDisabled = !!(uploadBtnEl && uploadBtnEl.disabled);
+      if (uploadBtnEl) uploadBtnEl.disabled = true;
+
+      try {
+        const r = await fetch(`/api/task-points/${encodeURIComponent(pointId)}/attachments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attachments }),
+        });
+        if (!r.ok) {
+          const msg = await r.text().catch(() => "");
+          throw new Error(msg || "FAILED");
+        }
+
+        const data = await r.json().catch(() => ({}));
+        if (window.toast) window.toast.success("Attachment uploaded");
+
+        // Update badge count (best-effort)
+        const count = Number(data?.filesCount);
+        if (uploadBtnEl) {
+          const badge = uploadBtnEl.querySelector(".tv2-point-badge");
+          if (Number.isFinite(count) && count > 0) {
+            if (badge) badge.textContent = String(count);
+            else uploadBtnEl.insertAdjacentHTML("beforeend", `<span class="tv2-point-badge">${escapeHtml(String(count))}</span>`);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        if (window.toast) window.toast.error("Failed to upload attachment");
+      } finally {
+        if (uploadBtnEl) uploadBtnEl.disabled = prevDisabled;
+        try {
+          fileInputEl.value = "";
+        } catch {}
+      }
+    }
+
+    function tv2RenderPointsModal(task, { canEdit } = {}) {
+      tv2PointsTask = task || null;
+      if (tv2PointsTitleEl) tv2PointsTitleEl.textContent = task?.title || "Task";
+
+      const todos = Array.isArray(task?.todos) ? task.todos.filter((t) => String(t?.text || "").trim()) : [];
+      const stats = tv2ComputePointsStats(todos);
+
+      if (tv2PointsCountEl) tv2PointsCountEl.textContent = `${stats.checked} of ${stats.total} complete`;
+      if (tv2PointsPctEl) tv2PointsPctEl.textContent = `${stats.pct}%`;
+      if (tv2PointsBarEl) tv2PointsBarEl.setAttribute("aria-valuenow", String(stats.pct));
+      if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = `${stats.pct}%`;
+
+      if (!tv2PointsListEl) return;
+
+      if (!todos.length) {
+        tv2PointsListEl.innerHTML = `<div class="tv2-empty">No task points</div>`;
+        return;
+      }
+
+      const editable = !!canEdit;
+      tv2PointsListEl.innerHTML = todos
+        .map((t) => {
+          const id = String(t?.id || "");
+          const checked = !!t?.checked;
+          const filesCount = Array.isArray(t?.files) ? t.files.length : 0;
+          const disabledAttr = editable && id ? "" : "disabled";
+          const badge = filesCount ? `<span class="tv2-point-badge">${escapeHtml(String(filesCount))}</span>` : "";
+
+          return `
+            <div class="tv2-point-row${checked ? " is-checked" : ""}${!editable ? " is-readonly" : ""}" data-point-id="${escapeHtml(id)}">
+              <button class="tv2-point-check" type="button" aria-label="Mark complete" ${disabledAttr}></button>
+              <div class="tv2-point-text">${escapeHtml(t.text)}</div>
+              <div class="tv2-point-actions">
+                <button class="tv2-point-upload" type="button" aria-label="Upload attachment" ${disabledAttr}>
+                  <i data-feather="paperclip"></i>
+                  ${badge}
+                </button>
+                <input class="tv2-point-file-input" type="file" multiple hidden />
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      // Wire interactions
+      tv2PointsListEl.querySelectorAll(".tv2-point-row").forEach((row) => {
+        const pointId = row.getAttribute("data-point-id") || "";
+
+        const checkBtn = row.querySelector(".tv2-point-check");
+        if (checkBtn) {
+          checkBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!editable) return;
+            if (!pointId) return;
+            const next = !row.classList.contains("is-checked");
+            tv2SetPointChecked(pointId, next, row);
+          });
+        }
+
+        const uploadBtn = row.querySelector(".tv2-point-upload");
+        const fileInput = row.querySelector(".tv2-point-file-input");
+
+        if (uploadBtn && fileInput) {
+          uploadBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!editable) return;
+            if (!pointId) return;
+            try {
+              fileInput.click();
+            } catch {}
+          });
+
+          fileInput.addEventListener("change", () => {
+            if (!editable) return;
+            if (!pointId) return;
+            tv2UploadPointAttachments(pointId, fileInput, uploadBtn);
+          });
+        }
+      });
+
+      if (window.feather) window.feather.replace();
+    }
+
+    async function openTaskPointsForTask(id) {
+      if (!id) return;
+      tv2EnsurePointsModal();
+
+      // Highlight selection in list
+      state.selectedTaskId = id;
+      renderTasksList();
+
+      tv2PointsTaskId = id;
+      tv2RenderPointsLoading();
+      tv2OpenPointsModal();
+
+      try {
+        const r = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store" });
+        if (!r.ok) throw new Error("Failed to load task");
+        const data = await r.json();
+
+        // We only enable editing in Mine tasks view (UX request)
+        tv2RenderPointsModal(data, { canEdit: state.mode === "mine" });
+
+        // Sync card completion from fetched data (best-effort)
+        const pct = tv2ComputePointsStats(data?.todos).pct;
+        const idx = state.tasks.findIndex((t) => t && t.id === id);
+        if (idx !== -1) {
+          state.tasks[idx].completion = pct;
+          renderTasksList();
+        }
+      } catch (e) {
+        console.error(e);
+        if (tv2PointsListEl) tv2PointsListEl.innerHTML = `<div class="tv2-empty">Failed to load task points</div>`;
+        if (window.toast) window.toast.error("Failed to load task points");
+      }
     }
 
     function tv2RenderAssigneeOptions() {
@@ -1350,7 +1713,8 @@
         // Optional: auto-open the created task details
         if (data?.id) {
           try {
-            await selectTask(String(data.id), { open: true });
+            if (state.mode === "mine") await openTaskPointsForTask(String(data.id));
+            else await selectTask(String(data.id), { open: true });
           } catch {}
         }
       } catch (err) {
@@ -1559,6 +1923,11 @@ function wireListActions() {
     async function loadTasks(opts) {
       showListLoading(gridEl, "Loading tasks");
 
+      // If the user changes filter/scope while a points window is open, close it.
+      if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) {
+        tv2ClosePointsModal();
+      }
+
       // Always start from the list screen when reloading tasks
       closeDetailView();
 
@@ -1619,7 +1988,10 @@ function wireListActions() {
 
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
-          if (isMonthPickerOpen()) closeMonthPicker();
+          // Close the top-most overlay first
+          if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) tv2ClosePointsModal();
+          else if (tv2NewTaskOverlay && tv2NewTaskOverlay.hidden === false) tv2CloseNewTaskModal();
+          else if (isMonthPickerOpen()) closeMonthPicker();
           else if (document.body.classList.contains("tv2-detail-open")) closeDetailView();
           else if (sortMenuEl && !sortMenuEl.hidden) closeSortMenu();
           else closeMenu();
