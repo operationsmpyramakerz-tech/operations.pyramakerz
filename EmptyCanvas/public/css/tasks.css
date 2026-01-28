@@ -843,6 +843,13 @@ body.tasks-v2 .tv2-modal-overlay{
   z-index: 9999;
 }
 
+/* Make sure the native [hidden] attribute actually hides the overlay.
+   (Our overlay uses display:flex; without this, [hidden]{display:none} from
+   the UA stylesheet can be overridden by this file.) */
+body.tasks-v2 .tv2-modal-overlay[hidden]{
+  display: none !important;
+}
+
 body.tasks-v2 .tv2-modal{
   width: min(560px, 94vw);
   background: #fff;
@@ -878,6 +885,15 @@ body.tasks-v2 .tv2-modal-icon-btn{
   justify-content: center;
   cursor: pointer;
   color: #111827;
+}
+
+/* Visible "X" inside the modal close button */
+body.tasks-v2 .tv2-modal-icon-btn .tv2-x{
+  display: inline-block;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  transform: translateY(-1px);
 }
 
 body.tasks-v2 .tv2-modal-icon-btn:disabled{
