@@ -2057,6 +2057,194 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
   }
 });
 
+// -----------------------------------------------------------------------------
+// Task Points: allow assignees to check points + upload attachments per point
+// -----------------------------------------------------------------------------
+
+function _findPagePropNameByType(pageProps, type) {
+  for (const [name, def] of Object.entries(pageProps || {})) {
+    if (def && def.type === type) return name;
+  }
+  return "";
+}
+
+// Resolve the parent Task page_id from a Task Point row (page) id.
+// Task Point row -> parent database -> database parent page.
+async function _resolveParentTaskIdFromPoint(pointPageId) {
+  const pid = String(pointPageId || "").trim();
+  if (!pid) return null;
+
+  const pointPage = await notion.pages.retrieve({ page_id: pid });
+  const parentDbId = pointPage?.parent?.type === "database_id" ? pointPage.parent.database_id : null;
+  if (!parentDbId) return null;
+
+  const db = await notion.databases.retrieve({ database_id: parentDbId });
+  // Inline DBs are created with parent page_id in our app.
+  const taskPageId = db?.parent?.type === "page_id" ? db.parent.page_id : null;
+  return taskPageId || null;
+}
+
+async function _assertSessionUserIsTaskAssignee(req, taskPageId) {
+  const me = await getSessionUserNotionId(req);
+  if (!me) return { ok: false, status: 401, error: "Unauthorized" };
+
+  const schema = await getTasksSchemaCached();
+  const taskPage = await notion.pages.retrieve({ page_id: taskPageId });
+
+  // Ensure the task belongs to the Tasks database (best-effort)
+  try {
+    const parentDbId = taskPage?.parent?.type === "database_id" ? taskPage.parent.database_id : null;
+    if (parentDbId) {
+      const parentNorm = normalizeNotionId(parentDbId);
+      const tasksNorm = normalizeNotionId(tasksDatabaseId);
+      if (tasksNorm && parentNorm && parentNorm !== tasksNorm) {
+        return { ok: false, status: 404, error: "Not found" };
+      }
+    }
+  } catch {}
+
+  // If we can't detect assignee property, allow (fallback), but normally we require it.
+  const ap = schema?.assigneeProp;
+  const rel = ap && taskPage?.properties?.[ap]?.type === "relation" ? taskPage.properties[ap].relation || [] : null;
+
+  if (Array.isArray(rel)) {
+    const isAssignee = rel.some((x) => normalizeNotionId(x?.id) === normalizeNotionId(me));
+    if (!isAssignee) return { ok: false, status: 403, error: "You are not assigned to this task." };
+  }
+
+  return { ok: true, me, schema, taskPage };
+}
+
+app.post("/api/task-points/:pointId/check", requireAuth, requirePage("Tasks"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+
+  try {
+    const raw = String(req.params.pointId || "").trim();
+    if (!raw) return res.status(400).json({ error: "Missing pointId" });
+
+    const rawNoHyphen = raw.replace(/-/g, "");
+    if (!looksLikeNotionId(rawNoHyphen)) return res.status(400).json({ error: "Invalid pointId" });
+
+    const pointId = toHyphenatedUUID(rawNoHyphen);
+    const checked = !!req.body?.checked;
+
+    // Resolve parent task and validate assignee
+    const taskPageId = await _resolveParentTaskIdFromPoint(pointId);
+    if (!taskPageId) return res.status(404).json({ error: "Parent task not found" });
+
+    const authz = await _assertSessionUserIsTaskAssignee(req, taskPageId);
+    if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+
+    // Retrieve point page to locate the checkbox prop
+    const pointPage = await notion.pages.retrieve({ page_id: pointId });
+    const props = pointPage?.properties || {};
+    const checkboxPropName =
+      props?.[TASK_POINTS_TABLE.checkbox]?.type === "checkbox"
+        ? TASK_POINTS_TABLE.checkbox
+        : _findPagePropNameByType(props, "checkbox");
+
+    if (!checkboxPropName) return res.status(400).json({ error: "Checkbox property not found on point" });
+
+    await notion.pages.update({
+      page_id: pointId,
+      properties: {
+        [checkboxPropName]: { checkbox: checked },
+      },
+    });
+
+    // Invalidate + recompute completion so the UI can update the card progress immediately.
+    let completionPct = null;
+    try {
+      const key = `cache:tasks:completion:${taskPageId}:v2`;
+      await cacheDel(key);
+
+      const title = authz?.schema?.titleProp
+        ? _titleTextFromProp(authz.taskPage?.properties?.[authz.schema.titleProp]) || ""
+        : "";
+      completionPct = await getTaskCompletionPercentCached(taskPageId, title);
+    } catch (e) {
+      console.warn("[tasks] completion recompute after point check failed:", e?.message || e);
+    }
+
+    return res.json({ ok: true, pointId, checked, completionPct });
+  } catch (e) {
+    console.error("Task point check error:", e?.body || e);
+    return res.status(500).json({ error: "Failed to update task point." });
+  }
+});
+
+app.post("/api/task-points/:pointId/attachments", requireAuth, requirePage("Tasks"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+
+  try {
+    const raw = String(req.params.pointId || "").trim();
+    if (!raw) return res.status(400).json({ error: "Missing pointId" });
+    const rawNoHyphen = raw.replace(/-/g, "");
+    if (!looksLikeNotionId(rawNoHyphen)) return res.status(400).json({ error: "Invalid pointId" });
+    const pointId = toHyphenatedUUID(rawNoHyphen);
+
+    const attachments = Array.isArray(req.body?.attachments)
+      ? req.body.attachments
+      : Array.isArray(req.body?.files)
+        ? req.body.files
+        : [];
+
+    if (!attachments.length) return res.status(400).json({ error: "No attachments" });
+
+    // Resolve parent task and validate assignee
+    const taskPageId = await _resolveParentTaskIdFromPoint(pointId);
+    if (!taskPageId) return res.status(404).json({ error: "Parent task not found" });
+
+    const authz = await _assertSessionUserIsTaskAssignee(req, taskPageId);
+    if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+
+    // Retrieve point page to locate Files property & existing items
+    const pointPage = await notion.pages.retrieve({ page_id: pointId });
+    const props = pointPage?.properties || {};
+
+    const filesPropName =
+      props?.[TASK_POINTS_TABLE.files]?.type === "files" ? TASK_POINTS_TABLE.files : _findPagePropNameByType(props, "files");
+    if (!filesPropName) return res.status(400).json({ error: "Files property not found on point" });
+
+    // Keep only existing EXTERNAL files (safe to re-send to Notion API)
+    const existingRaw = props?.[filesPropName]?.type === "files" ? props[filesPropName].files || [] : [];
+    const existing = (existingRaw || [])
+      .filter((f) => f && f.type === "external" && f.external?.url)
+      .map((f) => makeExternalFile(f.name || "file", f.external.url));
+
+    const newFiles = [];
+    for (let i = 0; i < attachments.length; i++) {
+      const a = attachments[i] || {};
+      const dataUrl = a.dataUrl || a.fileDataUrl || a.screenshotDataUrl || "";
+      if (!dataUrl) continue;
+
+      const originalName = String(a.name || a.filename || "attachment").trim() || "attachment";
+      const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+      const filename = `task-point-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
+
+      const url = await uploadToBlobFromBase64(dataUrl, filename);
+      newFiles.push(makeExternalFile(originalName, url));
+    }
+
+    if (!newFiles.length) return res.status(400).json({ error: "No valid attachments" });
+
+    // Notion imposes limits; keep the latest 20 items
+    const combined = [...existing, ...newFiles].slice(-20);
+
+    await notion.pages.update({
+      page_id: pointId,
+      properties: {
+        [filesPropName]: { files: combined },
+      },
+    });
+
+    return res.json({ ok: true, pointId, filesCount: combined.length });
+  } catch (e) {
+    console.error("Task point attachment error:", e?.body || e);
+    return res.status(500).json({ error: "Failed to upload attachment." });
+  }
+});
+
 // ===== End Tasks APIs =====
 
 // ===== B2B Schools APIs =====
