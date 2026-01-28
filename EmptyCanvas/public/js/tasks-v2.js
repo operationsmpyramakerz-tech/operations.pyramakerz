@@ -1022,13 +1022,15 @@
       tv2NewTaskOverlay.className = "tv2-modal-overlay";
       tv2NewTaskOverlay.id = "tv2NewTaskOverlay";
       tv2NewTaskOverlay.hidden = true;
+      // Inline display fallback (see tv2OpenNewTaskModal / tv2CloseNewTaskModal)
+      tv2NewTaskOverlay.style.display = "none";
 
       tv2NewTaskOverlay.innerHTML = `
         <div class="tv2-modal" role="dialog" aria-modal="true" aria-labelledby="tv2NewTaskTitle">
           <div class="tv2-modal-header">
             <h3 class="tv2-modal-title" id="tv2NewTaskTitle">New task</h3>
             <button class="tv2-modal-icon-btn" type="button" id="tv2NewTaskCloseBtn" aria-label="Close">
-              <i data-feather="x"></i>
+              <span class="tv2-x" aria-hidden="true">×</span>
             </button>
           </div>
 
@@ -1154,7 +1156,12 @@
       tv2ResetChecklist();
       tv2AddChecklistRow("");
 
+      // IMPORTANT:
+      // - We use both the [hidden] attribute *and* inline display toggling.
+      //   Some page CSS defines display:flex on the overlay which can override
+      //   the UA [hidden]{display:none} rule depending on cascade.
       tv2NewTaskOverlay.hidden = false;
+      tv2NewTaskOverlay.style.display = "flex";
       document.body.classList.add("tv2-modal-open");
 
       // Focus subject
@@ -1168,6 +1175,7 @@
     function tv2CloseNewTaskModal() {
       if (!tv2NewTaskOverlay) return;
       tv2NewTaskOverlay.hidden = true;
+      tv2NewTaskOverlay.style.display = "none";
       document.body.classList.remove("tv2-modal-open");
     }
 
