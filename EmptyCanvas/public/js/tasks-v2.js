@@ -1000,19 +1000,346 @@
     }
 
     // List actions (New task + Sort) are re-rendered with the list, so we wire them after every render.
-    async function createNewTask() {
-      closeMenu();
-      closeSortMenu();
-      const title = window.prompt("Task title");
-      if (title === null) return;
-      const t = String(title || "").trim();
-      if (!t) return;
+        // --- New Task Modal (small window) ---
+    let tv2NewTaskOverlay = null;
+    let tv2NewTaskForm = null;
+    let tv2NewTaskSubject = null;
+    let tv2NewTaskAssignee = null;
+    let tv2NewTaskDueDate = null;
+    let tv2NewTaskFiles = null;
+    let tv2NewTaskPriority = null;
+    let tv2ChecklistList = null;
+    let tv2AddCheckpointBtn = null;
+    let tv2NewTaskCancelBtn = null;
+    let tv2NewTaskSubmitBtn = null;
+    let tv2NewTaskCloseBtn = null;
+    let tv2NewTaskEscWired = false;
+
+    function tv2EnsureNewTaskModal() {
+      if (tv2NewTaskOverlay) return;
+
+      tv2NewTaskOverlay = document.createElement("div");
+      tv2NewTaskOverlay.className = "tv2-modal-overlay";
+      tv2NewTaskOverlay.id = "tv2NewTaskOverlay";
+      tv2NewTaskOverlay.hidden = true;
+
+      tv2NewTaskOverlay.innerHTML = `
+        <div class="tv2-modal" role="dialog" aria-modal="true" aria-labelledby="tv2NewTaskTitle">
+          <div class="tv2-modal-header">
+            <h3 class="tv2-modal-title" id="tv2NewTaskTitle">New task</h3>
+            <button class="tv2-modal-icon-btn" type="button" id="tv2NewTaskCloseBtn" aria-label="Close">
+              <i data-feather="x"></i>
+            </button>
+          </div>
+
+          <form class="tv2-modal-form" id="tv2NewTaskForm">
+            <div class="tv2-modal-body">
+              <div class="tv2-form-row">
+                <label class="tv2-label" for="tv2TaskSubject">Subject</label>
+                <input class="tv2-input" type="text" id="tv2TaskSubject" placeholder="Write task subject" required />
+              </div>
+
+              <div class="tv2-form-row">
+                <label class="tv2-label" for="tv2TaskAssignee">Assignee To</label>
+                <select class="tv2-select" id="tv2TaskAssignee"></select>
+              </div>
+
+              <div class="tv2-form-row">
+                <label class="tv2-label" for="tv2TaskDeliveryDate">Delivery Date</label>
+                <input class="tv2-input" type="date" id="tv2TaskDeliveryDate" />
+              </div>
+
+              <div class="tv2-form-row">
+                <label class="tv2-label" for="tv2TaskFiles">Files &amp; media</label>
+                <input class="tv2-input" type="file" id="tv2TaskFiles" multiple />
+                <div class="tv2-help">You can select more than one file.</div>
+              </div>
+
+              <div class="tv2-form-row">
+                <label class="tv2-label" for="tv2TaskPriority">Priority Level</label>
+                <select class="tv2-select" id="tv2TaskPriority">
+                  <option value="">Select priority</option>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
+
+              <div class="tv2-form-row">
+                <div class="tv2-label-row">
+                  <label class="tv2-label">Task checklist</label>
+                  <button class="tv2-link-btn" type="button" id="tv2AddCheckpointBtn">+ Add checkpoint</button>
+                </div>
+                <div class="tv2-checklist" id="tv2ChecklistList"></div>
+              </div>
+            </div>
+
+            <div class="tv2-modal-footer">
+              <button class="tv2-btn tv2-btn--ghost" type="button" id="tv2NewTaskCancelBtn">Cancel</button>
+              <button class="tv2-btn tv2-btn--primary" type="submit" id="tv2NewTaskSubmitBtn">Create</button>
+            </div>
+          </form>
+        </div>
+      `;
+
+      document.body.appendChild(tv2NewTaskOverlay);
+
+      tv2NewTaskForm = tv2NewTaskOverlay.querySelector("#tv2NewTaskForm");
+      tv2NewTaskSubject = tv2NewTaskOverlay.querySelector("#tv2TaskSubject");
+      tv2NewTaskAssignee = tv2NewTaskOverlay.querySelector("#tv2TaskAssignee");
+      tv2NewTaskDueDate = tv2NewTaskOverlay.querySelector("#tv2TaskDeliveryDate");
+      tv2NewTaskFiles = tv2NewTaskOverlay.querySelector("#tv2TaskFiles");
+      tv2NewTaskPriority = tv2NewTaskOverlay.querySelector("#tv2TaskPriority");
+      tv2ChecklistList = tv2NewTaskOverlay.querySelector("#tv2ChecklistList");
+      tv2AddCheckpointBtn = tv2NewTaskOverlay.querySelector("#tv2AddCheckpointBtn");
+      tv2NewTaskCancelBtn = tv2NewTaskOverlay.querySelector("#tv2NewTaskCancelBtn");
+      tv2NewTaskSubmitBtn = tv2NewTaskOverlay.querySelector("#tv2NewTaskSubmitBtn");
+      tv2NewTaskCloseBtn = tv2NewTaskOverlay.querySelector("#tv2NewTaskCloseBtn");
+
+      // Close by clicking outside
+      tv2NewTaskOverlay.addEventListener("click", (e) => {
+        if (e.target === tv2NewTaskOverlay) tv2CloseNewTaskModal();
+      });
+
+      if (tv2NewTaskCloseBtn) {
+        tv2NewTaskCloseBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          tv2CloseNewTaskModal();
+        });
+      }
+
+      if (tv2NewTaskCancelBtn) {
+        tv2NewTaskCancelBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          tv2CloseNewTaskModal();
+        });
+      }
+
+      if (tv2AddCheckpointBtn) {
+        tv2AddCheckpointBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          tv2AddChecklistRow("");
+        });
+      }
+
+      if (tv2NewTaskForm) {
+        tv2NewTaskForm.addEventListener("submit", tv2SubmitNewTaskForm);
+      }
+
+      if (!tv2NewTaskEscWired) {
+        tv2NewTaskEscWired = true;
+        document.addEventListener("keydown", (e) => {
+          if (e.key !== "Escape") return;
+          if (!tv2NewTaskOverlay || tv2NewTaskOverlay.hidden) return;
+          tv2CloseNewTaskModal();
+        });
+      }
+
+      if (window.feather) window.feather.replace();
+    }
+
+    function tv2OpenNewTaskModal() {
+      if (!tv2NewTaskOverlay) return;
+
+      // Reset fields
+      if (tv2NewTaskSubject) tv2NewTaskSubject.value = "";
+      if (tv2NewTaskDueDate) tv2NewTaskDueDate.value = state.selectedDay || "";
+      if (tv2NewTaskFiles) tv2NewTaskFiles.value = "";
+      if (tv2NewTaskPriority && !tv2NewTaskPriority.value) {
+        tv2NewTaskPriority.value = "Medium";
+      }
+
+      tv2RenderAssigneeOptions();
+
+      tv2ResetChecklist();
+      tv2AddChecklistRow("");
+
+      tv2NewTaskOverlay.hidden = false;
+      document.body.classList.add("tv2-modal-open");
+
+      // Focus subject
+      setTimeout(() => {
+        try {
+          if (tv2NewTaskSubject) tv2NewTaskSubject.focus();
+        } catch {}
+      }, 0);
+    }
+
+    function tv2CloseNewTaskModal() {
+      if (!tv2NewTaskOverlay) return;
+      tv2NewTaskOverlay.hidden = true;
+      document.body.classList.remove("tv2-modal-open");
+    }
+
+    function tv2RenderAssigneeOptions() {
+      if (!tv2NewTaskAssignee) return;
+
+      const cur = String(tv2NewTaskAssignee.value || "");
+
+      const opts = [];
+      // Default: empty => server will set "me"
+      opts.push({ id: "", name: "Auto (me)" });
+
+      // Department users
+      for (const u of deptUsers || []) {
+        if (!u || !u.id) continue;
+        opts.push({ id: String(u.id), name: String(u.name || "Unnamed") });
+      }
+
+      // Ensure "me" exists even if dept list failed
+      if (meId && !opts.some((o) => o.id === meId)) {
+        opts.push({ id: String(meId), name: "Me" });
+      }
+
+      // De-dup by id
+      const seen = new Set();
+      const safe = [];
+      for (const o of opts) {
+        const id = String(o.id || "");
+        if (seen.has(id)) continue;
+        seen.add(id);
+        safe.push(o);
+      }
+
+      tv2NewTaskAssignee.innerHTML = safe
+        .map((o) => {
+          const label = escapeHtml(o.name);
+          const value = escapeHtml(o.id);
+          return `<option value="${value}">${label}</option>`;
+        })
+        .join("");
+
+      // Default to me (if possible)
+      if (cur && safe.some((o) => o.id === cur)) {
+        tv2NewTaskAssignee.value = cur;
+      } else if (meId && safe.some((o) => o.id === meId)) {
+        tv2NewTaskAssignee.value = meId;
+      } else {
+        tv2NewTaskAssignee.value = "";
+      }
+    }
+
+    function tv2ResetChecklist() {
+      if (!tv2ChecklistList) return;
+      tv2ChecklistList.innerHTML = "";
+    }
+
+    function tv2AddChecklistRow(initialValue) {
+      if (!tv2ChecklistList) return;
+
+      const row = document.createElement("div");
+      row.className = "tv2-check-row";
+
+      const bullet = document.createElement("span");
+      bullet.className = "tv2-check-bullet";
+      row.appendChild(bullet);
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "tv2-check-input";
+      input.placeholder = "Checkpoint details";
+      input.value = String(initialValue || "");
+      row.appendChild(input);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "tv2-check-remove";
+      remove.setAttribute("aria-label", "Remove checkpoint");
+      remove.textContent = "×";
+      remove.addEventListener("click", (e) => {
+        e.preventDefault();
+        try { row.remove(); } catch {}
+      });
+      row.appendChild(remove);
+
+      tv2ChecklistList.appendChild(row);
+
+      // Focus newly added
+      setTimeout(() => {
+        try { input.focus(); } catch {}
+      }, 0);
+    }
+
+    function tv2CollectChecklist() {
+      if (!tv2ChecklistList) return [];
+      const items = [];
+      tv2ChecklistList.querySelectorAll("input.tv2-check-input").forEach((el) => {
+        const t = String(el.value || "").trim();
+        if (t) items.push(t);
+      });
+      return items;
+    }
+
+    function tv2ReadFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        try {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(reader.error || new Error("READ_FAILED"));
+          reader.readAsDataURL(file);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+
+    async function tv2ReadFilesAsDataUrls(fileInputEl) {
+      const out = [];
+      if (!fileInputEl || !fileInputEl.files || !fileInputEl.files.length) return out;
+
+      const files = Array.from(fileInputEl.files || []);
+      for (const f of files) {
+        if (!f) continue;
+        const dataUrl = await tv2ReadFileAsDataUrl(f);
+        if (!dataUrl) continue;
+        out.push({ name: f.name || "file", dataUrl });
+      }
+      return out;
+    }
+
+    async function tv2SubmitNewTaskForm(e) {
+      e.preventDefault();
+
+      const title = String(tv2NewTaskSubject?.value || "").trim();
+      if (!title) {
+        if (window.toast) window.toast.error("Subject is required");
+        return;
+      }
+
+      const assigneeId = String(tv2NewTaskAssignee?.value || "").trim();
+      const deliveryDate = String(tv2NewTaskDueDate?.value || "").trim();
+      const priority = String(tv2NewTaskPriority?.value || "").trim();
+      const checklist = tv2CollectChecklist();
+
+      let attachments = [];
+      try {
+        attachments = await tv2ReadFilesAsDataUrls(tv2NewTaskFiles);
+      } catch (err) {
+        console.error(err);
+        if (window.toast) window.toast.error("Failed to read files");
+        return;
+      }
+
+      const payload = { title };
+      // If user didn't pick a date, default to selected day (calendar UX)
+      if (deliveryDate) payload.deliveryDate = deliveryDate;
+      else if (state.selectedDay) payload.deliveryDate = state.selectedDay;
+
+      if (assigneeId) payload.assigneeId = assigneeId;
+      if (priority) payload.priority = priority;
+      if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
+      if (Array.isArray(checklist) && checklist.length) payload.checklist = checklist;
+
+      // UI loading state
+      const prevText = tv2NewTaskSubmitBtn ? tv2NewTaskSubmitBtn.textContent : "";
+      if (tv2NewTaskSubmitBtn) {
+        tv2NewTaskSubmitBtn.disabled = true;
+        tv2NewTaskSubmitBtn.textContent = "Creating...";
+      }
+      if (tv2NewTaskCancelBtn) tv2NewTaskCancelBtn.disabled = true;
+      if (tv2NewTaskCloseBtn) tv2NewTaskCloseBtn.disabled = true;
 
       try {
-        const payload = { title: t };
-        // Default due date = currently selected day (helps the calendar UI)
-        if (state.selectedDay) payload.dueDate = state.selectedDay;
-
         const r = await fetch("/api/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1021,7 +1348,9 @@
 
         if (!r.ok) throw new Error("Failed to create task");
         const data = await r.json();
+
         if (window.toast) window.toast.success("Task created");
+        tv2CloseNewTaskModal();
 
         await loadTasks({ keepDay: true });
 
@@ -1031,13 +1360,27 @@
             await selectTask(String(data.id), { open: true });
           } catch {}
         }
-      } catch (e) {
-        console.error(e);
+      } catch (err) {
+        console.error(err);
         if (window.toast) window.toast.error("Failed to create task");
+      } finally {
+        if (tv2NewTaskSubmitBtn) {
+          tv2NewTaskSubmitBtn.disabled = false;
+          tv2NewTaskSubmitBtn.textContent = prevText || "Create";
+        }
+        if (tv2NewTaskCancelBtn) tv2NewTaskCancelBtn.disabled = false;
+        if (tv2NewTaskCloseBtn) tv2NewTaskCloseBtn.disabled = false;
       }
     }
 
-    function wireListActions() {
+    async function createNewTask() {
+      closeMenu();
+      closeSortMenu();
+      tv2EnsureNewTaskModal();
+      tv2OpenNewTaskModal();
+    }
+
+function wireListActions() {
       if (!gridEl) return;
 
       sortBtnEl = gridEl.querySelector("#tasksV2SortBtn");
