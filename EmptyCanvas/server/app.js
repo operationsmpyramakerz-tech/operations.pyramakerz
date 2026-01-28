@@ -1203,6 +1203,8 @@ async function getTasksSchemaCached() {
   const completionProp = pickPropName(props, ["Completion Rate", "Completion", "Progress", "Completion rate"]);
   const createdByProp = pickPropName(props, ["Created By", "Creator", "Created by"]);
   const assigneeProp = pickPropName(props, ["Assignee To", "Assignee", "Assigned To", "Assignee to"]);
+  let filesProp = pickPropName(props, ["Files & media", "Files & Media", "Files", "Attachments", "Attachment", "Media"]);
+  if (filesProp && props?.[filesProp]?.type !== "files") filesProp = null;
   const idProp = pickPropName(props, ["ID", "Id"]) || _findFirstUniqueIdPropName(props);
 
   return {
@@ -1214,6 +1216,7 @@ async function getTasksSchemaCached() {
     completionProp,
     createdByProp,
     assigneeProp,
+    filesProp,
     idProp,
   };
 }
@@ -1532,6 +1535,23 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
     const statusName = String(req.body?.status || "").trim();
     const dueDate = String(req.body?.dueDate || req.body?.deliveryDate || "").trim();
 
+    const rawAssignee = String(req.body?.assigneeId || req.body?.assignee || req.body?.assigneeTo || "").trim();
+    const assigneeId = looksLikeNotionId(rawAssignee) ? toHyphenatedUUID(rawAssignee) : "";
+
+    const attachments = Array.isArray(req.body?.attachments)
+      ? req.body.attachments
+      : Array.isArray(req.body?.files)
+        ? req.body.files
+        : Array.isArray(req.body?.media)
+          ? req.body.media
+          : [];
+
+    const checklist = Array.isArray(req.body?.checklist)
+      ? req.body.checklist
+      : Array.isArray(req.body?.todos)
+        ? req.body.todos
+        : [];
+
     if (!title) return res.status(400).json({ error: "Title is required" });
 
     const properties = {};
@@ -1554,21 +1574,69 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
       properties[schema.deliveryDateProp] = { date: { start: dueDate } };
     }
 
-    // Default: set Created By & Assignee To to current user (if relation props exist)
+    // Optional Files & media attachments (upload to Vercel Blob then attach as external files)
+    if (schema.filesProp && Array.isArray(attachments) && attachments.length) {
+      const filesToAttach = [];
+      for (let i = 0; i < attachments.length; i++) {
+        const a = attachments[i] || {};
+        const dataUrl = a.dataUrl || a.fileDataUrl || a.screenshotDataUrl || "";
+        if (!dataUrl) continue;
+
+        const originalName = String(a.name || a.filename || "attachment").trim() || "attachment";
+        const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+        const filename = `task-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
+
+        const url = await uploadToBlobFromBase64(dataUrl, filename);
+        filesToAttach.push(makeExternalFile(originalName, url));
+      }
+
+      if (filesToAttach.length) {
+        properties[schema.filesProp] = { files: filesToAttach };
+      }
+    }
+
+    // Created By = current user (if relation prop exists)
     const me = await getSessionUserNotionId(req);
-    if (me) {
-      if (schema.createdByProp && schema.props?.[schema.createdByProp]?.type === "relation") {
-        properties[schema.createdByProp] = { relation: [{ id: me }] };
-      }
-      if (schema.assigneeProp && schema.props?.[schema.assigneeProp]?.type === "relation") {
-        properties[schema.assigneeProp] = { relation: [{ id: me }] };
-      }
+    if (me && schema.createdByProp && schema.props?.[schema.createdByProp]?.type === "relation") {
+      properties[schema.createdByProp] = { relation: [{ id: me }] };
+    }
+
+    // Assignee To = selected user, fallback to current user
+    const finalAssignee = assigneeId || me;
+    if (finalAssignee && schema.assigneeProp && schema.props?.[schema.assigneeProp]?.type === "relation") {
+      properties[schema.assigneeProp] = { relation: [{ id: finalAssignee }] };
     }
 
     const created = await notion.pages.create({
       parent: { database_id: tasksDatabaseId },
       properties,
     });
+
+    // Optional: checklist items as Notion to_do blocks inside the task page
+    const cleanTodos = (Array.isArray(checklist) ? checklist : [])
+      .map((x) => {
+        if (typeof x === "string") return x.trim();
+        if (x && typeof x === "object") return String(x.text || x.title || x.name || "").trim();
+        return "";
+      })
+      .filter(Boolean);
+
+    if (cleanTodos.length) {
+      const children = cleanTodos.slice(0, 50).map((txt) => ({
+        object: "block",
+        type: "to_do",
+        to_do: {
+          rich_text: [{ type: "text", text: { content: txt } }],
+          checked: false,
+        },
+      }));
+
+      try {
+        await notion.blocks.children.append({ block_id: created.id, children });
+      } catch (err) {
+        console.warn("Task checklist append error:", err?.body || err);
+      }
+    }
 
     return res.json({ ok: true, id: created.id, url: created.url });
   } catch (e) {
