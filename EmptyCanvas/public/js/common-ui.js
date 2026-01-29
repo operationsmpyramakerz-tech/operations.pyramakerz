@@ -762,7 +762,27 @@ if (document.querySelector('.sidebar')) {
     }
   }
 
-  menuToggle    && menuToggle.addEventListener('click', toggleSidebar);
+  // Some pages (e.g. tasks.html) ship without a static header.
+  // The header is injected later by ensureMainHeaderExists(), so ensureMenuToggle()
+  // may return null during the first pass.
+  // We bind the click handler defensively (once) whenever the button exists.
+  function wireMenuToggleOnce(){
+    const btn = document.getElementById('menu-toggle');
+    if (!btn) return;
+    if (btn.dataset && btn.dataset.boundSidebarToggle === '1') {
+      menuToggle = btn;
+      return;
+    }
+    try {
+      if (btn.dataset) btn.dataset.boundSidebarToggle = '1';
+    } catch {}
+    btn.addEventListener('click', toggleSidebar);
+    menuToggle = btn;
+    setAria();
+  }
+
+  // Initial attempt (works on pages that already have a header in HTML)
+  wireMenuToggleOnce();
 
   // ✅ Requested: close the dashboard when clicking outside it
   // - Mobile: closes the overlay sidebar
@@ -819,6 +839,11 @@ if (document.querySelector('.sidebar')) {
 
   // UI Redesign: ensure header exists + convert it to the Dashboard topbar style
   ensureMainHeaderExists();
+  // Some pages (like tasks.html) inject the header at runtime.
+  // Ensure the logo toggle exists AFTER the header is created.
+  // (ensureMenuToggle() is safe to call multiple times.)
+  menuToggle = ensureMenuToggle() || menuToggle;
+  wireMenuToggleOnce();
   ensureDashboardHeaderLayout();
 
   // لو عندك لينكات بتتعمل inject في صفحات معينة:

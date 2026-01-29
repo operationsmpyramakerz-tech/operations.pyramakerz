@@ -138,8 +138,14 @@
     const monthBtn = $("tasksV2MonthBtn");
     const gridEl = $("tasksGrid");
 
-    const filterBtn = $("tasksV2FilterBtn");
-    const filterMenu = $("tasksV2FilterMenu");
+    // NOTE:
+    // The Tasks "view" dropdown (My tasks / Delegated tasks) is rendered inside the list actions bar
+    // (next to New task + Sort). Since the list is re-rendered, the DOM nodes are dynamic.
+    // We keep references in mutable variables and wire them after every list render.
+    let filterBtnEl = null;
+    let filterMenuEl = null;
+    let filterDocCloseBound = false;
+    let globalKeydownBound = false;
 
     // Month / year picker
     const monthPickerEl = $("tasksV2MonthPicker");
@@ -363,22 +369,67 @@
       });
     }
 
+    function bindFilterDocCloseOnce() {
+      if (filterDocCloseBound) return;
+      filterDocCloseBound = true;
+
+      document.addEventListener("click", (e) => {
+        if (!isMenuOpen()) return;
+        const t = e.target;
+        if (t && (filterMenuEl?.contains(t) || filterBtnEl?.contains(t))) return;
+        closeMenu();
+      });
+    }
+
+    function bindGlobalKeydownOnce() {
+      if (globalKeydownBound) return;
+      globalKeydownBound = true;
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          // Close the top-most overlay first
+          if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) tv2ClosePointsModal();
+          else if (tv2NewTaskOverlay && tv2NewTaskOverlay.hidden === false) tv2CloseNewTaskModal();
+          else if (isMonthPickerOpen()) closeMonthPicker();
+          else if (document.body.classList.contains("tv2-detail-open")) closeDetailView();
+          else if (sortMenuEl && !sortMenuEl.hidden) closeSortMenu();
+          else if (isMenuOpen()) closeMenu();
+          return;
+        }
+
+        // Keyboard day navigation
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          // avoid interfering with typing, if any input exists
+          const ae = document.activeElement;
+          if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return;
+
+          const cur = parseIsoDayToLocalDate(state.selectedDay) || new Date();
+          const next = e.key === "ArrowLeft" ? addDays(cur, -1) : addDays(cur, 1);
+          setSelectedDay(next);
+        }
+      });
+    }
+
+    function isMenuOpen() {
+      return !!(filterMenuEl && filterMenuEl.hidden === false);
+    }
+
     function closeMenu() {
-      if (!filterMenu || !filterBtn) return;
-      filterMenu.hidden = true;
-      filterBtn.setAttribute("aria-expanded", "false");
+      if (!filterMenuEl || !filterBtnEl) return;
+      filterMenuEl.hidden = true;
+      filterBtnEl.setAttribute("aria-expanded", "false");
     }
 
     function openMenu() {
-      if (!filterMenu || !filterBtn) return;
+      if (!filterMenuEl || !filterBtnEl) return;
       closeSortMenu();
-      filterMenu.hidden = false;
-      filterBtn.setAttribute("aria-expanded", "true");
+      filterMenuEl.hidden = false;
+      filterBtnEl.setAttribute("aria-expanded", "true");
     }
 
     function toggleMenu() {
-      if (!filterMenu) return;
-      if (filterMenu.hidden) openMenu();
+      if (!filterMenuEl) return;
+      if (filterMenuEl.hidden) openMenu();
       else closeMenu();
     }
 
@@ -499,7 +550,7 @@
     }
 
     function renderFilterMenu() {
-      if (!filterMenu) return;
+      if (!filterMenuEl) return;
 
       const items = [
         { key: "mine", label: "My tasks" },
@@ -508,7 +559,7 @@
 
       const activeKey = state.mode === "delegated" ? "delegated" : "mine";
 
-      filterMenu.innerHTML = items
+      filterMenuEl.innerHTML = items
         .map((it) => {
           const active = it.key === activeKey ? "is-active" : "";
           return `
@@ -520,7 +571,7 @@
         .join("");
 
       // Bind clicks
-      filterMenu.querySelectorAll("[data-filter]").forEach((btn) => {
+      filterMenuEl.querySelectorAll("[data-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const key = String(btn.getAttribute("data-filter") || "");
           if (key === "delegated") return setFilter("delegated");
@@ -914,6 +965,21 @@
 
       const actionsHTML = `
         <div class="tv2-actionsbar" aria-label="List actions">
+          <div class="tv2-view-wrap">
+            <button
+              class="tv2-view-btn"
+              type="button"
+              id="tasksV2FilterBtn"
+              aria-label="View"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <i data-feather="sliders"></i>
+              <span class="tv2-view-label">View</span>
+            </button>
+            <div class="tasks-v2-dropdown" id="tasksV2FilterMenu" role="menu" aria-label="Tasks view" hidden></div>
+          </div>
+
           <button class="tv2-newtask-btn" type="button" id="tasksV2NewTaskBtn" aria-label="New task">
             <span class="tv2-newtask-plus">+</span>
             <span>New task</span>
@@ -1874,6 +1940,21 @@
 function wireListActions() {
       if (!gridEl) return;
 
+      // View (My tasks / Delegated tasks)
+      filterBtnEl = gridEl.querySelector("#tasksV2FilterBtn");
+      filterMenuEl = gridEl.querySelector("#tasksV2FilterMenu");
+
+      if (filterMenuEl) filterMenuEl.hidden = true;
+      if (filterBtnEl) filterBtnEl.setAttribute("aria-expanded", "false");
+
+      if (filterBtnEl) {
+        filterBtnEl.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleMenu();
+        });
+      }
+
       sortBtnEl = gridEl.querySelector("#tasksV2SortBtn");
       sortMenuEl = gridEl.querySelector("#tasksV2SortMenu");
       newTaskBtnEl = gridEl.querySelector("#tasksV2NewTaskBtn");
@@ -1910,6 +1991,14 @@ function wireListActions() {
 
       // Close sort menu when clicking anywhere else
       bindSortDocCloseOnce();
+      // Close view menu when clicking anywhere else
+      bindFilterDocCloseOnce();
+
+      // Render current view menu items (and wire clicks)
+      renderFilterMenu();
+
+      // Global keyboard shortcuts (Escape + day navigation)
+      bindGlobalKeydownOnce();
 
       if (window.feather) window.feather.replace();
     }
@@ -2100,47 +2189,9 @@ function wireListActions() {
       }
     }
 
-    // --- UI bindings ---
-    if (filterBtn && filterMenu) {
-      filterMenu.hidden = true;
-
-      filterBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleMenu();
-      });
-
-      document.addEventListener("click", (e) => {
-        if (filterMenu.hidden) return;
-        const t = e.target;
-        if (t && (filterMenu.contains(t) || filterBtn.contains(t))) return;
-        closeMenu();
-      });
-
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
-          // Close the top-most overlay first
-          if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) tv2ClosePointsModal();
-          else if (tv2NewTaskOverlay && tv2NewTaskOverlay.hidden === false) tv2CloseNewTaskModal();
-          else if (isMonthPickerOpen()) closeMonthPicker();
-          else if (document.body.classList.contains("tv2-detail-open")) closeDetailView();
-          else if (sortMenuEl && !sortMenuEl.hidden) closeSortMenu();
-          else closeMenu();
-          return;
-        }
-
-        // Keyboard day navigation
-        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-          // avoid interfering with typing, if any input exists
-          const ae = document.activeElement;
-          if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) return;
-
-          const cur = parseIsoDayToLocalDate(state.selectedDay) || new Date();
-          const next = e.key === "ArrowLeft" ? addDays(cur, -1) : addDays(cur, 1);
-          setSelectedDay(next);
-        }
-      });
-    }
+    // --- Global UI bindings ---
+    // (The view dropdown is wired inside wireListActions() because its DOM is dynamic.)
+    bindGlobalKeydownOnce();
 
     // Month picker bindings
     if (monthBtn && monthPickerEl) {
