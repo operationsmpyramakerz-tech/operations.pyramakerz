@@ -2323,7 +2323,18 @@ app.post("/api/task-points/:pointId/attachments", requireAuth, requirePage("Task
       },
     });
 
-    return res.json({ ok: true, pointId, filesCount: combined.length });
+    // Return the updated list so the UI can populate the dropdown immediately.
+    const files = (combined || [])
+      .map((f) => {
+        if (!f) return null;
+        if (f.type === "external" && f.external?.url) {
+          return { name: String(f.name || "file"), url: String(f.external.url) };
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    return res.json({ ok: true, pointId, filesCount: combined.length, files });
   } catch (e) {
     console.error("Task point attachment error:", e?.body || e);
     return res.status(500).json({ error: "Failed to upload attachment." });
