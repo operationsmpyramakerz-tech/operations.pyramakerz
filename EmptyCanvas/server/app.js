@@ -1151,6 +1151,82 @@ async function getTeamMembersByDepartmentCached(deptName) {
   });
 }
 
+
+const _TEAM_MEMBERS_ALL_TTL_SEC = 5 * 60; // 5 minutes
+
+async function getAllTeamMembersCached() {
+  if (!teamMembersDatabaseId) return [];
+
+  const key = `cache:notion:teamMembersAll:v1`;
+  return await cacheGetOrSet(key, _TEAM_MEMBERS_ALL_TTL_SEC, async () => {
+    const out = [];
+
+    // Try with sort by Name first (best UX). If schema differs, fall back to querying without sorts.
+    try {
+      let cursor = undefined;
+      let hasMore = true;
+
+      while (hasMore) {
+        const r = await notion.databases.query({
+          database_id: teamMembersDatabaseId,
+          page_size: 100,
+          start_cursor: cursor,
+          sorts: [{ property: "Name", direction: "ascending" }],
+        });
+
+        for (const p of r.results || []) {
+          out.push({
+            id: p.id,
+            name: p.properties?.Name?.title?.[0]?.plain_text || "Unnamed",
+            department: p.properties?.Department?.select?.name || "",
+          });
+        }
+
+        hasMore = !!r.has_more;
+        cursor = r.next_cursor || undefined;
+        if (!hasMore) break;
+      }
+
+      return out;
+    } catch (e) {
+      console.warn("[tasks] Team members all-users sort fallback:", e?.body || e);
+    }
+
+    // Fallback: no sorts, then sort locally.
+    try {
+      out.length = 0;
+      let cursor2 = undefined;
+      let hasMore2 = true;
+
+      while (hasMore2) {
+        const r2 = await notion.databases.query({
+          database_id: teamMembersDatabaseId,
+          page_size: 100,
+          start_cursor: cursor2,
+        });
+
+        for (const p of r2.results || []) {
+          out.push({
+            id: p.id,
+            name: p.properties?.Name?.title?.[0]?.plain_text || "Unnamed",
+            department: p.properties?.Department?.select?.name || "",
+          });
+        }
+
+        hasMore2 = !!r2.has_more;
+        cursor2 = r2.next_cursor || undefined;
+        if (!hasMore2) break;
+      }
+
+      out.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      return out;
+    } catch (e2) {
+      console.error("[tasks] Team members all-users fallback failed:", e2?.body || e2);
+      return [];
+    }
+  });
+}
+
 function _titleTextFromProp(prop) {
   if (!prop) return "";
   const arr = prop.title || prop.rich_text || [];
@@ -1603,7 +1679,8 @@ app.get("/api/tasks/meta", requireAuth, requirePage("Tasks"), async (req, res) =
   }
 });
 
-// Users list for Tasks filters (same Department as current user)
+// Users list for Tasks UI (all Team Members)
+// - Used by "Assignee To" in the New Task modal.
 app.get("/api/tasks/users", requireAuth, requirePage("Tasks"), async (req, res) => {
   res.set("Cache-Control", "no-store");
   if (!teamMembersDatabaseId) {
@@ -1615,13 +1692,10 @@ app.get("/api/tasks/users", requireAuth, requirePage("Tasks"), async (req, res) 
     if (!meId) return res.status(404).json({ error: "User not found." });
 
     const department = await getSessionUserDepartment(req);
-    if (!department) {
-      return res.json({ department: "", meId, users: [] });
-    }
+    const users = await getAllTeamMembersCached();
 
-    const users = await getTeamMembersByDepartmentCached(department);
     return res.json({
-      department,
+      department: department || "",
       meId,
       users: (users || []).map((u) => ({ id: u.id, name: u.name || "Unnamed" })),
     });
@@ -1643,13 +1717,17 @@ app.get("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
     const assigneeId = looksLikeNotionId(rawAssignee) ? toHyphenatedUUID(rawAssignee) : null;
 
     // Filter rules:
-    // - scope=mine  => tasks where Assignee To contains current user
-    // - scope=all   => tasks where Assignee To contains any user in SAME Department as current user
-    // - assignee=ID => tasks where Assignee To contains that user (must be in same Department)
+    // - scope=mine       => tasks where Assignee To contains current user
+    // - scope=delegated  => tasks where Created By contains current user
+    // - scope=all        => tasks where Assignee To contains any user in SAME Department as current user (legacy)
+    // - assignee=ID      => tasks where Assignee To contains that user (must be in same Department) (legacy)
     let filter = undefined;
 
     const def = schema.assigneeProp ? schema.props?.[schema.assigneeProp] : null;
     const canFilterByAssignee = !!(schema.assigneeProp && def && def.type === "relation");
+
+    const defCreatedBy = schema.createdByProp ? schema.props?.[schema.createdByProp] : null;
+    const canFilterByCreatedBy = !!(schema.createdByProp && defCreatedBy && defCreatedBy.type === "relation");
 
     // Build same-department member IDs (only if we need them)
     let deptMemberIds = [];
@@ -1661,7 +1739,14 @@ app.get("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
       }
     }
 
-    if (canFilterByAssignee && assigneeId) {
+    if (scope === "delegated") {
+      if (canFilterByCreatedBy && userId) {
+        filter = { property: schema.createdByProp, relation: { contains: userId } };
+      } else if (canFilterByAssignee && userId) {
+        // Fallback: if "Created By" relation is missing, at least show mine
+        filter = { property: schema.assigneeProp, relation: { contains: userId } };
+      }
+    } else if (canFilterByAssignee && assigneeId) {
       // Security: only allow selecting users from the same department
       if (deptMemberIds.length) {
         const allowed = new Set(deptMemberIds.map((x) => normalizeNotionId(x)));
