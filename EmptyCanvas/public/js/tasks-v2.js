@@ -287,6 +287,37 @@
     let calendarSwipeBound = false;
     let calendarTouchStartX = null;
 
+    // Small arrow (orange) that appears when there are tasks outside the current week.
+    // Clicking it jumps to the nearest day that has a task outside the displayed week.
+    let tv2WeekJumpBtn = null;
+
+    function tv2EnsureWeekJumpBtn() {
+      if (tv2WeekJumpBtn) return;
+      if (!daysEl) return;
+      const cal = daysEl.parentElement; // .tasks-v2-calendar
+      if (!cal) return;
+
+      tv2WeekJumpBtn = document.createElement("button");
+      tv2WeekJumpBtn.type = "button";
+      tv2WeekJumpBtn.className = "tv2-week-jump";
+      tv2WeekJumpBtn.id = "tasksV2WeekJumpBtn";
+      tv2WeekJumpBtn.setAttribute("aria-label", "Jump to tasks outside this week");
+      tv2WeekJumpBtn.hidden = true;
+      tv2WeekJumpBtn.style.display = "none";
+      tv2WeekJumpBtn.innerHTML = `<i data-feather="chevron-right"></i>`;
+
+      cal.appendChild(tv2WeekJumpBtn);
+
+      tv2WeekJumpBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const target = tv2WeekJumpBtn?.getAttribute("data-target-day") || "";
+        const dir = tv2WeekJumpBtn?.getAttribute("data-week-dir") || "";
+        if (!target) return;
+        setSelectedDay(target, { weekDir: dir === "prev" ? "prev" : "next" });
+      });
+    }
+
     function currentFilterLabel() {
       if (state.mode === "mine") return "My tasks";
       if (state.mode === "delegated") return "Delegated tasks";
@@ -630,28 +661,15 @@
     }
 
     function pickInitialDayFromTasks(tasks) {
-      const dueDays = Array.from(
-        new Set(
-          (tasks || [])
-            .map((t) => isoDayFromAny(t?.dueDate))
-            .filter(Boolean)
-        )
-      ).sort();
-
       let stored = "";
       try {
         stored = String(localStorage.getItem(LS_DAY) || "");
       } catch {}
 
-      if (stored) {
-        // keep stored even if no tasks that day (calendar navigation),
-        // but prefer a day that exists in the current dataset.
-        if (dueDays.includes(stored)) return stored;
-      }
-
+      // UX request:
+      // Default marked day should be TODAY (not the first day that has a task).
+      // If the user previously selected a day, keep it.
       const today = isoDayFromAny(new Date());
-      if (dueDays.includes(today)) return today;
-      if (dueDays.length) return dueDays[0];
       return stored || today;
     }
 
@@ -735,6 +753,40 @@
           .map((t) => isoDayFromAny(t?.dueDate))
           .filter(Boolean)
       );
+
+      // If there are tasks outside the currently displayed week, show a small jump arrow.
+      // - Prefer jumping forward (next week that contains tasks).
+      // - If there are only past tasks, jump backward.
+      tv2EnsureWeekJumpBtn();
+      if (tv2WeekJumpBtn) {
+        const dueDaysSorted = Array.from(dueSet).sort();
+        const weekStartIso = isoDayFromAny(weekStart);
+        const weekEndIso = isoDayFromAny(addDays(weekStart, 6));
+
+        let nextOutside = "";
+        let prevOutside = "";
+        for (const d of dueDaysSorted) {
+          if (d < weekStartIso) prevOutside = d; // keep the closest previous
+          if (!nextOutside && d > weekEndIso) nextOutside = d;
+        }
+
+        const target = nextOutside || prevOutside;
+        const dir = nextOutside ? "next" : prevOutside ? "prev" : "";
+
+        if (target && dir) {
+          tv2WeekJumpBtn.hidden = false;
+          tv2WeekJumpBtn.style.display = "inline-flex";
+          tv2WeekJumpBtn.setAttribute("data-target-day", target);
+          tv2WeekJumpBtn.setAttribute("data-week-dir", dir);
+          tv2WeekJumpBtn.setAttribute("aria-label", dir === "prev" ? "Jump to previous tasks" : "Jump to next tasks");
+          tv2WeekJumpBtn.innerHTML = dir === "prev" ? `<i data-feather="chevron-left"></i>` : `<i data-feather="chevron-right"></i>`;
+        } else {
+          tv2WeekJumpBtn.hidden = true;
+          tv2WeekJumpBtn.style.display = "none";
+          tv2WeekJumpBtn.removeAttribute("data-target-day");
+          tv2WeekJumpBtn.removeAttribute("data-week-dir");
+        }
+      }
 
       const btns = [];
       for (let i = 0; i < 7; i++) {
@@ -1210,6 +1262,8 @@
 
       // Close by clicking outside
       tv2PointsOverlay.addEventListener("click", (e) => {
+        // Any click inside the modal should close any open attachments dropdown.
+        tv2CloseAllPointFilesMenus();
         if (e.target === tv2PointsOverlay) tv2ClosePointsModal();
       });
 
@@ -1232,6 +1286,7 @@
 
     function tv2ClosePointsModal() {
       if (!tv2PointsOverlay) return;
+      tv2CloseAllPointFilesMenus();
       tv2PointsOverlay.hidden = true;
       tv2PointsOverlay.style.display = "none";
       document.body.classList.remove("tv2-modal-open");
@@ -1261,6 +1316,46 @@
       const checked = list.reduce((acc, t) => acc + (t?.checked ? 1 : 0), 0);
       const pct = total ? Math.max(0, Math.min(100, Math.round((checked / total) * 100))) : 0;
       return { total, checked, pct };
+    }
+
+    function tv2PointFilesMenuHtml(files) {
+      const list = Array.isArray(files)
+        ? files
+            .map((f) => {
+              if (!f) return null;
+              const name = String(f?.name || "file");
+              const url = String(f?.url || "");
+              return { name, url };
+            })
+            .filter(Boolean)
+        : [];
+
+      if (!list.length) {
+        return `<div class="tv2-point-files-empty">No attachments</div>`;
+      }
+
+      return list
+        .map((f) => {
+          const name = escapeHtml(f.name || "file");
+          const url = String(f.url || "");
+          if (url) {
+            return `<a class="tv2-point-file-item" role="menuitem" href="${escapeHtml(url)}" target="_blank" rel="noopener">${name}</a>`;
+          }
+          return `<span class="tv2-point-file-item is-disabled" role="menuitem">${name}</span>`;
+        })
+        .join("");
+    }
+
+    function tv2CloseAllPointFilesMenus() {
+      if (!tv2PointsListEl) return;
+      try {
+        tv2PointsListEl.querySelectorAll(".tv2-point-files-menu").forEach((m) => {
+          m.hidden = true;
+        });
+        tv2PointsListEl.querySelectorAll(".tv2-point-files-btn").forEach((b) => {
+          b.setAttribute("aria-expanded", "false");
+        });
+      } catch {}
     }
 
     function tv2UpdatePointsStatsUI() {
@@ -1373,6 +1468,29 @@
             else uploadBtnEl.insertAdjacentHTML("beforeend", `<span class="tv2-point-badge">${escapeHtml(String(count))}</span>`);
           }
         }
+
+        // Update in-memory list + dropdown menu so the user can view attachments immediately.
+        const files = Array.isArray(data?.files) ? data.files : null;
+        if (files && tv2PointsTask && Array.isArray(tv2PointsTask.todos)) {
+          try {
+            const item = tv2PointsTask.todos.find((t) => String(t?.id || "") === String(pointId));
+            if (item) item.files = files;
+          } catch {}
+
+          const row = uploadBtnEl && uploadBtnEl.closest ? uploadBtnEl.closest(".tv2-point-row") : null;
+          if (row) {
+            const filesBtn = row.querySelector(".tv2-point-files-btn");
+            const menu = row.querySelector(".tv2-point-files-menu");
+            if (filesBtn) {
+              filesBtn.disabled = !(Array.isArray(files) && files.length);
+            }
+            if (menu) {
+              menu.innerHTML = tv2PointFilesMenuHtml(files);
+              menu.hidden = true;
+              if (filesBtn) filesBtn.setAttribute("aria-expanded", "false");
+            }
+          }
+        }
       } catch (e) {
         console.error(e);
         if (window.toast) window.toast.error("Failed to upload attachment");
@@ -1408,9 +1526,12 @@
         .map((t) => {
           const id = String(t?.id || "");
           const checked = !!t?.checked;
-          const filesCount = Array.isArray(t?.files) ? t.files.length : 0;
+          const files = Array.isArray(t?.files) ? t.files : [];
+          const filesCount = files.length;
           const disabledAttr = editable && id ? "" : "disabled";
           const badge = filesCount ? `<span class="tv2-point-badge">${escapeHtml(String(filesCount))}</span>` : "";
+          const menuHtml = tv2PointFilesMenuHtml(files);
+          const filesBtnDisabled = filesCount ? "" : "disabled";
 
           return `
             <div class="tv2-point-row${checked ? " is-checked" : ""}${!editable ? " is-readonly" : ""}" data-point-id="${escapeHtml(id)}">
@@ -1419,8 +1540,19 @@
               <div class="tv2-point-actions">
                 <button class="tv2-point-upload" type="button" aria-label="Upload attachment" ${disabledAttr}>
                   <i data-feather="paperclip"></i>
+                  <span class="tv2-point-upload__label">Upload</span>
                   ${badge}
                 </button>
+
+                <div class="tv2-point-files-wrap">
+                  <button class="tv2-point-files-btn" type="button" aria-label="View attachments" aria-haspopup="menu" aria-expanded="false" ${filesBtnDisabled}>
+                    <i data-feather="chevron-down"></i>
+                  </button>
+                  <div class="tv2-point-files-menu" role="menu" hidden>
+                    ${menuHtml}
+                  </div>
+                </div>
+
                 <input class="tv2-point-file-input" type="file" multiple hidden />
               </div>
             </div>
@@ -1447,6 +1579,9 @@
         const uploadBtn = row.querySelector(".tv2-point-upload");
         const fileInput = row.querySelector(".tv2-point-file-input");
 
+        const filesBtn = row.querySelector(".tv2-point-files-btn");
+        const filesMenu = row.querySelector(".tv2-point-files-menu");
+
         if (uploadBtn && fileInput) {
           uploadBtn.addEventListener("click", (e) => {
             e.preventDefault();
@@ -1462,6 +1597,29 @@
             if (!editable) return;
             if (!pointId) return;
             tv2UploadPointAttachments(pointId, fileInput, uploadBtn);
+          });
+        }
+
+        // Attachments dropdown
+        if (filesBtn && filesMenu) {
+          // Prevent overlay click handler from closing the menu immediately.
+          filesBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (filesBtn.disabled) return;
+
+            const isOpen = filesMenu.hidden === false;
+            tv2CloseAllPointFilesMenus();
+
+            if (!isOpen) {
+              filesMenu.hidden = false;
+              filesBtn.setAttribute("aria-expanded", "true");
+            }
+          });
+
+          // Keep clicks inside the menu from bubbling to the overlay (optional UX)
+          filesMenu.addEventListener("click", (e) => {
+            e.stopPropagation();
           });
         }
       });
