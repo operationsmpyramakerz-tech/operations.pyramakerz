@@ -1,7 +1,7 @@
 // public/js/tasks-v2.js
 // Tasks (V2) UI wiring:
 // - Calendar (week) built from Delivery Date (Notion "Delivery Date" -> API "dueDate")
-// - Filter dropdown: All Tasks (same department), Mine tasks, and users in same department
+// - Filter dropdown: My tasks and Delegated tasks
 
 (function () {
   "use strict";
@@ -168,7 +168,7 @@
 
     let state = {
       // mode: 'all' | 'mine' | 'user'
-      // Default view requested: Mine tasks
+      // Default view: My tasks
       mode: "mine",
       assigneeId: "",
       selectedDay: "",
@@ -288,12 +288,9 @@
     let calendarTouchStartX = null;
 
     function currentFilterLabel() {
-      if (state.mode === "mine") return "Mine tasks";
-      if (state.mode === "user") {
-        const name = usersById.get(state.assigneeId) || "User";
-        return name;
-      }
-      return "All Tasks";
+      if (state.mode === "mine") return "My tasks";
+      if (state.mode === "delegated") return "Delegated tasks";
+      return "My tasks";
     }
 
     // ---- Sort dropdown (inside list) ----
@@ -354,14 +351,14 @@
       else closeMenu();
     }
 
-    function setFilter(mode, assigneeId) {
-      state.mode = mode;
-      state.assigneeId = assigneeId || "";
+    function setFilter(mode) {
+      const m = String(mode || "").trim();
+      state.mode = m === "delegated" ? "delegated" : "mine";
+      state.assigneeId = "";
 
       // Persist
       try {
-        const v = mode === "user" && state.assigneeId ? `user:${state.assigneeId}` : mode;
-        localStorage.setItem(LS_FILTER, v);
+        localStorage.setItem(LS_FILTER, state.mode);
       } catch {}
 
       renderFilterMenu();
@@ -473,24 +470,15 @@
     function renderFilterMenu() {
       if (!filterMenu) return;
 
-      const items = [];
-      items.push({ key: "all", label: "All Tasks" });
-      items.push({ key: "mine", label: "Mine tasks" });
+      const items = [
+        { key: "mine", label: "My tasks" },
+        { key: "delegated", label: "Delegated tasks" },
+      ];
 
-      // Users in same department (excluding me)
-      const others = (deptUsers || []).filter((u) => u?.id && u.id !== meId);
-      if (others.length) {
-        items.push({ sep: true });
-        for (const u of others) {
-          items.push({ key: `user:${u.id}`, label: u.name || "Unnamed" });
-        }
-      }
-
-      const activeKey = state.mode === "user" ? `user:${state.assigneeId}` : state.mode;
+      const activeKey = state.mode === "delegated" ? "delegated" : "mine";
 
       filterMenu.innerHTML = items
         .map((it) => {
-          if (it.sep) return `<div class="tasks-v2-dropdown-sep" role="separator"></div>`;
           const active = it.key === activeKey ? "is-active" : "";
           return `
             <button class="tasks-v2-dropdown-item ${active}" type="button" role="menuitem" data-filter="${escapeHtml(it.key)}">
@@ -504,9 +492,8 @@
       filterMenu.querySelectorAll("[data-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const key = String(btn.getAttribute("data-filter") || "");
-          if (key === "all") return setFilter("all");
-          if (key === "mine") return setFilter("mine");
-          if (key.startsWith("user:")) return setFilter("user", key.slice(5));
+          if (key === "delegated") return setFilter("delegated");
+          return setFilter("mine");
         });
       });
 
@@ -543,29 +530,18 @@
     }
 
     function restoreFilterFromStorage() {
-      // Default view requested: Mine tasks
+      // Default view: My tasks
       let v = "mine";
       try {
         v = String(localStorage.getItem(LS_FILTER) || "mine");
       } catch {}
 
-      if (v === "mine") {
+      if (String(v || "").trim() === "delegated") {
+        state.mode = "delegated";
+      } else {
         state.mode = "mine";
-        state.assigneeId = "";
-        return;
       }
 
-      if (v.startsWith("user:")) {
-        const id = v.slice(5);
-        const exists = deptUsers.some((u) => u?.id === id);
-        if (exists) {
-          state.mode = "user";
-          state.assigneeId = id;
-          return;
-        }
-      }
-
-      state.mode = "all";
       state.assigneeId = "";
     }
 
@@ -980,7 +956,7 @@
 
         card.addEventListener("click", () => {
           // UX request:
-          // - Mine tasks (assignee = me): open a small Task Points window (check + upload per point)
+          // - My tasks (assignee = me): open a small Task Points window (check + upload per point)
           // - Other scopes: keep the existing details view
           if (state.mode === "mine") {
             openTaskPointsForTask(id);
@@ -1510,7 +1486,7 @@
         if (!r.ok) throw new Error("Failed to load task");
         const data = await r.json();
 
-        // We only enable editing in Mine tasks view (UX request)
+        // We only enable editing in My tasks view (UX request)
         tv2RenderPointsModal(data, { canEdit: state.mode === "mine" });
 
         // Sync card completion from fetched data (best-effort)
@@ -1939,13 +1915,10 @@ function wireListActions() {
       try {
         const qs = new URLSearchParams();
 
-        if (state.mode === "mine") {
+        if (state.mode === "delegated") {
+          qs.set("scope", "delegated");
+        } else {
           qs.set("scope", "mine");
-        } else if (state.mode === "all") {
-          qs.set("scope", "all");
-        } else if (state.mode === "user" && state.assigneeId) {
-          qs.set("scope", "all"); // still same dept, but server will use assignee
-          qs.set("assignee", state.assigneeId);
         }
 
         const url = qs.toString() ? `/api/tasks?${qs.toString()}` : "/api/tasks";
