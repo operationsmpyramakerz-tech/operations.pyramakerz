@@ -406,6 +406,40 @@ body.tasks-v2 .tv2-actionsbar{
   justify-content: flex-end;
 }
 
+body.tasks-v2 .tv2-view-wrap{
+  position: relative;
+}
+
+body.tasks-v2 .tv2-view-btn{
+  height: 46px;
+  border-radius: 18px;
+  border: 0;
+  background: #111827;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  cursor: pointer;
+  box-shadow: 0 18px 34px rgba(0,0,0,0.18);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.tasks-v2 .tv2-view-btn:hover{ opacity: 0.96; }
+body.tasks-v2 .tv2-view-btn:active{ transform: translateY(1px); }
+
+body.tasks-v2 .tv2-view-btn svg{
+  width: 20px;
+  height: 20px;
+}
+
+body.tasks-v2 .tv2-view-label{
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
 body.tasks-v2 .tv2-newtask-btn{
   border: 0;
   background: #111827;
