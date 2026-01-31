@@ -4526,7 +4526,8 @@ app.get(
 
     res.set("Cache-Control", "no-store");
     try {
-      const cacheKey = "cache:api:orders:requested:v2";
+      // Cache version is bumped when response logic/shape changes.
+      const cacheKey = "cache:api:orders:requested:v3";
       const data = await cacheGetOrSet(cacheKey, 60, async () => {
       const all = [];
       let hasMore = true,
@@ -4614,6 +4615,52 @@ app.get(
         return null;
       };
 
+      // Helper: safely read text from Notion props (title / rich_text / select/status / formula / rollup)
+      // Used as a fallback when product relation lookups fail or are temporarily cached as "Unknown Product".
+      const parseTextProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "title") {
+            const t = (prop.title || []).map((r) => r?.plain_text || "").join("").trim();
+            return t || null;
+          }
+          if (prop.type === "rich_text") {
+            const t = (prop.rich_text || []).map((r) => r?.plain_text || "").join("").trim();
+            return t || null;
+          }
+          if (prop.type === "select") return prop.select?.name || null;
+          if (prop.type === "status") return prop.status?.name || null;
+          if (prop.type === "number" && (prop.number === 0 || typeof prop.number === "number")) {
+            return String(prop.number);
+          }
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "string") {
+              const t = String(prop.formula.string || "").trim();
+              return t || null;
+            }
+            if (prop.formula?.type === "number" && typeof prop.formula.number === "number") {
+              return String(prop.formula.number);
+            }
+          }
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number" && typeof prop.rollup.number === "number") {
+              return String(prop.rollup.number);
+            }
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              const parts = [];
+              for (const x of arr) {
+                const t = _extractPropText(x);
+                if (t) parts.push(t);
+              }
+              const joined = parts.join(", ").trim();
+              return joined || null;
+            }
+          }
+        } catch {}
+        return null;
+      };
+
       // ----- Notion "ID" (unique_id) helpers for Requested Orders -----
       const getPropInsensitive = (props, name) => {
         if (!props || !name) return null;
@@ -4696,10 +4743,20 @@ app.get(
       const productCache = new Map();
       async function getProductInfo(productPageId) {
         if (!productPageId) {
-          return { name: "Unknown Product", unitPrice: null, image: null, url: null };
+          return { name: "Unknown Product", idCode: null, unitPrice: null, image: null, url: null };
         }
         if (productCache.has(productPageId)) return productCache.get(productPageId);
-        const info = await getProductInfoCached(productPageId);
+        let info = await getProductInfoCached(productPageId);
+
+        // If a transient Notion error happened earlier, we might have cached "Unknown Product" for hours.
+        // Best-effort: bust that per-product cache once, then retry.
+        if (String(info?.name || "").trim().toLowerCase() === "unknown product") {
+          try {
+            await cacheDel(`cache:notion:productInfo:${productPageId}:v2`);
+            info = await getProductInfoCached(productPageId);
+          } catch {}
+        }
+
         productCache.set(productPageId, info);
         return info;
       }
@@ -4723,10 +4780,38 @@ app.get(
           const productPageId =
             Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
           const prod = await getProductInfo(productPageId);
-          const productName = prod.name;
-          const unitPrice = prod.unitPrice;
-          const productImage = prod.image;
-          const productUrl = prod.url;
+
+          // Some orders may temporarily show "Unknown Product" in Operations due to a cached lookup failure.
+          // Use best-effort fallbacks from the Orders DB itself.
+          const fallbackName =
+            parseTextProp(getPropInsensitive(props, "Product Name")) ||
+            parseTextProp(getPropInsensitive(props, "Name")) ||
+            parseTextProp(getPropInsensitive(props, "Product")) ||
+            parseTextProp(getPropInsensitive(props, "Component")) ||
+            null;
+
+          const productName =
+            String(prod?.name || "").trim() &&
+            String(prod?.name || "").trim().toLowerCase() !== "unknown product"
+              ? prod.name
+              : fallbackName || prod?.name || "Unknown Product";
+
+          const fallbackUnitPrice =
+            parseNumberProp(getPropInsensitive(props, "Unity Price")) ??
+            parseNumberProp(getPropInsensitive(props, "Unit price")) ??
+            parseNumberProp(getPropInsensitive(props, "Unit Price")) ??
+            parseNumberProp(getPropInsensitive(props, "Price")) ??
+            null;
+
+          const unitPrice =
+            typeof prod?.unitPrice === "number" && Number.isFinite(prod.unitPrice)
+              ? prod.unitPrice
+              : typeof fallbackUnitPrice === "number" && Number.isFinite(fallbackUnitPrice)
+                ? fallbackUnitPrice
+                : null;
+
+          const productImage = prod?.image || null;
+          const productUrl = prod?.url || null;
 
           const reason = props.Reason?.title?.[0]?.plain_text || "No Reason";
 
@@ -4926,7 +5011,7 @@ app.post(
       );
 
       // Invalidate caches so lists reflect the assignment immediately.
-      await cacheDel("cache:api:orders:requested:v2");
+      await cacheDel("cache:api:orders:requested:v3");
       const memberIdsNorm = (memberIds || [])
         .map((x) => String(x || "").trim())
         .filter(Boolean)
@@ -5151,7 +5236,7 @@ app.post(
       );
 
       // Invalidate cached lists (Operations view).
-      await cacheDel("cache:api:orders:requested:v2");
+      await cacheDel("cache:api:orders:requested:v3");
 
       res.json({
         success: true,
@@ -5238,7 +5323,7 @@ app.post(
         ),
       );
 
-      await cacheDel("cache:api:orders:requested:v2");
+      await cacheDel("cache:api:orders:requested:v3");
 
       res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
     } catch (e) {
@@ -5284,7 +5369,7 @@ app.post(
       });
 
       // Invalidate caches so quantities update immediately.
-      await cacheDel("cache:api:orders:requested:v2");
+      await cacheDel("cache:api:orders:requested:v3");
       try {
         const page = await notion.pages.retrieve({ page_id: id });
         const rel = page?.properties?.["Teams Members"]?.relation || [];
