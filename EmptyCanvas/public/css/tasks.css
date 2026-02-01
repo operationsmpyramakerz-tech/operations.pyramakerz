@@ -663,23 +663,7 @@ body.tasks-v2 .tv2-progress-row{
   align-items: center;
   gap: 10px;
 }
-body.tasks-v2 .tv2-progress-meta{
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-  flex: 0 0 auto;
-}
 
-body.tasks-v2 .tv2-card-arrow{
-  width: 34px;
-  height: 34px;
-}
-
-body.tasks-v2 .tv2-card-arrow svg{
-  width: 16px;
-  height: 16px;
-}
 body.tasks-v2 .tv2-progress{
   position: relative;
   flex: 1 1 auto;
