@@ -1052,12 +1052,7 @@
                   <div class="tv2-progress__fill" style="width:${pct}%"></div>
                   <div class="tv2-progress__pct">${pct}%</div>
                 </div>
-                <div class="tv2-progress-meta">
-                  <button class="tv2-card-arrow tv2-circle tv2-circle--dark" type="button" aria-label="Open task">
-                    <i data-feather="chevron-right"></i>
-                  </button>
-                  <div class="tv2-progress__due">${escapeHtml(dueLabel)}</div>
-                </div>
+                <div class="tv2-progress__due">${escapeHtml(dueLabel)}</div>
               </div>
 
               <div class="tv2-card__bottom">
