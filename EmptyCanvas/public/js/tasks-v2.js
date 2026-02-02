@@ -1588,6 +1588,31 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
           if (tv2PointsBarEl) tv2PointsBarEl.setAttribute("aria-valuenow", String(pct));
           if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = `${pct}%`;
         }
+
+        // Auto-update task status in the UI when the backend updates the Notion page.
+        // Server may return { taskStatus: { name, color } }.
+        const nextStatusName = String(data?.taskStatus?.name || data?.statusName || data?.newStatusName || "").trim();
+        const nextStatusColor = String(data?.taskStatus?.color || "").trim();
+
+        if (nextStatusName) {
+          // Update the currently open task details (modal state)
+          if (tv2PointsTask) {
+            if (!tv2PointsTask.status) tv2PointsTask.status = { name: nextStatusName, color: nextStatusColor || "default" };
+            tv2PointsTask.status.name = nextStatusName;
+            if (nextStatusColor) tv2PointsTask.status.color = nextStatusColor;
+          }
+
+          // Update the list card state
+          const idx = state.tasks.findIndex((t) => t && t.id === tv2PointsTaskId);
+          if (idx !== -1) {
+            if (!state.tasks[idx].status) state.tasks[idx].status = { name: nextStatusName, color: nextStatusColor || "default" };
+            state.tasks[idx].status.name = nextStatusName;
+            if (nextStatusColor) state.tasks[idx].status.color = nextStatusColor;
+          }
+
+          // Re-render (task may move across status tabs)
+          renderTasksList();
+        }
       } catch (err) {
         // Revert
         item.checked = !checked;
