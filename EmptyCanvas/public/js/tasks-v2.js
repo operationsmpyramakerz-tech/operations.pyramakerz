@@ -167,6 +167,7 @@
     const LS_FILTER = "tasksV2.filter";
     const LS_DAY = "tasksV2.day";
     const LS_SORT = "tasksV2.sort";
+    const LS_STATUS = "tasksV2.statusTab";
 
     let deptUsers = [];
     let meId = "";
@@ -185,7 +186,19 @@
       selectedTaskUrl: "",
       // sort: 'priority' | 'delivery' | 'created'
       sortKey: "delivery",
+      // Status tabs
+      statusTab: "all",
     };
+
+
+const STATUS_TABS = [
+  { key: "all", label: "All", notion: "" },
+  { key: "not-started", label: "Not started", notion: "Not started" },
+  { key: "in-progress", label: "In progress", notion: "In progress" },
+  { key: "paused", label: "Paused", notion: "Paused" },
+  { key: "done", label: "Done", notion: "Done" },
+  { key: "canceled", label: "Canceled", notion: "Canceled" },
+];
 
     let monthPickerYear = new Date().getFullYear();
 
@@ -329,6 +342,62 @@
       if (state.mode === "delegated") return "Delegated tasks";
       return "My tasks";
     }
+
+// ---- Status tabs (filter by task Status) ----
+function tv2NormalizeKey(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function tv2ResolveStatusNotionName(key) {
+  const k = String(key || "").trim();
+  const found = STATUS_TABS.find((t) => t.key === k);
+  return found ? String(found.notion || "") : "";
+}
+
+function restoreStatusFromStorage() {
+  let v = "all";
+  try {
+    v = String(localStorage.getItem(LS_STATUS) || "all");
+  } catch {}
+
+  if (!STATUS_TABS.some((t) => t.key === v)) v = "all";
+  state.statusTab = v;
+}
+
+function setStatusTab(key) {
+  const k = String(key || "").trim();
+  if (!STATUS_TABS.some((t) => t.key === k)) return;
+
+  state.statusTab = k;
+  try {
+    localStorage.setItem(LS_STATUS, k);
+  } catch {}
+
+  // UX: when switching status, return to list view and close menus
+  closeMenu();
+  closeSortMenu();
+  closeDetailView();
+
+  renderCalendar();
+  renderTasksList();
+}
+
+function filterTasksByStatus(list) {
+  const arr = Array.isArray(list) ? list : [];
+  const key = String(state.statusTab || "all");
+  if (!key || key === "all") return arr;
+
+  const want = tv2ResolveStatusNotionName(key);
+  if (!want) return arr;
+  const wantNorm = tv2NormalizeKey(want);
+
+  return arr.filter((t) => tv2NormalizeKey(t?.status?.name) === wantNorm);
+}
+
 
     // ---- Sort dropdown (inside list) ----
     function isSortMenuOpen() {
@@ -799,10 +868,10 @@
         monthLabelEl.textContent = formatMonthName(selectedDate) || "";
       }
 
+      const tasksForCalendar = filterTasksByStatus(state.tasks || []);
+
       const dueSet = new Set(
-        (state.tasks || [])
-          .map((t) => isoDayFromAny(t?.dueDate))
-          .filter(Boolean)
+        tasksForCalendar.map((t) => isoDayFromAny(t?.dueDate)).filter(Boolean)
       );
 
       // If there are tasks outside the currently displayed week, show a small jump arrow.
@@ -930,8 +999,9 @@
     function renderTasksList() {
       if (!gridEl) return;
 
-      const tasks = Array.isArray(state.tasks) ? state.tasks : [];
-      const visible = sortTasks(tasks);
+      const allTasks = Array.isArray(state.tasks) ? state.tasks : [];
+      const filteredTasks = filterTasksByStatus(allTasks);
+      const visible = sortTasks(filteredTasks);
 
       // Keep selection only if it still exists in the current visible list
       if (state.selectedTaskId && !visible.some((t) => t.id === state.selectedTaskId)) {
@@ -1004,8 +1074,35 @@
         </div>
       `;
 
+const statusTabsHTML = `
+  <div class="tv2-status-tabs" role="tablist" aria-label="Task status">
+    ${STATUS_TABS.map((tab) => {
+      const active = tab.key === state.statusTab;
+      return `
+        <button
+          class="tv2-status-tab${active ? " is-active" : ""}"
+          type="button"
+          role="tab"
+          aria-selected="${active ? "true" : "false"}"
+          data-status-tab="${escapeHtml(tab.key)}"
+        >
+          ${escapeHtml(tab.label)}
+        </button>
+      `;
+    }).join("")}
+  </div>
+`;
+
+const toolbarHTML = `
+  <div class="tv2-toolbar" aria-label="Tasks toolbar">
+    ${statusTabsHTML}
+    ${actionsHTML}
+  </div>
+`;
+
+
       if (!visible.length) {
-        gridEl.innerHTML = actionsHTML + `<div class="tv2-empty">No tasks</div>`;
+        gridEl.innerHTML = toolbarHTML + `<div class="tv2-empty">No tasks</div>`;
         wireListActions();
         if (window.feather) window.feather.replace();
         return;
@@ -1033,10 +1130,18 @@
 
           const avatars = renderAvatars(t?.assignees || [], { center: false, max: 3 });
 
+
+const prioName = String(t?.priority?.name || "");
+const prioNorm = prioName.trim().toLowerCase();
+let prioClass = "";
+if (prioNorm.includes("high")) prioClass = " tv2-card--prio-high";
+else if (prioNorm.includes("medium")) prioClass = " tv2-card--prio-medium";
+else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
+
           const selected = t.id === state.selectedTaskId ? " is-selected" : "";
 
           return `
-            <article class="tv2-card${selected}" data-task-id="${escapeHtml(t.id)}" data-due-day="${escapeHtml(
+            <article class="tv2-card${prioClass}${selected}" data-task-id="${escapeHtml(t.id)}" data-due-day="${escapeHtml(
             dueIso
           )}" aria-label="${escapeHtml(t.title || "Task")}">
               <div class="tv2-card__top">
@@ -1063,7 +1168,7 @@
         })
         .join("");
 
-      gridEl.innerHTML = actionsHTML + cards;
+      gridEl.innerHTML = toolbarHTML + cards;
 
       wireListActions();
 
@@ -1940,6 +2045,19 @@
 function wireListActions() {
       if (!gridEl) return;
 
+// Status tabs
+try {
+  gridEl.querySelectorAll("[data-status-tab]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = String(btn.getAttribute("data-status-tab") || "").trim();
+      setStatusTab(key);
+    });
+  });
+} catch {}
+
+
       // View (My tasks / Delegated tasks)
       filterBtnEl = gridEl.querySelector("#tasksV2FilterBtn");
       filterMenuEl = gridEl.querySelector("#tasksV2FilterMenu");
@@ -2263,6 +2381,7 @@ function wireListActions() {
       await loadUsers();
       restoreFilterFromStorage();
       restoreSortFromStorage();
+      restoreStatusFromStorage();
       renderFilterMenu();
       closeMenu();
       closeSortMenu();
