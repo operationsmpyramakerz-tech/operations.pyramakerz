@@ -397,6 +397,81 @@ body.tasks-v2 .tasks-v2-day.is-active .tasks-v2-day__num{
    LIST ACTIONS (New task + Sort)
    ================================ */
 
+
+/* ================================
+   STATUS TABS (Filter by Status)
+   ================================ */
+
+body.tasks-v2 .tv2-toolbar{
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+body.tasks-v2 .tv2-status-tabs{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 2px;
+}
+
+body.tasks-v2 .tv2-status-tabs::-webkit-scrollbar{
+  height: 6px;
+}
+body.tasks-v2 .tv2-status-tabs::-webkit-scrollbar-thumb{
+  background: rgba(17,24,39,0.18);
+  border-radius: 999px;
+}
+
+body.tasks-v2 .tv2-status-tab{
+  border: 0;
+  background: transparent;
+  color: rgba(17,24,39,0.55);
+  font-weight: 900;
+  font-size: 14px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+body.tasks-v2 .tv2-status-tab:hover{
+  background: #F3F4F6;
+  color: rgba(17,24,39,0.92);
+}
+
+body.tasks-v2 .tv2-status-tab:active{
+  transform: translateY(1px);
+}
+
+body.tasks-v2 .tv2-status-tab:focus-visible{
+  outline: 3px solid rgba(17,24,39,0.35);
+  outline-offset: 2px;
+}
+
+body.tasks-v2 .tv2-status-tab.is-active{
+  background: #0B5FFF;
+  color: #fff;
+  box-shadow: 0 14px 26px rgba(0,0,0,0.16);
+}
+
+/* On very narrow screens, keep actions aligned to the right */
+@media (max-width: 520px){
+  body.tasks-v2 .tv2-toolbar{
+    gap: 10px;
+  }
+}
+
+
+
 body.tasks-v2 .tv2-actionsbar{
   grid-column: 1 / -1;
   display: flex;
@@ -626,7 +701,25 @@ body.tasks-v2 .tv2-card{
   border-radius: 28px;
   padding: 16px 16px 14px;
   box-shadow: 0 18px 40px rgba(0,0,0,0.20);
+  position: relative;
 }
+
+/* Priority side color (requested) */
+body.tasks-v2 .tv2-card::before{
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 10px;
+  border-radius: 999px;
+  background: #E5E7EB;
+}
+
+body.tasks-v2 .tv2-card--prio-high::before{ background: #EF4444; }
+body.tasks-v2 .tv2-card--prio-medium::before{ background: #F59E0B; }
+body.tasks-v2 .tv2-card--prio-low::before{ background: #10B981; }
+
 
 body.tasks-v2 .tv2-card__top{
   display: flex;
