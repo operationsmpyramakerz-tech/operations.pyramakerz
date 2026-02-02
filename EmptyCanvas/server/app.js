@@ -2251,7 +2251,49 @@ app.post("/api/task-points/:pointId/check", requireAuth, requirePage("Tasks"), a
       console.warn("[tasks] completion recompute after point check failed:", e?.message || e);
     }
 
-    return res.json({ ok: true, pointId, checked, completionPct });
+    // Auto-update Task Status based on checklist progress (requested UX):
+    // - First progress -> "In progress"
+    // - 100% -> "Done"
+    // - 0% -> "Not started" (best-effort)
+    // This is best-effort: point check should still succeed even if the status update fails.
+    let taskStatus = null;
+    try {
+      const schema = authz?.schema || {};
+      const statusProp = schema.statusProp;
+
+      if (statusProp && typeof completionPct === "number" && Number.isFinite(completionPct)) {
+        const pct = Math.max(0, Math.min(100, Math.round(Number(completionPct))));
+        const desiredName = pct >= 100 ? "Done" : pct > 0 ? "In progress" : "Not started";
+
+        const norm = (s) => String(s || "").trim().toLowerCase();
+        const cur = _selectFromProp(authz?.taskPage?.properties?.[statusProp]) || { name: "", color: "default" };
+
+        if (norm(cur.name) !== norm(desiredName)) {
+          const propType =
+            authz?.taskPage?.properties?.[statusProp]?.type || schema?.props?.[statusProp]?.type || "select";
+          const updates = {};
+          if (propType === "status") updates[statusProp] = { status: { name: desiredName } };
+          else updates[statusProp] = { select: { name: desiredName } };
+
+          await notion.pages.update({ page_id: taskPageId, properties: updates });
+        }
+
+        // Best-effort color lookup from DB schema options
+        let color = cur.color || "default";
+        try {
+          const def = schema?.props?.[statusProp];
+          const opts = def?.type === "status" ? def.status?.options : def?.type === "select" ? def.select?.options : [];
+          const hit = Array.isArray(opts) ? opts.find((o) => norm(o?.name) === norm(desiredName)) : null;
+          if (hit && hit.color) color = hit.color;
+        } catch {}
+
+        taskStatus = { name: desiredName, color };
+      }
+    } catch (e) {
+      console.warn("[tasks] status auto-update after point check failed:", e?.body || e);
+    }
+
+    return res.json({ ok: true, pointId, checked, completionPct, taskStatus });
   } catch (e) {
     console.error("Task point check error:", e?.body || e);
     return res.status(500).json({ error: "Failed to update task point." });
