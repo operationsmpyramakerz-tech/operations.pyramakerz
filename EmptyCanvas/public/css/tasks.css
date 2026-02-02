@@ -9,7 +9,7 @@ body.tasks-v2{
   --tv2-orange: #ffffff;
   --tv2-orange-2: #000000;
   --tv2-black: #ffffff;
-  --tv2-yellow: #F6D66F;
+  --tv2-yellow: #ff7518;
 
   /* Override the global app background (image) for this page */
   background: #ffffff !important;
@@ -239,12 +239,12 @@ body.tasks-v2 .tasks-v2-day__num{
 
 /* Days that contain at least one task get a stronger border */
 body.tasks-v2 .tasks-v2-day.has-task{
-  border-color: #F59E0B;
+  border-color: #ff7518;
   border-width: 2px;
 }
 
 body.tasks-v2 .tasks-v2-day.has-task.is-active{
-  border-color: #F59E0B;
+  border-color: #ff7518;
 }
 
 /* Orange jump arrow (appears when there are tasks outside the current week) */
