@@ -40,6 +40,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const norm = (s) => String(s || '').toLowerCase().trim();
   const toDate = (d) => new Date(d || 0);
 
+  // Current Orders groups should be stable when editing/adding items.
+  // The backend tracking endpoint groups items by Reason, so we mirror that here.
+  function groupKeyForOrder(o) {
+    const r = String(o?.reason || '').trim();
+    return norm(r) || 'no reason';
+  }
+
   const escapeHTML = (s) =>
     String(s ?? '').replace(/[&<>"']/g, (c) => ({
       '&': '&amp;',
@@ -532,19 +539,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function buildGroups(list) {
     const sorted = sortByNewest(list);
 
-    // Group by "date + time" to the minute (so orders that differ by 1 minute won't be merged).
-    const pad2 = (n) => String(n).padStart(2, '0');
-    const timeKey = (createdTime) => {
-      const d = toDate(createdTime);
-      if (Number.isNaN(d.getTime())) return 'Unknown time';
-      const yyyy = d.getFullYear();
-      const mm = pad2(d.getMonth() + 1);
-      const dd = pad2(d.getDate());
-      const hh = pad2(d.getHours());
-      const mi = pad2(d.getMinutes());
-      return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-    };
-
     const summarizeReasons = (items) => {
       const counts = new Map();
       for (const it of items || []) {
@@ -566,7 +560,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const map = new Map();
 
     for (const o of sorted) {
-      const key = timeKey(o.createdTime);
+      // Group by Reason instead of created time, so edits/additions stay within the same order.
+      const key = groupKeyForOrder(o);
       let g = map.get(key);
 
       if (!g) {
@@ -606,11 +601,22 @@ document.addEventListener('DOMContentLoaded', () => {
       g.reason = summary.title;
       g.reasons = summary.uniqueReasons;
 
+      // Keep a stable key for sorting (prefer the primary reason, not the "+N" title).
+      g.sortReason = (summary.uniqueReasons && summary.uniqueReasons[0]) ? summary.uniqueReasons[0] : summary.title;
+
       // Card title should show the Notion "ID" range instead of Reason
       g.orderIdRange = computeOrderIdRange(g.products);
     }
 
-    return Array.from(map.values()).sort((a, b) => toDate(b.latestCreated) - toDate(a.latestCreated));
+    // Sort by reason (requested). Tie-breaker: newest activity first.
+    return Array.from(map.values()).sort((a, b) => {
+      const ar = norm(a.sortReason || a.reason);
+      const br = norm(b.sortReason || b.reason);
+      if (ar && br && ar !== br) return ar.localeCompare(br);
+      if (ar && !br) return -1;
+      if (!ar && br) return 1;
+      return toDate(b.latestCreated) - toDate(a.latestCreated);
+    });
   }
 
   function goToTracking(groupId) {
@@ -771,13 +777,25 @@ document.addEventListener('DOMContentLoaded', () => {
     function runFilter() {
       const q = norm(searchInput.value);
       const base = allOrders;
-      filtered = q
-        ? base.filter((o) =>
-            norm(o.reason).includes(q) ||
-            norm(o.productName).includes(q) ||
-            norm(o.orderId).includes(q)
-          )
-        : base.slice();
+      if (!q) {
+        filtered = base.slice();
+        displayOrders(filtered);
+        return;
+      }
+
+      // Keep whole orders together: if ANY item matches, include ALL items in that Reason-group.
+      const matchedKeys = new Set();
+      for (const o of base) {
+        if (
+          norm(o.reason).includes(q) ||
+          norm(o.productName).includes(q) ||
+          norm(o.orderId).includes(q)
+        ) {
+          matchedKeys.add(groupKeyForOrder(o));
+        }
+      }
+
+      filtered = base.filter((o) => matchedKeys.has(groupKeyForOrder(o)));
       displayOrders(filtered);
     }
 

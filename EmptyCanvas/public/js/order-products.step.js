@@ -706,6 +706,56 @@
     const componentsPromise = loadComponents();
     const draftPromise = loadDraft();
 
+    // Keep promises accessible to reason submit handler
+    window.__cartLoadPromises = { componentsPromise, draftPromise };
+
+    // =======================
+    // Edit mode behavior
+    // =======================
+    // When editing an existing order we already have the reason on the order items,
+    // so we should NOT prompt for it again.
+    if (isEditMode) {
+      showSaving('Loading order...');
+
+      try {
+        // Ensure draft loaded first so we can pull its existing reason
+        await draftPromise;
+      } catch {}
+
+      // Derive reason from the existing order items (best effort)
+      const firstReason = cart.find((p) => String(p.reason || '').trim())?.reason || '';
+      globalReason = String(firstReason || '').trim();
+      applyGlobalReason();
+
+      // Wait for components DB
+      try {
+        await componentsPromise;
+      } catch {}
+
+      hideSaving();
+
+      if (!String(globalReason || '').trim()) {
+        // Fallback: no reason found in draft (legacy/edge case)
+        openOrderReasonModal({ force: true });
+      }
+
+      if (!Array.isArray(components) || components.length === 0) {
+        toast('error', 'Error', 'Failed to load components list. Please reload the page.');
+        return;
+      }
+
+      initComponentChoices();
+      setOrderReasonModalOpen(false);
+      setReady(true);
+
+      renderCart();
+      await persistDraft({ silent: true });
+      return;
+    }
+
+    // =======================
+    // Normal (new order) behavior
+    // =======================
     // Show reason modal immediately
     openOrderReasonModal({ force: true });
 
@@ -720,9 +770,6 @@
 
     // Render early (empty state) so the page doesn't look frozen
     renderCart();
-
-    // Keep promises accessible to reason submit handler
-    window.__cartLoadPromises = { componentsPromise, draftPromise };
   }
 
   document.addEventListener('DOMContentLoaded', init);
