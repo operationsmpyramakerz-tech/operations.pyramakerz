@@ -252,6 +252,58 @@ async function getSessionUserNotionId(req) {
   }
 }
 
+// ===== Admin password verification (used for "Edit" in Current Orders) =====
+async function getAdminUserPageFromNotion() {
+  if (!teamMembersDatabaseId) return null;
+
+  // Try exact matches first
+  const exact = ["admin", "Admin", "ADMIN"];
+  for (const name of exact) {
+    try {
+      const q = await notion.databases.query({
+        database_id: teamMembersDatabaseId,
+        page_size: 1,
+        filter: { property: "Name", title: { equals: name } },
+      });
+      if (q?.results?.length) return q.results[0];
+    } catch {}
+  }
+
+  // Fallback: contains("admin") then pick best match
+  try {
+    const q = await notion.databases.query({
+      database_id: teamMembersDatabaseId,
+      page_size: 10,
+      filter: { property: "Name", title: { contains: "admin" } },
+    });
+    const list = q?.results || [];
+    if (!list.length) return null;
+
+    const normName = (p) =>
+      String(p?.properties?.Name?.title?.[0]?.plain_text || "")
+        .trim()
+        .toLowerCase();
+
+    return list.find((p) => normName(p) === "admin") || list[0];
+  } catch {
+    return null;
+  }
+}
+
+async function verifyAdminPassword(inputPassword) {
+  const pwd = String(inputPassword || "").trim();
+  if (!pwd) return false;
+  try {
+    const adminPage = await getAdminUserPageFromNotion();
+    if (!adminPage) return false;
+    const stored = adminPage?.properties?.Password?.number;
+    if (stored === null || stored === undefined) return false;
+    return String(stored) === pwd;
+  } catch {
+    return false;
+  }
+}
+
 const _TEAM_MEMBER_NAME_TTL_SEC = 24 * 60 * 60; // 24h
 async function getTeamMemberNameCached(pageId) {
   if (!pageId) return "";
@@ -737,7 +789,13 @@ function requireAuth(req, res, next) {
 function requirePage(pageName) {
   return (req, res, next) => {
     const allowed = req.session?.allowedPages || ALL_PAGES;
-    if (allowed.includes(pageName)) return next();
+    // Temporary admin unlock (used for editing orders from Current Orders)
+    // Allows opening "Create New Order" page and its APIs for a short time.
+    const adminUnlockUntil = Number(req.session?.adminCreateOrderUnlockUntil || 0);
+    const adminUnlocked =
+      pageName === "Create New Order" && adminUnlockUntil && Date.now() < adminUnlockUntil;
+
+    if (allowed.includes(pageName) || adminUnlocked) return next();
     return res.redirect(firstAllowedPath(allowed));
   };
 }
@@ -6183,6 +6241,668 @@ app.post(
   },
 );
 
+// ===================== Current Orders: Export (PDF / Excel) =====================
+
+// Export current user's order group to PDF
+// Body: { orderIds: [notionPageId, ...] }
+app.post(
+  "/api/orders/export/pdf",
+  requireAuth,
+  requirePage("Current Orders"),
+  async (req, res) => {
+    try {
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const userId = await getSessionUserNotionId(req);
+      if (!userId) return res.status(404).json({ error: "User not found." });
+
+      const sameId = (a, b) => String(a || "").replace(/-/g, "") === String(b || "").replace(/-/g, "");
+
+      const parseNumberProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "number") return prop.number ?? null;
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "number") return prop.formula.number ?? null;
+            if (prop.formula?.type === "string") {
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              return Number.isFinite(n) ? n : null;
+            }
+          }
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              for (const x of arr) {
+                if (x.type === "number" && typeof x.number === "number") return x.number;
+                if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+                if (x.type === "formula" && x.formula?.type === "string") {
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  if (Number.isFinite(n)) return n;
+                }
+              }
+            }
+          }
+          if (prop.type === "rich_text") {
+            const t = (prop.rich_text || []).map((r) => r.plain_text).join("").trim();
+            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            return Number.isFinite(n) ? n : null;
+          }
+        } catch {}
+        return null;
+      };
+
+      const getPropInsensitive = (props, name) => {
+        if (!props || !name) return null;
+        const target = String(name).trim().toLowerCase();
+        for (const [k, v] of Object.entries(props)) {
+          if (String(k).trim().toLowerCase() === target) return v;
+        }
+        return null;
+      };
+
+      const extractUniqueIdDetails = (prop) => {
+        try {
+          if (!prop) return { text: null, prefix: null, number: null };
+          if (prop.type === "unique_id") {
+            const u = prop.unique_id;
+            if (!u || typeof u.number !== "number") return { text: null, prefix: null, number: null };
+            const prefix = u.prefix ? String(u.prefix).trim() : "";
+            const number = u.number;
+            const text = prefix ? `${prefix}-${number}` : String(number);
+            return { text, prefix: prefix || null, number };
+          }
+        } catch {}
+        return { text: null, prefix: null, number: null };
+      };
+
+      const getOrderUniqueIdDetails = (props) => {
+        const direct = getPropInsensitive(props, "ID");
+        const d = extractUniqueIdDetails(direct);
+        if (d.text) return d;
+        for (const v of Object.values(props || {})) {
+          if (v?.type === "unique_id") {
+            const x = extractUniqueIdDetails(v);
+            if (x.text) return x;
+          }
+        }
+        return { text: null, prefix: null, number: null };
+      };
+
+      const computeOrderIdRange = (uids) => {
+        const nums = uids.filter((u) => typeof u.number === "number");
+        if (nums.length) {
+          const prefix = nums[0].prefix || "";
+          const samePrefix = nums.every((x) => (x.prefix || "") === prefix);
+          const min = Math.min(...nums.map((x) => x.number));
+          const max = Math.max(...nums.map((x) => x.number));
+          if (min === max) return prefix ? `${prefix}-${min}` : String(min);
+          if (samePrefix && prefix) return `${prefix}-${min} : ${prefix}-${max}`;
+        }
+        const texts = uids.map((u) => u.text).filter(Boolean);
+        if (!texts.length) return "Order";
+        if (texts.length === 1) return texts[0];
+        return `${texts[0]} : ${texts[texts.length - 1]}`;
+      };
+
+      // Detect received quantity property name (Number)
+      const receivedProp = (await (async () => {
+        const props = await getOrdersDBProps();
+        if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })());
+
+      // Load pages
+      const pagesMap = await mapWithConcurrency(ids, 3, async (id) => {
+        return await notion.pages.retrieve({ page_id: id });
+      });
+      const pages = ids.map((id) => pagesMap.get(id)).filter(Boolean);
+      if (!pages.length) return res.status(404).json({ error: "Orders not found" });
+
+      // Validate ownership
+      for (const p of pages) {
+        const rel = p?.properties?.["Teams Members"]?.relation || [];
+        const belongs = Array.isArray(rel) && rel.some((r) => sameId(r?.id, userId));
+        if (!belongs) return res.status(403).json({ error: "Not allowed" });
+      }
+
+      // Header info
+      const createdTimes = pages.map((p) => new Date(p.created_time));
+      const createdAt = new Date(Math.min(...createdTimes.map((d) => d.getTime())));
+
+      // Team member (from first page relation)
+      let teamMember = "";
+      const firstProps = pages[0].properties || {};
+      const teamRel = firstProps["Teams Members"]?.relation;
+      if (Array.isArray(teamRel) && teamRel.length) {
+        teamMember = await getTeamMemberNameCached(teamRel[0].id);
+      }
+
+      const uids = pages.map((p) => getOrderUniqueIdDetails(p.properties || {}));
+      const orderIdRange = computeOrderIdRange(uids);
+
+      // Product cache
+      const productCache = new Map();
+      async function productInfo(productPageId) {
+        if (!productPageId) return { name: "Unknown", idCode: null, unitPrice: null, url: null };
+        if (productCache.has(productPageId)) return productCache.get(productPageId);
+        const info = await getProductInfoCached(productPageId);
+        const out = {
+          name: info?.name || "Unknown",
+          idCode: info?.idCode || null,
+          unitPrice: typeof info?.unitPrice === "number" ? info.unitPrice : null,
+          url: info?.url || null,
+        };
+        productCache.set(productPageId, out);
+        return out;
+      }
+
+      // Build rows
+      const rows = [];
+      let grandTotal = 0;
+      let grandQty = 0;
+
+      for (const p of pages) {
+        const props = p.properties || {};
+        const reason = props.Reason?.title?.[0]?.plain_text || "";
+
+        // Base qty: "Quantity Progress" (fallback to "Quantity Requested")
+        const qtyProgressProp = props["Quantity Progress"] || props["Quantity progress"];
+        const qtyProgress =
+          qtyProgressProp?.number ??
+          qtyProgressProp?.formula?.number ??
+          qtyProgressProp?.rollup?.number ??
+          null;
+
+        const qtyRequested = props["Quantity Requested"]?.number || 0;
+        const baseQty = qtyProgress !== null && qtyProgress !== undefined ? qtyProgress : qtyRequested;
+
+        // Received qty (Operations override)
+        const recQtyRaw = receivedProp ? parseNumberProp(props[receivedProp]) : null;
+        const qty =
+          recQtyRaw === null || recQtyRaw === undefined
+            ? Number(baseQty) || 0
+            : Number.isFinite(Number(recQtyRaw))
+              ? Number(recQtyRaw)
+              : Number(baseQty) || 0;
+
+        const productRel = props.Product?.relation;
+        const productPageId = Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
+        const prod = await productInfo(productPageId);
+        const unit = Number(prod.unitPrice) || 0;
+        const total = (Number(qty) || 0) * unit;
+
+        grandTotal += total;
+        grandQty += Number(qty) || 0;
+
+        rows.push({
+          idCode: prod.idCode || "",
+          component: prod.name,
+          qty,
+          reason,
+          link: prod.url,
+          unit,
+          total,
+        });
+      }
+
+      const safeName = String(orderIdRange || "order")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "_")
+        .slice(0, 60);
+      const fileName = `delivery_receipt_${safeName}.pdf`;
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      );
+      res.setHeader("Cache-Control", "no-store");
+
+      const { pipeDeliveryReceiptPDF } = require("./deliveryReceiptPdf");
+      pipeDeliveryReceiptPDF(
+        {
+          orderId: orderIdRange,
+          createdAt,
+          teamMember,
+          preparedBy: req.session.username || "—",
+          rows,
+          grandQty,
+          grandTotal,
+        },
+        res,
+      );
+    } catch (e) {
+      console.error("export current pdf error:", e?.body || e);
+      try {
+        if (!res.headersSent) res.status(500).json({ error: "Failed to export PDF" });
+      } catch {}
+    }
+  },
+);
+
+// Export current user's order group to Excel
+// Body: { orderIds: [notionPageId, ...] }
+app.post(
+  "/api/orders/export/excel",
+  requireAuth,
+  requirePage("Current Orders"),
+  async (req, res) => {
+    try {
+      const ExcelJS = require("exceljs");
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const userId = await getSessionUserNotionId(req);
+      if (!userId) return res.status(404).json({ error: "User not found." });
+
+      const sameId = (a, b) => String(a || "").replace(/-/g, "") === String(b || "").replace(/-/g, "");
+
+      // Helpers
+      const parseNumberProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "number") return prop.number ?? null;
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "number") return prop.formula.number ?? null;
+            if (prop.formula?.type === "string") {
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              return Number.isFinite(n) ? n : null;
+            }
+          }
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              for (const x of arr) {
+                if (x.type === "number" && typeof x.number === "number") return x.number;
+                if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+                if (x.type === "formula" && x.formula?.type === "string") {
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  if (Number.isFinite(n)) return n;
+                }
+              }
+            }
+          }
+        } catch {}
+        return null;
+      };
+
+      const getPropInsensitive = (props, name) => {
+        if (!props || !name) return null;
+        const target = String(name).trim().toLowerCase();
+        for (const [k, v] of Object.entries(props)) {
+          if (String(k).trim().toLowerCase() === target) return v;
+        }
+        return null;
+      };
+
+      const extractUniqueIdDetails = (prop) => {
+        try {
+          if (!prop) return { text: null, prefix: null, number: null };
+          if (prop.type === "unique_id") {
+            const u = prop.unique_id;
+            if (!u || typeof u.number !== "number") return { text: null, prefix: null, number: null };
+            const prefix = u.prefix ? String(u.prefix).trim() : "";
+            const number = u.number;
+            const text = prefix ? `${prefix}-${number}` : String(number);
+            return { text, prefix: prefix || null, number };
+          }
+        } catch {}
+        return { text: null, prefix: null, number: null };
+      };
+
+      const getOrderUniqueIdDetails = (props) => {
+        const direct = getPropInsensitive(props, "ID");
+        const d = extractUniqueIdDetails(direct);
+        if (d.text) return d;
+        for (const v of Object.values(props || {})) {
+          if (v?.type === "unique_id") {
+            const x = extractUniqueIdDetails(v);
+            if (x.text) return x;
+          }
+        }
+        return { text: null, prefix: null, number: null };
+      };
+
+      const computeOrderIdRange = (uids) => {
+        const nums = uids.filter((u) => typeof u.number === "number");
+        if (nums.length) {
+          const prefix = nums[0].prefix || "";
+          const samePrefix = nums.every((x) => (x.prefix || "") === prefix);
+          const min = Math.min(...nums.map((x) => x.number));
+          const max = Math.max(...nums.map((x) => x.number));
+          if (min === max) return prefix ? `${prefix}-${min}` : String(min);
+          if (samePrefix && prefix) return `${prefix}-${min} : ${prefix}-${max}`;
+        }
+        const texts = uids.map((u) => u.text).filter(Boolean);
+        if (!texts.length) return "Order";
+        if (texts.length === 1) return texts[0];
+        return `${texts[0]} : ${texts[texts.length - 1]}`;
+      };
+
+      // Received Quantity property (Number)
+      const receivedProp = (await (async () => {
+        const props = await getOrdersDBProps();
+        if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })());
+
+      // Load pages
+      const pagesMap = await mapWithConcurrency(ids, 3, async (id) => {
+        return await notion.pages.retrieve({ page_id: id });
+      });
+      const pages = ids.map((id) => pagesMap.get(id)).filter(Boolean);
+      if (!pages.length) return res.status(404).json({ error: "Orders not found" });
+
+      // Validate ownership
+      for (const p of pages) {
+        const rel = p?.properties?.["Teams Members"]?.relation || [];
+        const belongs = Array.isArray(rel) && rel.some((r) => sameId(r?.id, userId));
+        if (!belongs) return res.status(403).json({ error: "Not allowed" });
+      }
+
+      // Derive order header info
+      const createdTimes = pages.map((p) => new Date(p.created_time));
+      const createdAt = new Date(Math.min(...createdTimes.map((d) => d.getTime())));
+
+      // Team member (from first page relation)
+      let teamMember = "";
+      const firstProps = pages[0].properties || {};
+      const teamRel = firstProps["Teams Members"]?.relation;
+      if (Array.isArray(teamRel) && teamRel.length) {
+        teamMember = await getTeamMemberNameCached(teamRel[0].id);
+      }
+
+      const uids = pages.map((p) => getOrderUniqueIdDetails(p.properties || {}));
+      const orderIdRange = computeOrderIdRange(uids);
+
+      // Product cache
+      const productCache = new Map();
+      async function productInfo(productPageId) {
+        if (!productPageId) return { name: "Unknown", idCode: null, unitPrice: null, url: null };
+        if (productCache.has(productPageId)) return productCache.get(productPageId);
+        const info = await getProductInfoCached(productPageId);
+        const out = {
+          name: info?.name || "Unknown",
+          idCode: info?.idCode || null,
+          unitPrice: typeof info?.unitPrice === "number" ? info.unitPrice : null,
+          url: info?.url || null,
+        };
+        productCache.set(productPageId, out);
+        return out;
+      }
+
+      // Build rows
+      const rows = [];
+      let grandTotal = 0;
+      let grandQty = 0;
+
+      for (const p of pages) {
+        const props = p.properties || {};
+        const reason = props.Reason?.title?.[0]?.plain_text || "";
+
+        const qtyProgressProp = props["Quantity Progress"] || props["Quantity progress"];
+        const qtyProgress =
+          qtyProgressProp?.number ??
+          qtyProgressProp?.formula?.number ??
+          qtyProgressProp?.rollup?.number ??
+          null;
+        const qtyRequested = props["Quantity Requested"]?.number || 0;
+        const baseQty = qtyProgress !== null && qtyProgress !== undefined ? qtyProgress : qtyRequested;
+
+        const recQtyRaw = receivedProp ? parseNumberProp(props[receivedProp]) : null;
+        const qty =
+          recQtyRaw === null || recQtyRaw === undefined
+            ? Number(baseQty) || 0
+            : Number.isFinite(Number(recQtyRaw))
+              ? Number(recQtyRaw)
+              : Number(baseQty) || 0;
+
+        const productRel = props.Product?.relation;
+        const productPageId = Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
+        const prod = await productInfo(productPageId);
+        const unit = Number(prod.unitPrice) || 0;
+        const total = (Number(qty) || 0) * unit;
+        grandTotal += total;
+        grandQty += Number(qty) || 0;
+
+        rows.push({
+          idCode: prod.idCode || "",
+          component: prod.name,
+          qty: Number(qty) || 0,
+          reason,
+          link: prod.url,
+          unit,
+          total,
+        });
+      }
+
+      // Create workbook
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Operations Hub";
+      const ws = wb.addWorksheet("Order");
+
+      const formatDateTime = (date) => {
+        try {
+          const d = date instanceof Date ? date : new Date(date);
+          if (Number.isNaN(d.getTime())) return String(date || "-");
+          return d.toLocaleString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        } catch {
+          return String(date || "-");
+        }
+      };
+
+      const borderThin = {
+        top: { style: "thin", color: { argb: "FFDDDDDD" } },
+        left: { style: "thin", color: { argb: "FFDDDDDD" } },
+        bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
+        right: { style: "thin", color: { argb: "FFDDDDDD" } },
+      };
+      const borderLight = {
+        top: { style: "thin", color: { argb: "FFEEEEEE" } },
+        left: { style: "thin", color: { argb: "FFEEEEEE" } },
+        bottom: { style: "thin", color: { argb: "FFEEEEEE" } },
+        right: { style: "thin", color: { argb: "FFEEEEEE" } },
+      };
+
+      // ---- Meta small table (top) ----
+      ws.addRow(["Order ID", orderIdRange, "Date", formatDateTime(createdAt)]);
+      ws.addRow([
+        "Team member",
+        String(teamMember || ""),
+        "Prepared by (Operations)",
+        String(req.session?.username || "—"),
+      ]);
+      ws.addRow(["Total quantity", Number(grandQty) || 0, "Estimate total", Number(grandTotal) || 0]);
+
+      // Style meta table A1:D3
+      for (let r = 1; r <= 3; r++) {
+        const row = ws.getRow(r);
+        row.height = 20;
+        for (let c = 1; c <= 4; c++) {
+          const cell = row.getCell(c);
+          cell.border = borderThin;
+          cell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+        }
+        [1, 3].forEach((c) => {
+          const cell = row.getCell(c);
+          cell.font = { bold: true };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFEFEF" } };
+        });
+        [2, 4].forEach((c) => {
+          const cell = row.getCell(c);
+          cell.font = { bold: true };
+        });
+      }
+      ws.getRow(3).getCell(2).numFmt = "0";
+      ws.getRow(3).getCell(4).numFmt = '"£"#,##0.00';
+
+      ws.addRow([]);
+
+      // ---- Data table (grouped by Reason) ----
+      const EXCEL_TAG_PALETTE = [
+        { bg: "FFFDF2F8", header: "FFFCE7F3", font: "FF9D174D" },
+        { bg: "FFECFDF5", header: "FFD1FAE5", font: "FF065F46" },
+        { bg: "FFEFF6FF", header: "FFDBEAFE", font: "FF1E40AF" },
+        { bg: "FFFEFCE8", header: "FFFEF3C7", font: "FF92400E" },
+        { bg: "FFF5F3FF", header: "FFEDE9FE", font: "FF5B21B6" },
+        { bg: "FFFFF7ED", header: "FFFFEDD5", font: "FF9A3412" },
+        { bg: "FFF0FDFA", header: "FFCCFBF1", font: "FF115E59" },
+      ];
+      const hashString = (str) => {
+        const s = String(str || "");
+        let h = 0;
+        for (let i = 0; i < s.length; i++) {
+          h = (h << 5) - h + s.charCodeAt(i);
+          h |= 0;
+        }
+        return h;
+      };
+      const pickExcelColors = (key) => {
+        const idx = Math.abs(hashString(key)) % EXCEL_TAG_PALETTE.length;
+        return EXCEL_TAG_PALETTE[idx];
+      };
+
+      const reasonMap = new Map();
+      for (const row of rows || []) {
+        const reason = String(row.reason || "").trim() || "No Reason";
+        if (!reasonMap.has(reason)) reasonMap.set(reason, []);
+        reasonMap.get(reason).push(row);
+      }
+      let reasons = Array.from(reasonMap.keys()).sort((a, b) => String(a).localeCompare(String(b)));
+      const noReasonIdx = reasons.findIndex((x) => x === "No Reason");
+      if (noReasonIdx !== -1) {
+        const [nr] = reasons.splice(noReasonIdx, 1);
+        reasons.push(nr);
+      }
+
+      const dataHeaderCols = [
+        "ID Code",
+        "Component",
+        "Quantity",
+        "Reason",
+        "Component link",
+        "Unit cost",
+        "Total cost",
+      ];
+
+      for (let gi = 0; gi < reasons.length; gi++) {
+        const reason = reasons[gi];
+        const items = (reasonMap.get(reason) || []).slice().sort((a, b) =>
+          String(a?.component || "").localeCompare(String(b?.component || "")),
+        );
+        const colors = pickExcelColors(reason);
+
+        const titleRow = ws.addRow([`Reason: ${reason} (${items.length} items)`]);
+        const titleRowNum = titleRow.number;
+        ws.mergeCells(`A${titleRowNum}:G${titleRowNum}`);
+        const titleCell = ws.getCell(`A${titleRowNum}`);
+        titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.bg } };
+        titleCell.font = { bold: true, color: { argb: colors.font } };
+        titleCell.alignment = { vertical: "middle", horizontal: "left" };
+        for (let c = 1; c <= 7; c++) {
+          const cell = ws.getRow(titleRowNum).getCell(c);
+          cell.border = borderThin;
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.bg } };
+        }
+
+        const header = ws.addRow(dataHeaderCols);
+        header.font = { bold: true, color: { argb: colors.font } };
+        header.alignment = { vertical: "middle" };
+        header.eachCell((cell) => {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.header } };
+          cell.border = borderThin;
+        });
+
+        for (const row of items) {
+          const r = ws.addRow([
+            row.idCode || "",
+            row.component,
+            row.qty,
+            row.reason,
+            row.link || "",
+            row.unit === null || typeof row.unit === "undefined" ? "" : Number(row.unit),
+            row.total === null || typeof row.total === "undefined" ? "" : Number(row.total),
+          ]);
+
+          if (row.link) {
+            r.getCell(5).value = { text: row.link, hyperlink: row.link };
+            r.getCell(5).font = { color: { argb: "FF2563EB" }, underline: true };
+          }
+
+          r.getCell(3).numFmt = "0";
+          r.getCell(6).numFmt = '"£"#,##0.00';
+          r.getCell(7).numFmt = '"£"#,##0.00';
+
+          r.eachCell((cell) => {
+            cell.border = borderLight;
+            cell.alignment = { vertical: "middle", wrapText: true };
+          });
+        }
+
+        if (gi !== reasons.length - 1) ws.addRow([]);
+      }
+
+      ws.columns = [
+        { width: 14 },
+        { width: 32 },
+        { width: 10 },
+        { width: 24 },
+        { width: 48 },
+        { width: 12 },
+        { width: 12 },
+      ];
+      ws.views = [{ state: "frozen", ySplit: 4 }];
+
+      const safeName = String(orderIdRange || "order")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "_")
+        .slice(0, 60);
+      const fileName = `order_${safeName}.xlsx`;
+
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      );
+      res.setHeader("Cache-Control", "no-store");
+      res.send(Buffer.from(buf));
+    } catch (e) {
+      console.error("export current excel error:", e?.body || e);
+      res.status(500).json({ error: "Failed to export Excel" });
+    }
+  },
+);
+
 // ========== Assigned: APIs ==========
 // 1) جلب الطلبات المسندة للمستخدم الحالي — مع reason + status
 app.get(
@@ -7335,6 +8055,158 @@ if (cleanedProducts.some(p => !p.reason)) {
           .json({ success: false, message: "Invalid password. Please try again." });
       }
 
+      // ===================== Edit mode =====================
+      // If the session contains an active edit context (set by /api/orders/current/edit/init),
+      // we update the existing order pages instead of creating a brand new order.
+      const editCtx = req.session?.editingOrder;
+      const now = Date.now();
+      const editActive =
+        editCtx &&
+        typeof editCtx.expiresAt === "number" &&
+        now < editCtx.expiresAt &&
+        Array.isArray(editCtx.items) &&
+        editCtx.items.length > 0;
+
+      if (editActive) {
+        const normalizeId = (x) => String(x || "").replace(/-/g, "");
+
+        // Detect Status + Received props (so we can reset them when repurposing/creating)
+        const dbProps = await getOrdersDBProps();
+        const statusPropName = await detectStatusPropName();
+        const statusPropType = dbProps?.[statusPropName]?.type || "select";
+        const statusPlaced =
+          statusPropType === "status"
+            ? { status: { name: "Order Placed" } }
+            : { select: { name: "Order Placed" } };
+
+        const receivedProp = await (async () => {
+          if (dbProps?.[REC_PROP_HARDBIND] && dbProps[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
+          return await detectReceivedQtyPropName();
+        })();
+
+        // Build existing map: productId -> orderPageId
+        const existing = (editCtx.items || [])
+          .map((it) => ({
+            orderPageId: looksLikeNotionId(it.orderPageId) ? toHyphenatedUUID(it.orderPageId) : String(it.orderPageId || ""),
+            productId: String(it.productId || ""),
+          }))
+          .filter((it) => it.orderPageId && it.productId);
+
+        const existingByProduct = new Map();
+        for (const it of existing) {
+          existingByProduct.set(normalizeId(it.productId), it.orderPageId);
+        }
+
+        const existingProdIds = new Set(existingByProduct.keys());
+        const newProdIds = new Set(cleanedProducts.map((p) => normalizeId(p.id)));
+
+        const toRemoveProdIds = Array.from(existingProdIds).filter((pid) => !newProdIds.has(pid));
+        const toRemovePageIds = toRemoveProdIds
+          .map((pid) => existingByProduct.get(pid))
+          .filter(Boolean);
+
+        const toCreateProducts = cleanedProducts.filter(
+          (p) => !existingProdIds.has(normalizeId(p.id)),
+        );
+
+        // Reuse removed pages for new items (so we can "swap" products without creating extra rows).
+        const repurposePairs = [];
+        const reusable = toRemovePageIds.slice();
+        const createQueue = toCreateProducts.slice();
+        while (reusable.length && createQueue.length) {
+          const pageId = reusable.shift();
+          const prod = createQueue.shift();
+          repurposePairs.push({ pageId, prod });
+        }
+        const remainingToCreate = createQueue;
+        const remainingToArchive = reusable;
+
+        // Update existing products (intersection)
+        const updateTasks = [];
+        for (const prod of cleanedProducts) {
+          const pageId = existingByProduct.get(normalizeId(prod.id));
+          if (!pageId) continue;
+          updateTasks.push({ pageId, prod, repurpose: false });
+        }
+        // Repurpose removed pages to new products
+        for (const pair of repurposePairs) {
+          updateTasks.push({ pageId: pair.pageId, prod: pair.prod, repurpose: true });
+        }
+
+        // Apply updates with small concurrency
+        await mapWithConcurrency(updateTasks, 3, async (t) => {
+          if (!t?.pageId || !t?.prod) return;
+
+          const props = {
+            Reason: { title: [{ text: { content: String(t.prod.reason || "").trim() } }] },
+            "Quantity Requested": { number: Number(t.prod.quantity) },
+          };
+
+          if (t.repurpose) {
+            // Change product relation + reset status to Order Placed
+            props.Product = { relation: [{ id: t.prod.id }] };
+
+            if (statusPropName) {
+              props[statusPropName] = statusPlaced;
+            } else {
+              props.Status = statusPlaced;
+            }
+
+            // Clear received quantity when swapping items
+            if (receivedProp && dbProps?.[receivedProp]?.type === "number") {
+              props[receivedProp] = { number: null };
+            }
+          }
+
+          await notion.pages.update({ page_id: t.pageId, properties: props });
+        });
+
+        // Archive removed pages that weren't reused
+        await mapWithConcurrency(remainingToArchive, 3, async (pageId) => {
+          await notion.pages.update({ page_id: pageId, archived: true });
+        });
+
+        // Create new pages for extra items (if user added more without removing)
+        const createStatusProp = statusPropName || "Status";
+        const creations = await mapWithConcurrency(remainingToCreate, 3, async (product) => {
+          const created = await notion.pages.create({
+            parent: { database_id: ordersDatabaseId },
+            properties: {
+              Reason: { title: [{ text: { content: product.reason } }] },
+              "Quantity Requested": { number: Number(product.quantity) },
+              Product: { relation: [{ id: product.id }] },
+              [createStatusProp]: statusPlaced,
+              "Teams Members": { relation: [{ id: userId }] },
+            },
+          });
+
+          return {
+            orderPageId: created.id,
+            productId: product.id,
+            quantity: Number(product.quantity),
+            reason: product.reason,
+            createdTime: created.created_time,
+          };
+        });
+
+        // Clear edit context + draft
+        delete req.session.editingOrder;
+        delete req.session.orderDraft;
+        delete req.session.adminCreateOrderUnlockUntil;
+
+        // Invalidate cached Current Orders list for this user
+        const currentUserId = await getSessionUserNotionId(req);
+        if (currentUserId) {
+          await cacheDel(`cache:api:orders:list:${currentUserId}:v2`);
+        }
+
+        return res.json({
+          success: true,
+          message: "Order updated successfully!",
+          createdItems: Array.from(creations?.values?.() || []).filter(Boolean),
+        });
+      }
+
       const creations = await Promise.all(
   cleanedProducts.map(async (product) => {
           const created = await notion.pages.create({
@@ -7441,6 +8313,111 @@ app.post(
       res
         .status(500)
         .json({ success: false, error: "Failed to update status" });
+    }
+  },
+);
+
+// Init Edit Order (Current Orders) — requires admin password
+// - Verifies admin password
+// - Loads the selected order items
+// - Stores them into session.orderDraft so Create New Order page opens pre-filled
+// - Stores an edit context in the session so /api/submit-order can update existing pages
+app.post(
+  "/api/orders/current/edit/init",
+  requireAuth,
+  requirePage("Current Orders"),
+  async (req, res) => {
+    try {
+      if (!ordersDatabaseId || !teamMembersDatabaseId) {
+        return res.status(500).json({ error: "Database IDs are not configured." });
+      }
+
+      const { orderIds, adminPassword } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const pwd = String(adminPassword || "").trim();
+      if (!pwd) {
+        return res.status(400).json({ error: "adminPassword required" });
+      }
+
+      const ok = await verifyAdminPassword(pwd);
+      if (!ok) return res.status(401).json({ error: "Invalid admin password" });
+
+      const userId = await getSessionUserNotionId(req);
+      if (!userId) return res.status(404).json({ error: "User not found." });
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      // Retrieve pages (rate-limit friendly)
+      const pagesMap = await mapWithConcurrency(ids, 3, async (id) => {
+        return await notion.pages.retrieve({ page_id: id });
+      });
+      const pages = ids.map((id) => pagesMap.get(id)).filter(Boolean);
+      if (!pages.length) return res.status(404).json({ error: "Orders not found" });
+
+      const sameId = (a, b) => String(a || "").replace(/-/g, "") === String(b || "").replace(/-/g, "");
+
+      // Ensure all pages belong to the current user
+      for (const p of pages) {
+        const rel = p?.properties?.["Teams Members"]?.relation || [];
+        const belongs = Array.isArray(rel) && rel.some((r) => sameId(r?.id, userId));
+        if (!belongs) {
+          return res.status(403).json({ error: "This order does not belong to you." });
+        }
+      }
+
+      // Build draft products + edit context mapping
+      const draft = [];
+      const editItems = [];
+
+      for (const p of pages) {
+        const props = p.properties || {};
+        const productId = props?.Product?.relation?.[0]?.id || null;
+        if (!productId) continue;
+
+        const reason = props?.Reason?.title?.[0]?.plain_text || "";
+        const qty = Number(props?.["Quantity Requested"]?.number || 0);
+
+        draft.push({
+          id: String(productId),
+          quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
+          reason: String(reason || "").trim(),
+        });
+
+        editItems.push({
+          orderPageId: String(p.id),
+          productId: String(productId),
+        });
+      }
+
+      if (!draft.length) {
+        return res.status(400).json({ error: "No editable items found for this order." });
+      }
+
+      // Store as an order draft so /orders/new/products loads it
+      req.session.orderDraft = { products: draft };
+
+      // Allow Create New Order page for a short window (admin override)
+      const ADMIN_UNLOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes
+      req.session.adminCreateOrderUnlockUntil = Date.now() + ADMIN_UNLOCK_TTL_MS;
+
+      // Store edit context for /api/submit-order
+      const EDIT_CTX_TTL_MS = 30 * 60 * 1000; // 30 minutes
+      req.session.editingOrder = {
+        expiresAt: Date.now() + EDIT_CTX_TTL_MS,
+        items: editItems,
+      };
+
+      return res.json({ ok: true, count: draft.length });
+    } catch (e) {
+      console.error("edit init error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to init edit" });
     }
   },
 );
