@@ -20,6 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Modal (Order details)
   const modalOverlay = document.getElementById('coOrderModal');
   const modalCloseBtn = document.getElementById('coModalClose');
+  // Actions (PDF / Excel / Edit)
+  const excelBtn = document.getElementById('coExcelBtn');
+  const pdfBtn = document.getElementById('coPdfBtn');
+  const editOrderBtn = document.getElementById('coEditOrderBtn');
   const modalEls = {
     statusTitle: document.getElementById('coModalStatusTitle'),
     statusSub: document.getElementById('coModalStatusSub'),
@@ -31,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   let lastFocusEl = null;
+  let activeGroup = null; // currently opened order group in modal
 
   const norm = (s) => String(s || '').toLowerCase().trim();
   const toDate = (d) => new Date(d || 0);
@@ -214,6 +219,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function openOrderModal(group) {
     if (!modalOverlay || !group) return;
 
+    activeGroup = group;
+
     const items = group.products || [];
     const stage = computeStage(items);
 
@@ -320,8 +327,205 @@ document.addEventListener('DOMContentLoaded', () => {
     modalOverlay.classList.remove('is-open');
     modalOverlay.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('co-modal-open');
+    activeGroup = null;
     if (lastFocusEl && typeof lastFocusEl.focus === 'function') {
       lastFocusEl.focus();
+    }
+  }
+
+  function toast(type, title, message) {
+    if (window.UI?.toast) {
+      window.UI.toast({ type, title, message });
+      return;
+    }
+    // fallback
+    alert([title, message].filter(Boolean).join('\n'));
+  }
+
+  // ---------- Export (Excel / PDF) ----------
+  function groupOrderIds(g) {
+    if (!g) return [];
+    if (Array.isArray(g.orderIds) && g.orderIds.length) return g.orderIds.slice();
+    const ids = (g.products || []).map((x) => x?.id).filter(Boolean);
+    return ids;
+  }
+
+  async function downloadExcel(g) {
+    const orderIds = groupOrderIds(g);
+    if (!orderIds.length) return;
+
+    if (excelBtn) {
+      excelBtn.disabled = true;
+      excelBtn.dataset.prevHtml = excelBtn.innerHTML;
+      excelBtn.textContent = 'Preparing...';
+    }
+
+    try {
+      const res = await fetch('/api/orders/export/excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ orderIds }),
+      });
+
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to export Excel');
+      }
+
+      const blob = await res.blob();
+      const cd = res.headers.get('content-disposition') || '';
+      const m = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+      const filename = decodeURIComponent((m && (m[1] || m[2])) || 'orders.xlsx');
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      toast('success', 'Downloaded', 'Excel exported successfully.');
+    } catch (e) {
+      console.error(e);
+      toast('error', 'Export failed', e?.message || 'Failed to export Excel');
+    } finally {
+      if (excelBtn) {
+        excelBtn.disabled = false;
+        const prev = excelBtn.dataset.prevHtml;
+        if (prev) excelBtn.innerHTML = prev;
+        else excelBtn.textContent = 'Download Excel';
+      }
+      if (window.feather) window.feather.replace();
+    }
+  }
+
+  async function downloadPdf(g) {
+    const orderIds = groupOrderIds(g);
+    if (!orderIds.length) return;
+
+    if (pdfBtn) {
+      pdfBtn.disabled = true;
+      pdfBtn.dataset.prevHtml = pdfBtn.innerHTML;
+      pdfBtn.textContent = 'Preparing...';
+    }
+
+    try {
+      const res = await fetch('/api/orders/export/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ orderIds }),
+      });
+
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to export PDF');
+      }
+
+      const blob = await res.blob();
+      const cd = res.headers.get('content-disposition') || '';
+      const m = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+      const filename = decodeURIComponent((m && (m[1] || m[2])) || 'order.pdf');
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      toast('success', 'Downloaded', 'PDF downloaded.');
+    } catch (e) {
+      console.error(e);
+      toast('error', 'Export failed', e?.message || 'Failed to export PDF');
+    } finally {
+      if (pdfBtn) {
+        pdfBtn.disabled = false;
+        const prev = pdfBtn.dataset.prevHtml;
+        if (prev) pdfBtn.innerHTML = prev;
+        else pdfBtn.textContent = 'Download PDF';
+      }
+      if (window.feather) window.feather.replace();
+    }
+  }
+
+  // ---------- Edit Order (admin password) ----------
+  async function initEditOrder(g) {
+    const orderIds = groupOrderIds(g);
+    if (!orderIds.length) return;
+
+    // Prompt for admin password
+    const adminPassword = window.prompt('Enter admin password to edit this order:');
+    if (adminPassword === null) return; // cancelled
+
+    const pwd = String(adminPassword || '').trim();
+    if (!pwd) {
+      toast('error', 'Password required', 'Please enter the admin password.');
+      return;
+    }
+
+    if (editOrderBtn) {
+      editOrderBtn.disabled = true;
+      editOrderBtn.dataset.prevHtml = editOrderBtn.innerHTML;
+      editOrderBtn.textContent = 'Checking...';
+    }
+
+    try {
+      const res = await fetch('/api/orders/current/edit/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ orderIds, adminPassword: pwd }),
+      });
+
+      if (res.status === 401) {
+        toast('error', 'Wrong password', 'Admin password is incorrect.');
+        return;
+      }
+
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({}));
+        toast('error', 'Not allowed', data?.error || 'You are not allowed to edit this order.');
+        return;
+      }
+
+      if (res.status === 404) {
+        toast('error', 'Not found', 'Order not found.');
+        return;
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to init edit');
+      }
+
+      // Close modal and go to edit page
+      closeOrderModal();
+      window.location.href = '/orders/new/products?edit=1';
+    } catch (e) {
+      console.error(e);
+      toast('error', 'Error', e?.message || 'Failed to start editing');
+    } finally {
+      if (editOrderBtn) {
+        editOrderBtn.disabled = false;
+        const prev = editOrderBtn.dataset.prevHtml;
+        if (prev) editOrderBtn.innerHTML = prev;
+        else editOrderBtn.textContent = 'Edit';
+      }
+      if (window.feather) window.feather.replace();
     }
   }
 
@@ -372,6 +576,7 @@ document.addEventListener('DOMContentLoaded', () => {
           latestCreated: o.createdTime,
           earliestCreated: o.createdTime,
           products: [],
+          orderIds: [],
           reason: '—',
           reasons: [],
           orderIdRange: null,
@@ -381,6 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       g.products.push(o);
+      g.orderIds.push(o.id);
 
       if (!g.createdByName && o.createdByName) {
         g.createdByName = o.createdByName;
@@ -599,5 +805,19 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       closeOrderModal();
     }
+  });
+
+  // Action buttons
+  excelBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (activeGroup) downloadExcel(activeGroup);
+  });
+  pdfBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (activeGroup) downloadPdf(activeGroup);
+  });
+  editOrderBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (activeGroup) initEditOrder(activeGroup);
   });
 });

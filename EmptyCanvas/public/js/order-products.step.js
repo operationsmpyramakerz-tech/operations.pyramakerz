@@ -27,6 +27,9 @@
   const savingOverlayEl = document.getElementById('cartSavingOverlay');
   const savingTextEl = document.getElementById('cartSavingText');
 
+  // When opened from Current Orders -> Edit, we add ?edit=1
+  const isEditMode = new URLSearchParams(window.location.search).get('edit') === '1';
+
   if (!cartItemsEl) {
     console.warn('[order-products] Missing #cartItems — page markup mismatch.');
   }
@@ -552,7 +555,7 @@
       checkoutBtn.setAttribute('aria-busy', 'true');
     }
 
-    showSaving('Submitting order...');
+    showSaving(isEditMode ? 'Saving changes...' : 'Submitting order...');
 
     try {
       // Persist draft (optional) so the server session stays in sync
@@ -585,7 +588,11 @@
         throw new Error(data?.message || 'Failed to submit order.');
       }
 
-      toast('success', 'Order Submitted!', 'Your order has been created successfully.');
+      toast(
+        'success',
+        isEditMode ? 'Order Updated!' : 'Order Submitted!',
+        isEditMode ? 'Your order has been updated successfully.' : 'Your order has been created successfully.',
+      );
 
       // Clear UI immediately
       cart = [];
