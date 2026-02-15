@@ -4,6 +4,10 @@
   /**
    * Data model in session draft:
    * [{ id: string, quantity: number, reason: string }]
+   *
+   * NOTE (Feb 2026 update): Reason is now collected once per order (global reason)
+   * and applied to all cart items. We still persist it per item because the
+   * backend expects a reason on each product entry.
    */
 
   // ---------------------------- DOM ----------------------------
@@ -22,7 +26,11 @@
   const addToCartBtn = document.getElementById('addToCartBtn');
   const componentSelectEl = document.getElementById('cartComponentSelect');
   const qtyInputEl = document.getElementById('cartQtyInput');
-  const reasonInputEl = document.getElementById('cartReasonInput');
+
+  // Order reason (global for all items)
+  const orderReasonModalEl = document.getElementById('orderReasonModal');
+  const orderReasonInputEl = document.getElementById('orderReasonInput');
+  const orderReasonContinueBtn = document.getElementById('orderReasonContinue');
 
   const savingOverlayEl = document.getElementById('cartSavingOverlay');
   const savingTextEl = document.getElementById('cartSavingText');
@@ -76,9 +84,14 @@
   }
 
   // ---------------------------- State ----------------------------
+  const MIN_QTY = 0.01;
+
   let components = []; // [{id,name,url,unitPrice,imageUrl}]
   let byId = new Map();
   let cart = []; // draft products
+
+  let globalReason = '';
+  let readyToUse = false; // reason entered + components loaded
 
   // Discounts / delivery fees removed per request
 
@@ -112,7 +125,7 @@
       cart = list
         .map((p) => ({
           id: String(p.id || ''),
-          quantity: Math.max(1, Number(p.quantity) || 1),
+          quantity: normalizeQty(Number(p.quantity), 1),
           reason: String(p.reason || '').trim(),
         }))
         .filter((p) => p.id);
@@ -140,10 +153,12 @@
       }
 
       // Ensure reasons exist (server requires it)
+      applyGlobalReason();
+
       const clean = cart
         .map((p) => ({
           id: String(p.id),
-          quantity: Math.max(1, Number(p.quantity) || 1),
+          quantity: normalizeQty(Number(p.quantity), 1),
           reason: String(p.reason || '').trim(),
         }))
         .filter((p) => p.id);
@@ -181,10 +196,10 @@
   }
 
   function updateSummary() {
-    const subtotal = cart.reduce((sum, p) => sum + itemTotal(p), 0);
-    const total = subtotal;
+    const entryCount = Array.isArray(cart) ? cart.length : 0;
+    const total = Array.isArray(cart) ? cart.reduce((sum, p) => sum + itemTotal(p), 0) : 0;
 
-    if (summarySubTotalEl) summarySubTotalEl.textContent = formatMoney(subtotal);
+    if (summarySubTotalEl) summarySubTotalEl.textContent = String(entryCount);
     if (summaryTotalEl) summaryTotalEl.textContent = formatMoney(total);
   }
 
@@ -213,7 +228,7 @@
       const c = byId.get(String(p.id)) || null;
       const name = c?.name || 'Unknown component';
       const reason = String(p.reason || '').trim();
-      const qty = Math.max(1, Number(p.quantity) || 1);
+      const qty = normalizeQty(Number(p.quantity), MIN_QTY);
       const total = itemTotal({ id: p.id, quantity: qty, reason });
 
       const row = document.createElement('div');
@@ -289,7 +304,7 @@
 
       const qtyVal = document.createElement('div');
       qtyVal.className = 'qty-value';
-      qtyVal.textContent = String(qty);
+      qtyVal.textContent = formatQty(qty);
 
       const incBtn = document.createElement('button');
       incBtn.className = 'qty-btn';
@@ -368,8 +383,8 @@
   function changeQty(id, delta) {
     const idx = cart.findIndex((p) => String(p.id) === String(id));
     if (idx === -1) return;
-    const cur = Math.max(1, Number(cart[idx].quantity) || 1);
-    const next = cur + Number(delta || 0);
+    const cur = normalizeQty(Number(cart[idx].quantity), MIN_QTY);
+    const next = normalizeQty(cur + Number(delta || 0), 0);
     if (next <= 0) {
       removeItem(id);
       return;
@@ -385,10 +400,10 @@
     scheduleSaveDraft();
   }
 
-  function upsertItem({ id, quantity, reason }) {
+  function upsertItem({ id, quantity }) {
     const cleanId = String(id || '');
-    const cleanQty = Math.max(1, Number(quantity) || 1);
-    const cleanReason = String(reason || '').trim();
+    const cleanQty = normalizeQty(Number(quantity), NaN);
+    const cleanReason = String(globalReason || '').trim();
 
     if (!cleanId) {
       toast('error', 'Missing field', 'Please choose a component.');
@@ -430,7 +445,6 @@
     }
     // reset inputs
     if (qtyInputEl) qtyInputEl.value = '1';
-    if (reasonInputEl) reasonInputEl.value = '';
 
     // reset select
     if (choicesInst) {
@@ -458,8 +472,7 @@
 
     editingId = String(item.id);
     if (addToCartBtn) addToCartBtn.textContent = 'Update';
-    if (qtyInputEl) qtyInputEl.value = String(Math.max(1, Number(item.quantity) || 1));
-    if (reasonInputEl) reasonInputEl.value = String(item.reason || '').trim();
+    if (qtyInputEl) qtyInputEl.value = String(normalizeQty(Number(item.quantity), 1));
 
     // set select to item component
     if (choicesInst) {
@@ -532,6 +545,13 @@
       return;
     }
 
+    // Global reason is required before checkout
+    if (!String(globalReason || '').trim()) {
+      toast('error', 'Reason required', 'Please enter the order reason first.');
+      openOrderReasonModal({ force: true });
+      return;
+    }
+
     // Password is required before checkout (requested)
     const password = getPasswordValue();
     if (!password) {
@@ -540,13 +560,8 @@
       return;
     }
 
-    // Ensure all items have reason
-    const missingReason = cart.find((p) => !String(p.reason || '').trim());
-    if (missingReason) {
-      toast('error', 'Missing field', 'Reason is required for all items.');
-      openModalForEdit(missingReason.id);
-      return;
-    }
+    // Apply global reason to all items before submit
+    applyGlobalReason();
 
     // Prevent double submit
     if (checkoutBtn && checkoutBtn.disabled) return;
@@ -617,7 +632,14 @@
 
   // ---------------------------- Bindings ----------------------------
   function bindEvents() {
-    updateCartBtn?.addEventListener('click', openModalForAdd);
+    updateCartBtn?.addEventListener('click', () => {
+      if (!readyToUse) {
+        toast('error', 'Not ready', 'Please enter the order reason first.');
+        openOrderReasonModal({ force: true });
+        return;
+      }
+      openModalForAdd();
+    });
     modalCloseBtn?.addEventListener('click', closeModal);
 
     // Close modal when clicking backdrop
@@ -635,7 +657,6 @@
     addToCartBtn?.addEventListener('click', async () => {
       const id = componentSelectEl?.value;
       const qty = Number(qtyInputEl?.value);
-      const reason = reasonInputEl?.value;
 
       // If we opened the modal from an existing item and the user changed
       // the selected component, remove the old item first to avoid duplicates.
@@ -643,7 +664,7 @@
         cart = cart.filter((p) => String(p.id) !== String(editingId));
       }
 
-      const ok = upsertItem({ id, quantity: qty, reason });
+      const ok = upsertItem({ id, quantity: qty });
       if (!ok) return;
 
       closeModal();
@@ -663,16 +684,161 @@
         checkout();
       }
     });
+
+    // Reason modal
+    orderReasonContinueBtn?.addEventListener('click', submitOrderReason);
+    orderReasonInputEl?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitOrderReason();
+      }
+    });
   }
 
   // ---------------------------- Init ----------------------------
   async function init() {
     bindEvents();
-    await loadComponents();
-    initComponentChoices();
-    await loadDraft();
+
+    // Disable interactions until reason is entered + components loaded
+    setReady(false);
+
+    // Start loading data in the background while the user types the reason
+    const componentsPromise = loadComponents();
+    const draftPromise = loadDraft();
+
+    // Show reason modal immediately
+    openOrderReasonModal({ force: true });
+
+    // When draft loads, try to prefill the reason input (best effort)
+    draftPromise.then(() => {
+      if (!orderReasonInputEl) return;
+      const current = String(orderReasonInputEl.value || '').trim();
+      if (current) return;
+      const first = cart.find((p) => String(p.reason || '').trim());
+      if (first) orderReasonInputEl.value = String(first.reason || '').trim();
+    });
+
+    // Render early (empty state) so the page doesn't look frozen
     renderCart();
+
+    // Keep promises accessible to reason submit handler
+    window.__cartLoadPromises = { componentsPromise, draftPromise };
   }
 
   document.addEventListener('DOMContentLoaded', init);
+
+  // ---------------------------- Reason / gating ----------------------------
+  function setReady(isReady) {
+    readyToUse = Boolean(isReady);
+    try {
+      if (updateCartBtn) updateCartBtn.disabled = !readyToUse;
+    } catch {}
+  }
+
+  function setOrderReasonModalOpen(open) {
+    if (!orderReasonModalEl) return;
+    orderReasonModalEl.style.display = open ? 'flex' : 'none';
+    orderReasonModalEl.setAttribute('aria-hidden', open ? 'false' : 'true');
+    document.body.style.overflow = open ? 'hidden' : '';
+  }
+
+  function openOrderReasonModal({ force = false } = {}) {
+    if (!orderReasonModalEl) return;
+
+    // If we already have a reason and not forced, don't block the user.
+    if (!force && String(globalReason || '').trim()) return;
+
+    setOrderReasonModalOpen(true);
+    window.setTimeout(() => {
+      try {
+        orderReasonInputEl?.focus?.();
+      } catch {}
+    }, 50);
+  }
+
+  function applyGlobalReason() {
+    const r = String(globalReason || '').trim();
+    if (!r) return;
+    if (!Array.isArray(cart)) return;
+    for (const item of cart) {
+      item.reason = r;
+    }
+  }
+
+  async function submitOrderReason() {
+    const reason = String(orderReasonInputEl?.value || '').trim();
+    if (!reason) {
+      toast('error', 'Missing field', 'Please enter a reason.');
+      try { orderReasonInputEl?.focus?.(); } catch {}
+      return;
+    }
+
+    globalReason = reason;
+    applyGlobalReason();
+
+    // Wait for components to finish loading (if still pending)
+    const promises = window.__cartLoadPromises || {};
+    const componentsPromise = promises.componentsPromise;
+    const draftPromise = promises.draftPromise;
+
+    // Ensure draft loaded before we proceed (so cart renders correctly)
+    if (draftPromise && typeof draftPromise.then === 'function') {
+      try {
+        await draftPromise;
+      } catch {}
+      // If draft loaded after user typed the reason, enforce the global reason.
+      applyGlobalReason();
+    }
+
+    let componentsLoaded = false;
+    if (componentsPromise && typeof componentsPromise.then === 'function') {
+      try {
+        // If already resolved, this await is instant; otherwise show a loader.
+        const showLoader = components.length === 0;
+        if (showLoader) showSaving('Loading components...');
+        await componentsPromise;
+        componentsLoaded = true;
+      } catch {
+        componentsLoaded = false;
+      } finally {
+        hideSaving();
+      }
+    } else {
+      // No promise (shouldn't happen) — treat as loaded
+      componentsLoaded = true;
+    }
+
+    if (!componentsLoaded || !Array.isArray(components) || components.length === 0) {
+      toast('error', 'Error', 'Failed to load components list. Please reload the page.');
+      return;
+    }
+
+    // Initialize choices now that we have components
+    initComponentChoices();
+
+    // Close modal and enable interactions
+    setOrderReasonModalOpen(false);
+    setReady(true);
+
+    // Update UI
+    renderCart();
+    await persistDraft({ silent: true });
+  }
+
+  // ---------------------------- Quantity helpers ----------------------------
+  function normalizeQty(n, fallback = NaN) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return fallback;
+    // Round to 3 decimals to avoid float artifacts like 0.30000000004
+    const rounded = Math.round(x * 1000) / 1000;
+    if (rounded <= 0) return 0;
+    if (rounded < MIN_QTY) return MIN_QTY;
+    return rounded;
+  }
+
+  function formatQty(n) {
+    const x = normalizeQty(n, MIN_QTY);
+    if (Math.abs(x - Math.round(x)) < 1e-9) return String(Math.round(x));
+    return x.toFixed(3).replace(/\.0+$/,'').replace(/(\.\d*[1-9])0+$/,'$1');
+  }
 })();
