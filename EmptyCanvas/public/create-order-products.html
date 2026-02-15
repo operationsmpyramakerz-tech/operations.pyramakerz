@@ -548,7 +548,7 @@
             <div class="summary-title">Order Summary</div>
 
             <div class="summary-lines">
-              <div class="summary-line"><span>Sub Total</span><span class="val" id="summarySubTotal">—</span></div>
+              <div class="summary-line"><span>Entry count</span><span class="val" id="summarySubTotal">—</span></div>
               <div class="summary-line summary-total"><span>Total</span><span class="val" id="summaryTotal">—</span></div>
             </div>
 
@@ -576,18 +576,31 @@
 
           <div class="mfield">
             <label for="cartQtyInput">Qty <span class="req-star">*</span></label>
-            <input id="cartQtyInput" min="1" step="1" type="number" value="1"/>
-          </div>
-
-          <div class="mfield full">
-            <label for="cartReasonInput">Reason <span class="req-star">*</span></label>
-            <input id="cartReasonInput" placeholder="Reason..." type="text"/>
+            <input id="cartQtyInput" min="0.01" step="0.01" type="number" value="1"/>
           </div>
         </div>
 
         <div class="modal-actions">
           <button class="btn-ghost" id="updateCartClose" type="button">Close</button>
           <button class="btn-solid" id="addToCartBtn" type="button">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Order Reason Modal (shown on page open) -->
+    <div class="modal-overlay" id="orderReasonModal" aria-hidden="true">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="orderReasonTitle">
+        <h3 class="modal-title" id="orderReasonTitle">Order Reason</h3>
+
+        <div class="modal-grid" style="grid-template-columns: 1fr;">
+          <div class="mfield full">
+            <label for="orderReasonInput">Reason <span class="req-star">*</span></label>
+            <input id="orderReasonInput" placeholder="Reason..." type="text" autocomplete="off"/>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-solid" id="orderReasonContinue" type="button">Continue</button>
         </div>
       </div>
     </div>
