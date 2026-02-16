@@ -27,9 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalEls = {
     statusTitle: document.getElementById('coModalStatusTitle'),
     statusSub: document.getElementById('coModalStatusSub'),
+    reason: document.getElementById('coModalReason'),
     date: document.getElementById('coModalDate'),
     components: document.getElementById('coModalComponents'),
-    totalQty: document.getElementById('coModalTotalQty'),
     totalPrice: document.getElementById('coModalTotalPrice'),
     items: document.getElementById('coModalItems'),
   };
@@ -256,9 +256,12 @@ document.addEventListener('DOMContentLoaded', () => {
       0,
     );
 
+    // Reason is the group key (stable order grouping)
+    const groupReason = String(group?.reason || items?.[0]?.reason || '—').trim() || '—';
+
+    if (modalEls.reason) modalEls.reason.textContent = groupReason;
     if (modalEls.date) modalEls.date.textContent = fmtCreated(group.latestCreated) || '—';
     if (modalEls.components) modalEls.components.textContent = String(items.length);
-    if (modalEls.totalQty) modalEls.totalQty.textContent = String(totalQty);
     if (modalEls.totalPrice) modalEls.totalPrice.textContent = fmtMoney(estimateTotal);
 
     // Items list
@@ -539,22 +542,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function buildGroups(list) {
     const sorted = sortByNewest(list);
 
-    const summarizeReasons = (items) => {
+    // Pick the most common original Reason text inside a group
+    // (Handles accidental casing/spaces differences while keeping grouping stable).
+    const pickPrimaryReason = (items) => {
       const counts = new Map();
       for (const it of items || []) {
-        const r = String(it.reason || '').trim();
-        if (!r) continue;
+        const r = String(it?.reason || '').trim() || 'No Reason';
         counts.set(r, (counts.get(r) || 0) + 1);
       }
-
-      const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-      const unique = entries.map(([k]) => k);
-
-      if (unique.length === 0) return { title: 'No Reason', uniqueReasons: [] };
-      if (unique.length === 1) return { title: unique[0], uniqueReasons: unique };
-
-      const main = unique[0];
-      return { title: `${main} +${unique.length - 1}`, uniqueReasons: unique };
+      const arr = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+      return (arr[0] && arr[0][0]) ? arr[0][0] : 'No Reason';
     };
 
     const map = new Map();
@@ -597,25 +594,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     for (const g of map.values()) {
-      const summary = summarizeReasons(g.products);
-      g.reason = summary.title;
-      g.reasons = summary.uniqueReasons;
+      // Ensure products are ordered by newest first inside the group
+      g.products = sortByNewest(g.products);
 
-      // Keep a stable key for sorting (prefer the primary reason, not the "+N" title).
-      g.sortReason = (summary.uniqueReasons && summary.uniqueReasons[0]) ? summary.uniqueReasons[0] : summary.title;
+      g.reason = pickPrimaryReason(g.products);
+      g.reasons = [g.reason];
 
-      // Card title should show the Notion "ID" range instead of Reason
+      // Card title should show the Notion "ID" range
       g.orderIdRange = computeOrderIdRange(g.products);
     }
 
-    // Sort by reason (requested). Tie-breaker: newest activity first.
+    // Sort groups by time (newest activity first) while keeping items grouped by Reason.
     return Array.from(map.values()).sort((a, b) => {
-      const ar = norm(a.sortReason || a.reason);
-      const br = norm(b.sortReason || b.reason);
-      if (ar && br && ar !== br) return ar.localeCompare(br);
-      if (ar && !br) return -1;
-      if (!ar && br) return 1;
-      return toDate(b.latestCreated) - toDate(a.latestCreated);
+      const dt = toDate(b.latestCreated) - toDate(a.latestCreated);
+      if (dt !== 0) return dt;
+      return norm(a.reason).localeCompare(norm(b.reason));
     });
   }
 
@@ -630,9 +623,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const first = items[0] || {};
 
     const itemsCount = items.length;
+
+    // Use the same "effective" quantity logic as the modal (Operations edits override).
+    const effectiveQty = (x) => {
+      const baseCandidate = Number(x?.quantityRequested);
+      const base = Number.isFinite(baseCandidate) ? baseCandidate : (Number(x?.quantity) || 0);
+      const rec = (typeof x?.quantityReceived === 'number' && Number.isFinite(x.quantityReceived))
+        ? Number(x.quantityReceived)
+        : null;
+      return rec !== null && rec !== undefined ? rec : base;
+    };
+
     // "Components price" = total cost of all items (qty * unitPrice)
     const estimateTotal = items.reduce(
-      (sum, x) => sum + (Number(x.quantity) || 0) * (Number(x.unitPrice) || 0),
+      (sum, x) => sum + effectiveQty(x) * (Number(x.unitPrice) || 0),
       0,
     );
 
@@ -650,9 +654,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Under the title we show the date (per requested mapping)
     const sub = created ? escapeHTML(created) : '—';
 
-    // Keep total price for the Estimate section, but show the order creator under the date
+    // Keep total price for the Estimate section, but show the Reason under the date
     const componentsPrice = fmtMoney(estimateTotal);
-    const createdBy = String(group.createdByName || first.createdByName || '').trim();
+    const createdBy = String(group.reason || '').trim();
 
     const thumbLabel = String(group.orderIdRange || group.reason || '?').trim();
     const thumbHTML = first.productImage
