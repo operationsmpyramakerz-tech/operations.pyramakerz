@@ -90,7 +90,21 @@ function groupByReason(rows) {
  * @param {import('stream').Writable} stream
  */
 function pipeDeliveryReceiptPDF(
-  { orderId, createdAt, teamMember, preparedBy, rows, grandQty, grandTotal },
+  {
+    orderId,
+    createdAt,
+    teamMember,
+    preparedBy,
+    rows,
+    grandQty,
+    grandTotal,
+    // Optional layout overrides
+    metaLayout = "default", // "default" | "teamReasonFirst"
+    groupByReason: groupByReasonOpt = true,
+    showReasonTagBar: showReasonTagBarOpt = true,
+    // Used for header colors when grouping is disabled
+    headerColorKey = null,
+  },
   stream,
 ) {
   const doc = new PDFDocument({ size: "A4", margin: 36 });
@@ -104,7 +118,14 @@ function pipeDeliveryReceiptPDF(
   };
 
   const safeRows = Array.isArray(rows) ? rows : [];
-  const groups = groupByReason(safeRows);
+
+  // Default behavior keeps the original grouping by reason.
+  // For Current Orders we can disable grouping & hide the reason tag bar.
+  const singleKey =
+    String(headerColorKey || preparedBy || orderId || "Order").trim() || "Order";
+  const groups = groupByReasonOpt
+    ? groupByReason(safeRows)
+    : [{ reason: singleKey, rows: safeRows }];
 
   const logoPath = path.join(__dirname, "..", "public", "images", "Logo horizontal.png");
 
@@ -311,16 +332,27 @@ function pipeDeliveryReceiptPDF(
       .text(value || "—", x + padX, y + 16, { width: w - padX * 2, align: "left" });
   }
 
-  drawMetaCell("Order ID", String(orderId || "—"), metaX, metaY, metaColW);
-  drawMetaCell("Date", formatDateTime(createdAt), metaX + metaColW, metaY, metaColW);
-  drawMetaCell("Team member", String(teamMember || "—"), metaX, metaY + metaRowH, metaColW);
-  drawMetaCell(
-    "Prepared by (Operations)",
-    String(preparedBy || "—"),
-    metaX + metaColW,
-    metaY + metaRowH,
-    metaColW,
-  );
+  if (String(metaLayout || "").toLowerCase() === "teamreasonfirst") {
+    // Requested for Current Orders:
+    // Team member | Reason
+    // Order ID     | Date
+    drawMetaCell("Team member", String(teamMember || "—"), metaX, metaY, metaColW);
+    drawMetaCell("Reason", String(preparedBy || "—"), metaX + metaColW, metaY, metaColW);
+    drawMetaCell("Order ID", String(orderId || "—"), metaX, metaY + metaRowH, metaColW);
+    drawMetaCell("Date", formatDateTime(createdAt), metaX + metaColW, metaY + metaRowH, metaColW);
+  } else {
+    // Default (Operations Orders)
+    drawMetaCell("Order ID", String(orderId || "—"), metaX, metaY, metaColW);
+    drawMetaCell("Date", formatDateTime(createdAt), metaX + metaColW, metaY, metaColW);
+    drawMetaCell("Team member", String(teamMember || "—"), metaX, metaY + metaRowH, metaColW);
+    drawMetaCell(
+      "Prepared by (Operations)",
+      String(preparedBy || "—"),
+      metaX + metaColW,
+      metaY + metaRowH,
+      metaColW,
+    );
+  }
 
   doc.y = metaY + metaH + 18;
 
@@ -433,10 +465,11 @@ function pipeDeliveryReceiptPDF(
       String(a?.component || "").localeCompare(String(b?.component || "")),
     );
 
-    const groupHeaderHeight = tagBarH + 8 + headerH + 6;
+    const needsTagBar = Boolean(showReasonTagBarOpt);
+    const groupHeaderHeight = (needsTagBar ? tagBarH + 8 : 0) + headerH + 6;
     ensureSpace(groupHeaderHeight);
     const drawGroupHeader = () => {
-      drawTagBar(g.reason, items.length, tagColors);
+      if (needsTagBar) drawTagBar(g.reason, items.length, tagColors);
       drawTableHeader(tagColors);
     };
     drawGroupHeader();

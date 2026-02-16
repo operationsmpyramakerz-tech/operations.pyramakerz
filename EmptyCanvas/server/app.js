@@ -5719,6 +5719,15 @@ app.post(
         });
       }
 
+      // Primary Reason for this order group (current orders are grouped by Reason)
+      const reasonCounts = new Map();
+      for (const r of rows) {
+        const key = String(r?.reason || "").trim() || "No Reason";
+        reasonCounts.set(key, (reasonCounts.get(key) || 0) + 1);
+      }
+      const groupReason =
+        Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "No Reason";
+
       const safeName = String(orderIdRange || "order")
         .replace(/[\\/:*?"<>|]/g, "-")
         .replace(/\s+/g, "_")
@@ -5740,10 +5749,18 @@ app.post(
           orderId: orderIdRange,
           createdAt,
           teamMember,
-          preparedBy: req.session.username || "—",
+          // For Current Orders: show the order Reason instead of "Prepared by"
+          preparedBy: groupReason,
           rows,
           grandQty,
           grandTotal,
+          // Layout requested for Current Orders
+          metaLayout: "teamReasonFirst",
+          // Remove the Reason bar above the table
+          showReasonTagBar: false,
+          // Current Orders are already grouped by reason, keep a single table
+          groupByReason: false,
+          headerColorKey: groupReason,
         },
         res,
       );
@@ -6003,6 +6020,15 @@ app.post(
           total,
         });
       }
+
+      // Primary Reason for this order group (current orders are grouped by Reason)
+      const reasonCounts = new Map();
+      for (const r of rows) {
+        const key = String(r?.reason || "").trim() || "No Reason";
+        reasonCounts.set(key, (reasonCounts.get(key) || 0) + 1);
+      }
+      const groupReason =
+        Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "No Reason";
 
       // Create workbook
       const wb = new ExcelJS.Workbook();
@@ -6731,14 +6757,14 @@ app.post(
       };
 
       // ---- Meta small table (top) ----
+      // Requested layout for Current Orders:
+      // Team member | Reason
+      // Order ID     | Date
+      ws.addRow(["Team member", String(teamMember || ""), "Reason", String(groupReason || "")]);
       ws.addRow(["Order ID", orderIdRange, "Date", formatDateTime(createdAt)]);
-      ws.addRow([
-        "Team member",
-        String(teamMember || ""),
-        "Prepared by (Operations)",
-        String(req.session?.username || "—"),
-      ]);
-      ws.addRow(["Total quantity", Number(grandQty) || 0, "Estimate total", Number(grandTotal) || 0]);
+
+      // Keep a useful summary row (matches UI: Components + Estimated cost)
+      ws.addRow(["Components", Number(rows.length) || 0, "Estimate total", Number(grandTotal) || 0]);
 
       // Style meta table A1:D3
       for (let r = 1; r <= 3; r++) {
@@ -6764,7 +6790,7 @@ app.post(
 
       ws.addRow([]);
 
-      // ---- Data table (grouped by Reason) ----
+      // ---- Data table ----
       const EXCEL_TAG_PALETTE = [
         { bg: "FFFDF2F8", header: "FFFCE7F3", font: "FF9D174D" },
         { bg: "FFECFDF5", header: "FFD1FAE5", font: "FF065F46" },
@@ -6788,19 +6814,6 @@ app.post(
         return EXCEL_TAG_PALETTE[idx];
       };
 
-      const reasonMap = new Map();
-      for (const row of rows || []) {
-        const reason = String(row.reason || "").trim() || "No Reason";
-        if (!reasonMap.has(reason)) reasonMap.set(reason, []);
-        reasonMap.get(reason).push(row);
-      }
-      let reasons = Array.from(reasonMap.keys()).sort((a, b) => String(a).localeCompare(String(b)));
-      const noReasonIdx = reasons.findIndex((x) => x === "No Reason");
-      if (noReasonIdx !== -1) {
-        const [nr] = reasons.splice(noReasonIdx, 1);
-        reasons.push(nr);
-      }
-
       const dataHeaderCols = [
         "ID Code",
         "Component",
@@ -6811,61 +6824,45 @@ app.post(
         "Total cost",
       ];
 
-      for (let gi = 0; gi < reasons.length; gi++) {
-        const reason = reasons[gi];
-        const items = (reasonMap.get(reason) || []).slice().sort((a, b) =>
-          String(a?.component || "").localeCompare(String(b?.component || "")),
-        );
-        const colors = pickExcelColors(reason);
 
-        const titleRow = ws.addRow([`Reason: ${reason} (${items.length} items)`]);
-        const titleRowNum = titleRow.number;
-        ws.mergeCells(`A${titleRowNum}:G${titleRowNum}`);
-        const titleCell = ws.getCell(`A${titleRowNum}`);
-        titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.bg } };
-        titleCell.font = { bold: true, color: { argb: colors.font } };
-        titleCell.alignment = { vertical: "middle", horizontal: "left" };
-        for (let c = 1; c <= 7; c++) {
-          const cell = ws.getRow(titleRowNum).getCell(c);
-          cell.border = borderThin;
-          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.bg } };
+      // Color the table header using the primary Reason (no separate Reason bar row)
+      const colors = pickExcelColors(String(groupReason || "Order"));
+      const header = ws.addRow(dataHeaderCols);
+      header.font = { bold: true, color: { argb: colors.font } };
+      header.alignment = { vertical: "middle" };
+      header.eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.header } };
+        cell.border = borderThin;
+      });
+
+      const items = (rows || []).slice().sort((a, b) =>
+        String(a?.component || "").localeCompare(String(b?.component || "")),
+      );
+
+      for (const row of items) {
+        const r = ws.addRow([
+          row.idCode || "",
+          row.component,
+          row.qty,
+          row.reason,
+          row.link || "",
+          row.unit === null || typeof row.unit === "undefined" ? "" : Number(row.unit),
+          row.total === null || typeof row.total === "undefined" ? "" : Number(row.total),
+        ]);
+
+        if (row.link) {
+          r.getCell(5).value = { text: row.link, hyperlink: row.link };
+          r.getCell(5).font = { color: { argb: "FF2563EB" }, underline: true };
         }
 
-        const header = ws.addRow(dataHeaderCols);
-        header.font = { bold: true, color: { argb: colors.font } };
-        header.alignment = { vertical: "middle" };
-        header.eachCell((cell) => {
-          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.header } };
-          cell.border = borderThin;
+        r.getCell(3).numFmt = "0";
+        r.getCell(6).numFmt = '"£"#,##0.00';
+        r.getCell(7).numFmt = '"£"#,##0.00';
+
+        r.eachCell((cell) => {
+          cell.border = borderLight;
+          cell.alignment = { vertical: "middle", wrapText: true };
         });
-
-        for (const row of items) {
-          const r = ws.addRow([
-            row.idCode || "",
-            row.component,
-            row.qty,
-            row.reason,
-            row.link || "",
-            row.unit === null || typeof row.unit === "undefined" ? "" : Number(row.unit),
-            row.total === null || typeof row.total === "undefined" ? "" : Number(row.total),
-          ]);
-
-          if (row.link) {
-            r.getCell(5).value = { text: row.link, hyperlink: row.link };
-            r.getCell(5).font = { color: { argb: "FF2563EB" }, underline: true };
-          }
-
-          r.getCell(3).numFmt = "0";
-          r.getCell(6).numFmt = '"£"#,##0.00';
-          r.getCell(7).numFmt = '"£"#,##0.00';
-
-          r.eachCell((cell) => {
-            cell.border = borderLight;
-            cell.alignment = { vertical: "middle", wrapText: true };
-          });
-        }
-
-        if (gi !== reasons.length - 1) ws.addRow([]);
       }
 
       ws.columns = [
