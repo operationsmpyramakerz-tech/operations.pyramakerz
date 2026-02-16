@@ -4204,7 +4204,7 @@ app.get(
       if (!userId) return res.status(404).json({ error: "User not found." });
 
       // Cache the Notion-derived list briefly to make reloads fast and reduce Notion load.
-      const listCacheKey = `cache:api:orders:list:${userId}:v2`;
+      const listCacheKey = `cache:api:orders:list:${userId}:v3`;
       const allOrders = await cacheGetOrSet(listCacheKey, 60, async () => {
         const rows = [];
         let hasMore = true;
@@ -4325,6 +4325,14 @@ app.get(
                 ? Number(qtyReceived)
                 : Number(qtyRequested) || 0;
 
+            const unitPriceProp =
+              getPropInsensitive(props, "Unit price") ||
+              getPropInsensitive(props, "Unit Price") ||
+              getPropInsensitive(props, "Unity Price") ||
+              getPropInsensitive(props, "Price") ||
+              null;
+            const unitPriceFromOrder = _extractPropNumber(unitPriceProp);
+
             rows.push({
               id: page.id,
               orderId: uid.text,
@@ -4332,6 +4340,7 @@ app.get(
               orderIdNumber: uid.number,
               reason: props?.Reason?.title?.[0]?.plain_text || "No Reason",
               productPageId,
+              unitPriceFromOrder,
               quantity: qtyForUI,
               status: statusName,
               statusColor,
@@ -4351,6 +4360,11 @@ app.get(
 
         return rows.map((r) => {
           const p = r.productPageId ? productMap.get(r.productPageId) : null;
+          const unitFromOrder = Number(r.unitPriceFromOrder);
+          const unitFromProduct = Number(p?.unitPrice);
+          const unitPrice = Number.isFinite(unitFromOrder)
+            ? unitFromOrder
+            : (Number.isFinite(unitFromProduct) ? unitFromProduct : null);
           return {
             id: r.id,
             orderId: r.orderId,
@@ -4360,7 +4374,7 @@ app.get(
             productName: p?.name || "Unknown Product",
             productImage: p?.image || null,
             productUrl: p?.url || null,
-            unitPrice: (typeof p?.unitPrice === "number" ? p.unitPrice : null),
+            unitPrice,
             quantity: r.quantity,
             status: r.status,
             statusColor: r.statusColor,
@@ -4534,11 +4548,22 @@ app.get(
 
           const prod = await getProductInfo(productPageId);
 
+          const unitProp =
+            page.properties?.["Unit price"] ??
+            page.properties?.["Unit Price"] ??
+            page.properties?.["Unity Price"] ??
+            page.properties?.["Price"] ??
+            null;
+          const unitFromOrder = parseNumberProp(unitProp);
+          const unitPriceForUI = Number.isFinite(Number(unitFromOrder))
+            ? Number(unitFromOrder)
+            : (typeof prod.unitPrice === "number" ? prod.unitPrice : null);
+
           items.push({
             id: page.id,
             productName: prod.name,
             productImage: prod.image,
-            unitPrice: prod.unitPrice,
+            unitPrice: unitPriceForUI,
             quantity: page.properties?.["Quantity Requested"]?.number || 0,
             status: page.properties?.["Status"]?.select?.name || "Pending",
             createdTime: page.created_time,
@@ -5702,7 +5727,16 @@ app.post(
           Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
 
         const prod = await productInfo(productPageId);
-        const unit = Number(prod.unitPrice) || 0;
+        const unitProp =
+          _propInsensitive(props, "Unit price") ||
+          _propInsensitive(props, "Unit Price") ||
+          _propInsensitive(props, "Unity Price") ||
+          _propInsensitive(props, "Price") ||
+          null;
+        const unitFromOrder = _extractPropNumber(unitProp);
+        const unit = Number.isFinite(Number(unitFromOrder))
+          ? Number(unitFromOrder)
+          : (Number(prod.unitPrice) || 0);
         const total = (Number(qty) || 0) * unit;
 
         grandTotal += total;
@@ -6005,7 +6039,16 @@ app.post(
         const productPageId =
           Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
         const prod = await productInfo(productPageId);
-        const unit = Number(prod.unitPrice) || 0;
+        const unitProp =
+          _propInsensitive(props, "Unit price") ||
+          _propInsensitive(props, "Unit Price") ||
+          _propInsensitive(props, "Unity Price") ||
+          _propInsensitive(props, "Price") ||
+          null;
+        const unitFromOrder = _extractPropNumber(unitProp);
+        const unit = Number.isFinite(Number(unitFromOrder))
+          ? Number(unitFromOrder)
+          : (Number(prod.unitPrice) || 0);
         const total = (Number(qty) || 0) * unit;
         grandTotal += total;
         grandQty += Number(qty) || 0;
@@ -6465,7 +6508,16 @@ app.post(
         const productRel = props.Product?.relation;
         const productPageId = Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
         const prod = await productInfo(productPageId);
-        const unit = Number(prod.unitPrice) || 0;
+        const unitProp =
+          _propInsensitive(props, "Unit price") ||
+          _propInsensitive(props, "Unit Price") ||
+          _propInsensitive(props, "Unity Price") ||
+          _propInsensitive(props, "Price") ||
+          null;
+        const unitFromOrder = _extractPropNumber(unitProp);
+        const unit = Number.isFinite(Number(unitFromOrder))
+          ? Number(unitFromOrder)
+          : (Number(prod.unitPrice) || 0);
         const total = (Number(qty) || 0) * unit;
 
         grandTotal += total;
@@ -6725,7 +6777,16 @@ app.post(
         const productRel = props.Product?.relation;
         const productPageId = Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
         const prod = await productInfo(productPageId);
-        const unit = Number(prod.unitPrice) || 0;
+        const unitProp =
+          _propInsensitive(props, "Unit price") ||
+          _propInsensitive(props, "Unit Price") ||
+          _propInsensitive(props, "Unity Price") ||
+          _propInsensitive(props, "Price") ||
+          null;
+        const unitFromOrder = _extractPropNumber(unitProp);
+        const unit = Number.isFinite(Number(unitFromOrder))
+          ? Number(unitFromOrder)
+          : (Number(prod.unitPrice) || 0);
         const total = (Number(qty) || 0) * unit;
         grandTotal += total;
         grandQty += Number(qty) || 0;
