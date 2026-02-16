@@ -6495,16 +6495,35 @@ app.post(
       );
       res.setHeader("Cache-Control", "no-store");
 
+      // Primary Reason for this order group (Current Orders are grouped by Reason)
+      const reasonCounts = new Map();
+      for (const r of rows) {
+        const key = String(r?.reason || "").trim() || "No Reason";
+        reasonCounts.set(key, (reasonCounts.get(key) || 0) + 1);
+      }
+      const groupReason =
+        Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "No Reason";
+
       const { pipeDeliveryReceiptPDF } = require("./deliveryReceiptPdf");
       pipeDeliveryReceiptPDF(
         {
           orderId: orderIdRange,
           createdAt,
           teamMember,
-          preparedBy: req.session.username || "—",
+          // For Current Orders: show Reason instead of "Prepared by"
+          preparedBy: groupReason,
           rows,
           grandQty,
           grandTotal,
+          // Requested PDF header table layout:
+          // Team member | Reason
+          // Order ID     | Date
+          metaLayout: "teamReasonFirst",
+          // Remove the "Reason" bar above the table
+          showReasonTagBar: false,
+          // Current Orders are already grouped by Reason in the UI
+          groupByReason: false,
+          headerColorKey: groupReason,
         },
         res,
       );
@@ -6722,6 +6741,15 @@ app.post(
         });
       }
 
+      // Primary Reason for this order group (Current Orders are grouped by Reason)
+      const reasonCounts = new Map();
+      for (const r of rows) {
+        const key = String(r?.reason || "").trim() || "No Reason";
+        reasonCounts.set(key, (reasonCounts.get(key) || 0) + 1);
+      }
+      const groupReason =
+        Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "No Reason";
+
       // Create workbook
       const wb = new ExcelJS.Workbook();
       wb.creator = "Operations Hub";
@@ -6851,6 +6879,11 @@ app.post(
         ]);
 
         if (row.link) {
+          // Make the component name clickable
+          r.getCell(2).value = { text: row.component, hyperlink: row.link };
+          r.getCell(2).font = { color: { argb: "FF2563EB" }, underline: true };
+
+          // Keep the raw link column clickable as well
           r.getCell(5).value = { text: row.link, hyperlink: row.link };
           r.getCell(5).font = { color: { argb: "FF2563EB" }, underline: true };
         }

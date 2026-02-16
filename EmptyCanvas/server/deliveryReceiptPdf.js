@@ -23,6 +23,16 @@ function formatDateTime(date) {
   }
 }
 
+function normalizeUrl(url) {
+  const s = String(url || "").trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith("www.")) return `https://${s}`;
+  // Avoid creating broken links
+  return null;
+}
+
+
 // Pastel palette (similar to Stocktaking tags UI)
 const TAG_PALETTE = [
   { bg: "#FDF2F8", border: "#FBCFE8", text: "#9D174D", pill: "#FCE7F3" }, // pink
@@ -516,11 +526,20 @@ function pipeDeliveryReceiptPDF(
 
       // text
       doc.fillColor(COLORS.text).font("Helvetica").fontSize(10);
+      const componentLink = normalizeUrl(r.link || r.url || r.componentLink || r.href);
+
       columns.forEach((c) => {
-        doc.text(rowData[c.key], c.x + cellPadX, y + 6, {
+        const opts = {
           width: c.width - cellPadX * 2,
           align: c.align,
-        });
+        };
+
+        // Make component name clickable (open component URL)
+        if (c.key === "component" && componentLink) {
+          opts.link = componentLink;
+        }
+
+        doc.text(rowData[c.key], c.x + cellPadX, y + 6, opts);
       });
 
       doc.y = y + rowH;
