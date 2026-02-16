@@ -8958,7 +8958,7 @@ app.all(
       // PDF should be Done-only (no Inventory/Defected) for Stocktaking.
       const includeInventoryCol = false;
       const includeDefectedCol = false;
-      const includeSignatureBlocks = false;
+      const includeSignatureBlocks = true;
 
       const createdAt = new Date();
       const dateStr = createdAt.toISOString().slice(0, 10);
@@ -9041,16 +9041,114 @@ app.all(
       const colDefW = includeDefectedCol ? 70 : 0;
       const colCompW = contentW - colIdW - colQtyW - colInvW - colDefW;
 
-      // Page tracking for footer signatures
-      let pageNum = 1;
+      // Footer signatures (same style as Delivery Receipt in Operations Orders)
+      const FOOTER = {
+        titleFont: 12,
+        titleLineH: 16,
+        titleToBoxesGap: 10,
+        boxH: 120,
+        bottomGap: 10,
+      };
+      const FOOTER_RESERVED =
+        FOOTER.titleLineH + FOOTER.titleToBoxesGap + FOOTER.boxH + FOOTER.bottomGap + 6;
 
-      const sigBoxH = 54;
-      const sigFooterReserve = includeSignatureBlocks ? sigBoxH + 20 : 0;
+      const sigFooterReserve = includeSignatureBlocks ? FOOTER_RESERVED : 0;
 
-      const bottomLimit = () => doc.page.height - mB - (pageNum === 1 ? 0 : sigFooterReserve);
+      const bottomLimit = () => doc.page.height - mB - sigFooterReserve;
       const ensureSpace = (needed) => {
         if (doc.y + needed > bottomLimit()) doc.addPage();
       };
+
+      const drawFooterSignature = () => {
+        if (!includeSignatureBlocks) return;
+
+        const prevX = doc.x;
+        const prevY = doc.y;
+        doc.save();
+
+        const pageH = doc.page.height;
+        const pageW2 = doc.page.width;
+        const mL2 = doc.page.margins.left;
+        const mR2 = doc.page.margins.right;
+        const mB2 = doc.page.margins.bottom;
+        const contentW2 = pageW2 - mL2 - mR2;
+        const bottomY = pageH - mB2;
+
+        const boxesBottom = bottomY - FOOTER.bottomGap;
+        const boxesY = boxesBottom - FOOTER.boxH;
+        const titleY = boxesY - (FOOTER.titleLineH + FOOTER.titleToBoxesGap);
+
+        // Title
+        doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(FOOTER.titleFont);
+        doc.text("Handover confirmation", mL2, titleY, { width: contentW2, align: "left" });
+
+        const gap = 16;
+        const boxW = (contentW2 - gap) / 2;
+        const boxH = FOOTER.boxH;
+        const leftX = mL2;
+        const rightX = mL2 + boxW + gap;
+
+        const drawSignatureBox = (title, x, y) => {
+          doc.roundedRect(x, y, boxW, boxH, 10).lineWidth(1).strokeColor(COLORS.border).stroke();
+          doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(10);
+          doc.text(title, x + 12, y + 10, { width: boxW - 24, align: "left" });
+
+          const lineStartX = x + 12;
+          const lineEndX = x + boxW - 12;
+
+          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9);
+
+          doc.text("Name", lineStartX, y + 34);
+          doc
+            .moveTo(lineStartX + 40, y + 45)
+            .lineTo(lineEndX, y + 45)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+
+          doc.text("Signature", lineStartX, y + 58);
+          doc
+            .moveTo(lineStartX + 55, y + 69)
+            .lineTo(lineEndX, y + 69)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+
+          doc.text("Date", lineStartX, y + 82);
+          doc
+            .moveTo(lineStartX + 30, y + 93)
+            .lineTo(lineStartX + 95, y + 93)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 102, y + 84);
+          doc
+            .moveTo(lineStartX + 110, y + 93)
+            .lineTo(lineStartX + 175, y + 93)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 182, y + 84);
+          doc
+            .moveTo(lineStartX + 190, y + 93)
+            .lineTo(lineEndX, y + 93)
+            .lineWidth(1)
+            .strokeColor(COLORS.border)
+            .stroke();
+        };
+
+        drawSignatureBox("Delivered to", leftX, boxesY);
+        drawSignatureBox("Operations", rightX, boxesY);
+
+        doc.restore();
+        doc.x = prevX;
+        doc.y = prevY;
+      };
+
+      // Draw signatures on every new page
+      doc.on("pageAdded", () => {
+        drawFooterSignature();
+      });
 
       // Header
       try {
@@ -9114,48 +9212,13 @@ app.all(
       drawInfoBox(mL + boxW + boxGap, "Date", formatDateTime(createdAt));
       doc.y = boxY + boxH + 16;
 
-      // Signature blocks (disabled for Stocktaking exports)
-      const drawSigBox = (x, y, title, linesCount = 1) => {
-        doc.roundedRect(x, y, boxW, sigBoxH, 8).strokeColor(COLORS.border).stroke();
-        doc.fillColor(COLORS.muted).font("Helvetica-Bold").fontSize(9).text(title, x + 10, y + 8);
-
-        const firstLineY = y + 30;
-        const gap = 12;
-        for (let i = 0; i < Math.max(1, Number(linesCount) || 1); i++) {
-          const lineY = firstLineY + i * gap;
-          doc
-            .moveTo(x + 10, lineY)
-            .lineTo(x + boxW - 10, lineY)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-        }
-      };
-
-      const drawSignaturesAt = (y) => {
-        drawSigBox(mL, y, "Inventory Team Names / Signatures", 2);
-        drawSigBox(mL + boxW + boxGap, y, "Stockholder Name / Signature", 2);
-      };
-
+      // Footer signatures (same style as Delivery Receipt in Operations Orders)
       if (includeSignatureBlocks) {
-        const sigY = doc.y;
-        drawSignaturesAt(sigY);
-        doc.y = sigY + sigBoxH + 18;
-      } else {
-        doc.moveDown(0.5);
+        drawFooterSignature();
       }
 
-      doc.on("pageAdded", () => {
-        pageNum += 1;
-        if (includeSignatureBlocks && pageNum >= 2) {
-          const prevX = doc.x;
-          const prevY = doc.y;
-          const footerY = doc.page.height - mB - sigBoxH;
-          drawSignaturesAt(footerY);
-          doc.x = prevX;
-          doc.y = prevY;
-        }
-      });
+      // Small spacing so the table doesn't stick to the meta boxes
+      doc.moveDown(0.5);
 
       if (!groups.length) {
         doc.fillColor(COLORS.muted).font("Helvetica").fontSize(11).text("No stock data found.", mL, doc.y);
