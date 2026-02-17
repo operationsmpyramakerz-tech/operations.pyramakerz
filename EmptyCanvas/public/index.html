@@ -13,40 +13,15 @@
 <script src="/pwa-register.js" defer></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="refresh" content="0; url=/login" />
-  <title>Redirecting to Login…</title>
-  <style>
-    body {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      margin: 0;
-      padding: 24px;
-      background: #f7f7f7;
-      color: #111;
-    }
-    .box {
-      max-width: 560px;
-      margin: 80px auto;
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 14px;
-      padding: 18px 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.08);
-    }
-    .title { font-size: 18px; font-weight: 700; margin: 0 0 6px; }
-    .muted { margin: 0; color: #6b7280; }
-    a { color: #2563eb; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-  </style>
+  <!-- Go directly to the app landing page. If the user is not authenticated,
+       /home will redirect them to /login (server-side). -->
+  <meta http-equiv="refresh" content="0; url=/home" />
+  <title>Loading…</title>
 </head>
 <body>
-  <div class="box">
-    <p class="title">Redirecting…</p>
-    <p class="muted">If you are not redirected automatically, <a href="/login">click here to login</a>.</p>
-  </div>
-
   <script>
     // Extra safety for browsers that ignore meta refresh
-    window.location.replace('/login');
+    window.location.replace('/home');
   </script>
 </body>
 </html>
