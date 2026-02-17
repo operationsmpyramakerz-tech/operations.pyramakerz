@@ -537,12 +537,37 @@ if (document.querySelector('.sidebar')) {
   const toKey = (s) => String(s || '').trim().toLowerCase();
   const normPath = (s) => toKey(s).replace(/\/+$/, ''); // يشيل / في الآخر لو موجود
 
-  function hideEl(el){ if (el){ el.style.display = 'none'; el.setAttribute('aria-hidden','true'); } }
-  function showEl(el){ if (el){ el.style.display = ''; el.removeAttribute('aria-hidden'); } }
+  // IMPORTANT:
+  // Our sidebar layout CSS uses `display: flex !important` on `<li>` items.
+  // Normal inline `style.display = 'none'` will NOT override it.
+  // So we must set display with the `important` priority.
+  function hideEl(el){
+    if (!el) return;
+    try { el.style.setProperty('display', 'none', 'important'); } catch { el.style.display = 'none'; }
+    el.setAttribute('aria-hidden','true');
+  }
+  function showEl(el){
+    if (!el) return;
+    try { el.style.removeProperty('display'); } catch { el.style.display = ''; }
+    el.removeAttribute('aria-hidden');
+  }
 
   // أظهر المسموح وأخفِ غير المسموح (حتمي)
   function applyAllowedPages(allowed){
     if (!Array.isArray(allowed)) return;
+
+    // Default-deny for the sidebar: hide every first-level nav item.
+    // (Some CSS rules use `display: flex !important`, so we use hideEl() which
+    // sets `display: none !important`.)
+    try {
+      const nav = document.querySelector('.sidebar-nav .nav-list')
+        || document.querySelector('.sidebar .nav-list, .sidebar nav ul, .sidebar ul');
+      if (nav && nav.children) {
+        Array.from(nav.children).forEach((child) => {
+          if (child && String(child.tagName).toUpperCase() === 'LI') hideEl(child);
+        });
+      }
+    } catch {}
 
     // allowedPages ممكن تيجي:
     // 1) أسماء صفحات: "Expenses Users"
@@ -580,6 +605,12 @@ if (document.querySelector('.sidebar')) {
         showEl(li);
       }
     });
+
+    // Home is available for every authenticated user (not tied to Allowed Pages)
+    try {
+      const home = document.querySelector('a[href="/home"]');
+      if (home) showEl(home.closest('li') || home);
+    } catch {}
   }
 
   function cacheAllowedPages(arr){
@@ -850,7 +881,6 @@ if (document.querySelector('.sidebar')) {
     // Home should appear for everyone (not tied to permissions)
   ensureLink({ href: '/home', label: 'Home', icon: 'home', prepend: true });
 ensureLink({ href: '/orders/sv-orders', label: 'S.V schools orders', icon: 'award' });
-  ensureLink({ href: '/damaged-assets', label: 'Damaged Assets', icon: 'alert-octagon' });
   ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
   ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
   ensureLink({ href: '/tasks', label: 'Tasks', icon: 'check-square' });
