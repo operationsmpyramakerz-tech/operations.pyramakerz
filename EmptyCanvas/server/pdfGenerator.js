@@ -15,7 +15,7 @@ function generateExpensePDF({ userName, userId, items, dateFrom, dateTo }, callb
   const rows = Array.isArray(items) ? items : [];
 
   try {
-    const doc = new PDFDocument({ size: "A4", margin: 40 });
+    const doc = new PDFDocument({ size: "A4", margin: 40, bufferPages: true });
     const buffers = [];
     doc.on("data", buffers.push.bind(buffers));
     doc.on("end", () => callback(null, Buffer.concat(buffers)));

@@ -118,7 +118,7 @@ function pipeDeliveryReceiptPDF(
   },
   stream,
 ) {
-  const doc = new PDFDocument({ size: "A4", margin: 36 });
+  const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
   doc.pipe(stream);
   // Page numbering (helps ordering when printing/sharing)
   // Attach after piping so the first page number is included in the output stream.

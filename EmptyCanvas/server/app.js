@@ -3377,7 +3377,7 @@ app.get(
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
-      const doc = new PDFDocument({ size: "A4", margin: 36 });
+      const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
       doc.pipe(res);
       attachPageNumbers(doc);
 
@@ -7420,7 +7420,7 @@ app.get(
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
 
-      const doc = new PDFDocument({ size: "A4", margin: 36 });
+      const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
       doc.pipe(res);
       attachPageNumbers(doc);
 
@@ -7578,7 +7578,7 @@ app.get(
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
 
-      const doc = new PDFDocument({ size: "A4", margin: 36 });
+      const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
       doc.pipe(res);
       attachPageNumbers(doc);
 
@@ -9062,7 +9062,7 @@ app.all(
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
       res.set("Cache-Control", "no-store");
 
-      const doc = new PDFDocument({ size: "A4", margin: 36 });
+      const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
       doc.pipe(res);
       attachPageNumbers(doc);
 
@@ -11908,7 +11908,7 @@ app.get('/api/damaged-assets/report/:reportId/pdf', requireAuth, requirePage('Da
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
 
-    const doc = new PDFDocument({ size: 'A4', margin: 36 });
+    const doc = new PDFDocument({ size: 'A4', margin: 36, bufferPages: true });
     doc.pipe(res);
     attachPageNumbers(doc);
 
