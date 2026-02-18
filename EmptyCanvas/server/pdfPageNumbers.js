@@ -44,13 +44,23 @@ function attachPageNumbers(doc, opts = {}) {
       .replace("{page}", String(page))
       .replace("{total}", String(total));
 
-  const draw = (page, total) => {
+  /**
+   * Stamp a page footer like: 1|5
+   * - current page (left side) in bold
+   * - total pages normal
+   * - placed in the footer area (below content), far right
+   *
+   * @param {number} page
+   * @param {number} total
+   * @param {number} [footerBottomMargin] original bottom margin to position within
+   */
+  const draw = (page, total, footerBottomMargin) => {
     try {
       const prevX = doc.x;
       const prevY = doc.y;
 
       doc.save();
-      doc.fillColor(color).font("Helvetica").fontSize(fontSize);
+      doc.fillColor(color).fontSize(fontSize);
 
       // IMPORTANT:
       // PDFKit will automatically add a new page if you draw text below its
@@ -60,26 +70,55 @@ function attachPageNumbers(doc, opts = {}) {
       const margins = doc.page?.margins || {};
       const leftMargin = Number(margins.left) || 0;
       const rightMargin = Number(margins.right) || 0;
-      const bottomMargin = Number(margins.bottom) || 0;
-      const maxY = (Number(doc.page?.height) || 0) - bottomMargin;
+
+      const pageW = Number(doc.page?.width) || 0;
+      const pageH = Number(doc.page?.height) || 0;
+
+      // IMPORTANT:
+      // We stamp numbers during finalize() with bottom margin temporarily set to 0,
+      // so we are allowed to draw inside the original footer margin area without
+      // triggering implicit page breaks.
+      const bottomMarginNow = Number(margins.bottom) || 0;
+      const maxY = pageH - bottomMarginNow;
+
+      // Use normal font for metrics
+      doc.font("Helvetica");
       const lineH = doc.currentLineHeight(true) || 12;
 
-      // Default Y: inside the printable area (just above the bottom margin)
+      const footerMargin = Number.isFinite(Number(footerBottomMargin))
+        ? Number(footerBottomMargin)
+        : bottomMarginNow;
+
+      // Default Y: in the footer area (a little BELOW the content boundary)
+      const footerTop = pageH - footerMargin;
+      const footerInset = Math.min(12, Math.max(6, Math.round(footerMargin * 0.25)));
+
       const desiredY = Number.isFinite(Number(opts.y))
         ? Number(opts.y)
-        : maxY - lineH - 2;
+        : footerTop + footerInset;
 
       // Clamp so we NEVER exceed maxY (prevents auto page breaks)
-      const y = Math.min(desiredY, maxY - lineH - 1);
+      const y = Math.min(Math.max(0, desiredY), maxY - lineH - 1);
 
-      const x = leftMargin;
-      const width = Math.max(0, (Number(doc.page?.width) || 0) - leftMargin - rightMargin);
+      // Build "1|5" with bold "1"
+      const currentStr = String(page);
+      const restStr = `|${String(total)}`;
 
-      doc.text(render(page, total), x, y, {
-        width,
-        align,
-        lineBreak: false,
-      });
+      // Measure widths to right-align precisely
+      doc.font("Helvetica-Bold");
+      const wBold = doc.widthOfString(currentStr);
+      doc.font("Helvetica");
+      const wNormal = doc.widthOfString(restStr);
+      const totalW = wBold + wNormal;
+
+      const xRight = pageW - rightMargin;
+      const xStart = Math.max(leftMargin, xRight - totalW);
+
+      // Draw
+      doc.font("Helvetica-Bold");
+      doc.text(currentStr, xStart, y, { continued: true, lineBreak: false });
+      doc.font("Helvetica");
+      doc.text(restStr, { continued: false, lineBreak: false });
 
       doc.restore();
 
@@ -110,7 +149,32 @@ function attachPageNumbers(doc, opts = {}) {
       try {
         doc.switchToPage(i);
         const current = i - start + 1;
-        draw(current, total);
+
+        // Temporarily remove bottom margin while stamping,
+        // so we can draw inside the original footer area safely.
+        const m = doc.page?.margins || {};
+        const originalBottom = Number(m.bottom) || 0;
+        let restored = false;
+
+        try {
+          if (m && typeof m === "object") {
+            m.bottom = 0;
+            restored = true;
+          }
+        } catch {
+          // ignore
+        }
+
+        draw(current, total, originalBottom);
+
+        // Restore bottom margin
+        if (restored) {
+          try {
+            m.bottom = originalBottom;
+          } catch {
+            // ignore
+          }
+        }
       } catch {
         // ignore per-page errors
       }
