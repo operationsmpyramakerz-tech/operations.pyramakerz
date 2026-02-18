@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { Client } = require("@notionhq/client");
 const PDFDocument = require("pdfkit"); // PDF
+const { attachPageNumbers } = require("./pdfPageNumbers");
 
 // Web Push (Notifications)
 let webpush = null;
@@ -3378,6 +3379,7 @@ app.get(
 
       const doc = new PDFDocument({ size: "A4", margin: 36 });
       doc.pipe(res);
+      attachPageNumbers(doc);
 
       const logoPath = path.join(__dirname, "../public/images/logo.png");
       const COLORS = {
@@ -7420,6 +7422,7 @@ app.get(
 
       const doc = new PDFDocument({ size: "A4", margin: 36 });
       doc.pipe(res);
+      attachPageNumbers(doc);
 
       doc.font("Helvetica-Bold").fontSize(18).text("Components Receipt", { align: "left" });
       doc.moveDown(0.3);
@@ -7577,6 +7580,7 @@ app.get(
 
       const doc = new PDFDocument({ size: "A4", margin: 36 });
       doc.pipe(res);
+      attachPageNumbers(doc);
 
       doc.font("Helvetica-Bold").fontSize(16).text("Assigned Orders — Shortage List", { align: "left" });
       doc.moveDown(0.2);
@@ -9060,6 +9064,7 @@ app.all(
 
       const doc = new PDFDocument({ size: "A4", margin: 36 });
       doc.pipe(res);
+      attachPageNumbers(doc);
 
       const logoPath = path.join(__dirname, "../public/images/logo.png");
       const COLORS = {
@@ -11905,6 +11910,7 @@ app.get('/api/damaged-assets/report/:reportId/pdf', requireAuth, requirePage('Da
 
     const doc = new PDFDocument({ size: 'A4', margin: 36 });
     doc.pipe(res);
+    attachPageNumbers(doc);
 
     doc.font('Helvetica-Bold').fontSize(18).text(`Damaged Report (${reportId})`, { align: 'left' });
     doc.moveDown(0.3);

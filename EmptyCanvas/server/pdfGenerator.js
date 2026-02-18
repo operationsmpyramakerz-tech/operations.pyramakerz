@@ -1,5 +1,6 @@
 const PDFDocument = require("pdfkit");
 const path = require("path");
+const { attachPageNumbers } = require("./pdfPageNumbers");
 
 // Helper بسيط جدًا عشان نحسّن شكل العربي في PDFKit
 function fixRTL(text) {
@@ -19,6 +20,10 @@ function generateExpensePDF({ userName, userId, items, dateFrom, dateTo }, callb
     doc.on("data", buffers.push.bind(buffers));
     doc.on("end", () => callback(null, Buffer.concat(buffers)));
     doc.on("error", (err) => callback(err));
+
+    // Page numbering (helps ordering when printing/sharing)
+    // IMPORTANT: attach after data listeners, so we don't miss any chunks.
+    attachPageNumbers(doc);
 
     // ---------------- LOGO ----------------
     try {

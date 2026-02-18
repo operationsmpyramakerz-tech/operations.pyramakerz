@@ -1,5 +1,6 @@
 const PDFDocument = require("pdfkit");
 const path = require("path");
+const { attachPageNumbers } = require("./pdfPageNumbers");
 
 function moneyGBP(n) {
   const num = Number(n) || 0;
@@ -119,6 +120,9 @@ function pipeDeliveryReceiptPDF(
 ) {
   const doc = new PDFDocument({ size: "A4", margin: 36 });
   doc.pipe(stream);
+  // Page numbering (helps ordering when printing/sharing)
+  // Attach after piping so the first page number is included in the output stream.
+  attachPageNumbers(doc);
 
   const COLORS = {
     border: "#E5E7EB",
