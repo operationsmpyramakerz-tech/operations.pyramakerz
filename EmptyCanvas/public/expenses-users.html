@@ -114,6 +114,57 @@
   background: #f3f4f6;
 }
 
+/* Last settled date in user cards */
+.user-settled {
+  font-size: 0.85rem;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+/* Divider between recent and past expenses */
+.expenses-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 12px;
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.expenses-separator::before,
+.expenses-separator::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.expenses-separator span {
+  white-space: nowrap;
+}
+
+/* Show past expenses button */
+.past-expenses-wrapper {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0 0.25rem;
+}
+
+.past-expenses-btn {
+  border: 1.4px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.past-expenses-btn:hover {
+  background: #f9fafb;
+}
+
     .date-filter {
   display: flex;
   gap: 0.5rem;
@@ -896,16 +947,10 @@
       <div class="sheet-controls">
         <div class="controls-row">
           <div class="download-wrapper">
-            <button id="downloadBtn" class="download-btn" type="button">
+            <button id="downloadExcelBtn" class="download-btn" type="button">
               <i data-feather="download"></i>
-              Download
-              <span class="arrow">▼</span>
+              Download Excel
             </button>
-
-            <div id="downloadMenu" class="download-menu">
-              <button class="download-option" id="downloadPdfBtn" type="button">Download as PDF</button>
-              <button class="download-option" id="downloadExcelBtn" type="button">Download as Excel</button>
-            </div>
           </div>
 
           <div class="sort-wrapper">
@@ -949,6 +994,12 @@
 
       <div id="userExpensesList">
       <!-- list items -->
+    </div>
+
+    <div id="pastExpensesWrapper" class="past-expenses-wrapper" style="display:none;">
+      <button id="togglePastExpensesBtn" class="past-expenses-btn" type="button">
+        Show past expenses
+      </button>
     </div>
 
     </div>
