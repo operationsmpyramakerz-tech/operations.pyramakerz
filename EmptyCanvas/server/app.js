@@ -10621,6 +10621,10 @@ app.get(
           const props = page.properties || {};
           const rel = props["Team Member"]?.relation;
 
+          const fundsType = String(props["Funds Type"]?.select?.name || "").trim();
+          const isSettledMyAccount = fundsType.toLowerCase() === "settled my account";
+          const dateStr = props["Date"]?.date?.start || null;
+
           if (!Array.isArray(rel) || rel.length === 0) continue;
           const cashIn = Number(props["Cash in"]?.number || 0);
           const cashOut = Number(props["Cash out"]?.number || 0);
@@ -10638,11 +10642,18 @@ app.get(
                 userId,
                 total: 0,
                 count: 0,
+                lastSettledDate: null,
               });
             }
             const agg = perUser.get(userId);
             agg.total += delta;
             agg.count += 1;
+
+            // Because the query is sorted by Date desc, the first time we encounter
+            // "Settled my account" for a user is their latest settlement date.
+            if (isSettledMyAccount) {
+              if (!agg.lastSettledDate && dateStr) agg.lastSettledDate = dateStr;
+            }
           }
         }
 
@@ -10663,6 +10674,7 @@ app.get(
             name,
             total: agg.total,
             count: agg.count,
+            lastSettledDate: agg.lastSettledDate || null,
           });
         } catch (e) {
           console.error("Error loading team member name:", e.body || e);
@@ -10745,6 +10757,34 @@ app.get(
         cashInFromTitleMap.set(id, t);
       }
 
+      // Last settled time/date: find the most recent "Settled my account" record.
+      // We use Notion created_time as the stable boundary for "after last settlement".
+      let lastSettledAt = null;
+      let lastSettledDate = null;
+      try {
+        for (const pg of results) {
+          const p = pg?.properties || {};
+          const ft = String(p?.["Funds Type"]?.select?.name || "").trim().toLowerCase();
+          if (ft !== "settled my account") continue;
+
+          const ct = pg?.created_time;
+          if (!ct) continue;
+
+          if (!lastSettledAt) {
+            lastSettledAt = ct;
+            lastSettledDate = p?.["Date"]?.date?.start || null;
+            continue;
+          }
+
+          const a = new Date(lastSettledAt).getTime();
+          const b = new Date(ct).getTime();
+          if (Number.isFinite(b) && (!Number.isFinite(a) || b > a)) {
+            lastSettledAt = ct;
+            lastSettledDate = p?.["Date"]?.date?.start || null;
+          }
+        }
+      } catch {}
+
       const items = results.map((page) => {
         const props = page.properties || {};
 
@@ -10787,6 +10827,7 @@ app.get(
 
         return {
           id: page.id,
+          createdTime: page.created_time || null,
           date: props["Date"]?.date?.start || null,
           reason,
           fundsType: props["Funds Type"]?.select?.name || "",
@@ -10802,7 +10843,7 @@ app.get(
         };
       });
 
-      res.json({ success: true, items });
+      res.json({ success: true, items, lastSettledAt, lastSettledDate });
     } catch (err) {
       console.error("/api/expenses/user/:memberId error:", err.body || err);
       res
