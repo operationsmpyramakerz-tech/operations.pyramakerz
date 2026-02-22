@@ -31,6 +31,8 @@
   const orderReasonModalEl = document.getElementById('orderReasonModal');
   const orderReasonInputEl = document.getElementById('orderReasonInput');
   const orderReasonContinueBtn = document.getElementById('orderReasonContinue');
+  // Cancel (added per request). If the HTML does not include it, we create it dynamically.
+  let orderReasonCancelBtn = document.getElementById('orderReasonCancel');
 
   const savingOverlayEl = document.getElementById('cartSavingOverlay');
   const savingTextEl = document.getElementById('cartSavingText');
@@ -50,6 +52,30 @@
     }
     // Fallback
     alert([title, message].filter(Boolean).join('\n'));
+  }
+
+  function ensureOrderReasonCancelButton() {
+    // Prefer an existing button if it is present in the markup.
+    if (orderReasonCancelBtn) return;
+    if (!orderReasonModalEl) return;
+
+    const actions = orderReasonModalEl.querySelector('.modal-actions');
+    if (!actions) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'orderReasonCancel';
+    btn.className = 'btn-ghost';
+    btn.textContent = 'Cancel';
+
+    // Insert it before Continue to appear "Cancel  Continue".
+    if (orderReasonContinueBtn && orderReasonContinueBtn.parentElement === actions) {
+      actions.insertBefore(btn, orderReasonContinueBtn);
+    } else {
+      actions.appendChild(btn);
+    }
+
+    orderReasonCancelBtn = btn;
   }
 
   function showSaving(text = 'Saving...') {
@@ -699,6 +725,11 @@
     });
 
     // Reason modal
+    ensureOrderReasonCancelButton();
+    orderReasonCancelBtn?.addEventListener('click', () => {
+      // Go back to home page.
+      window.location.href = '/home';
+    });
     orderReasonContinueBtn?.addEventListener('click', submitOrderReason);
     orderReasonInputEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
