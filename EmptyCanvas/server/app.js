@@ -3469,6 +3469,7 @@ app.get(
       // Header (Stocktaking style) — without the divider line (to save space)
       drawStocktakingHeader(doc, {
         title: "Stocktaking",
+        subtitle: `School: ${schoolName}  •  Generated: ${formatDateTime(createdAt)}`,
         logoPath,
         colors: COLORS,
       });
@@ -7404,6 +7405,7 @@ app.get(
 
       drawStocktakingHeader(doc, {
         title: "Components Receipt",
+        subtitle: `User: ${req.session.username || "-"}  •  Generated: ${formatDateTime(new Date())}`,
       });
 
       if (reasonTitle) {
