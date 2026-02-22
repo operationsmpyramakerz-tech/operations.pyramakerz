@@ -3456,7 +3456,8 @@ app.get(
       // Page tracking for footer signatures
       let pageNum = 1;
 
-      const sigBoxH = 54;
+      // Keep signature boxes compact to fit more table rows per page.
+      const sigBoxH = 48;
       const sigFooterReserve = includeSignatureBlocks ? (sigBoxH + 20) : 0;
 
       const bottomLimit = () => doc.page.height - mB - (pageNum === 1 ? 0 : sigFooterReserve);
@@ -3465,36 +3466,13 @@ app.get(
         if (doc.y + needed > bottomLimit()) doc.addPage();
       };
 
-      // Header
-      try {
-        if (fs.existsSync(logoPath)) {
-          doc.image(logoPath, mL, doc.y, { width: 42 });
-        }
-      } catch {}
-
-      const headerX = mL + 52;
-      const headerTopY = doc.y;
-
-      doc
-        .fillColor(COLORS.text)
-        .font("Helvetica-Bold")
-        .fontSize(18)
-        .text("Stocktaking", headerX, headerTopY);
-
-      doc
-        .fillColor(COLORS.muted)
-        .font("Helvetica")
-        .fontSize(10)
-        .text(`School: ${schoolName}  •  Generated: ${formatDateTime(createdAt)}`, headerX, headerTopY + 22);
-
-      doc.moveDown(1.2);
-      doc
-        .moveTo(mL, doc.y)
-        .lineTo(pageW - mR, doc.y)
-        .lineWidth(1)
-        .strokeColor(COLORS.border)
-        .stroke();
-      doc.moveDown(0.8);
+      // Header (Stocktaking style) — without the divider line (to save space)
+      drawStocktakingHeader(doc, {
+        title: "Stocktaking",
+        subtitle: `School: ${schoolName}  •  Generated: ${formatDateTime(createdAt)}`,
+        logoPath,
+        colors: COLORS,
+      });
 
       // Handover confirmation title
       doc
@@ -9139,11 +9117,12 @@ app.all(
 
       // Footer signatures (same style as Delivery Receipt in Operations Orders)
       const FOOTER = {
-        titleFont: 12,
-        titleLineH: 16,
-        titleToBoxesGap: 10,
-        boxH: 120,
-        bottomGap: 10,
+        // Keep it compact to fit more table rows per page.
+        titleFont: 11,
+        titleLineH: 14,
+        titleToBoxesGap: 6,
+        boxH: 80,
+        bottomGap: 6,
       };
       const FOOTER_RESERVED =
         FOOTER.titleLineH + FOOTER.titleToBoxesGap + FOOTER.boxH + FOOTER.bottomGap + 6;
@@ -9224,32 +9203,13 @@ app.all(
         drawFooterSignature();
       });
 
-      // Header
-      try {
-        if (fs.existsSync(logoPath)) {
-          doc.image(logoPath, mL, doc.y, { width: 42 });
-        }
-      } catch {}
-
-      const headerX = mL + 52;
-      const headerTopY = doc.y;
-
-      doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(18).text("Stocktaking", headerX, headerTopY);
-
-      doc
-        .fillColor(COLORS.muted)
-        .font("Helvetica")
-        .fontSize(10)
-        .text(`School: ${schoolName}  •  Generated: ${formatDateTime(createdAt)}`, headerX, headerTopY + 22);
-
-      doc.moveDown(1.2);
-      doc
-        .moveTo(mL, doc.y)
-        .lineTo(pageW - mR, doc.y)
-        .lineWidth(1)
-        .strokeColor(COLORS.border)
-        .stroke();
-      doc.moveDown(0.8);
+      // Header (Stocktaking style) — without the divider line (to save space)
+      drawStocktakingHeader(doc, {
+        title: "Stocktaking",
+        subtitle: `School: ${schoolName}  •  Generated: ${formatDateTime(createdAt)}`,
+        logoPath,
+        colors: COLORS,
+      });
 
       // Handover confirmation title
       doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(14).text("Handover Confirmation", mL, doc.y);

@@ -147,11 +147,12 @@ function pipeDeliveryReceiptPDF(
 
   // Footer (signature) layout constants
   const FOOTER = {
-    titleFont: 12,
-    titleLineH: 16,
-    titleToBoxesGap: 10,
-    boxH: 120,
-    bottomGap: 10,
+    // Keep it compact to fit more table rows per page.
+    titleFont: 11,
+    titleLineH: 14,
+    titleToBoxesGap: 6,
+    boxH: 80,
+    bottomGap: 6,
   };
   const FOOTER_RESERVED = FOOTER.titleLineH + FOOTER.titleToBoxesGap + FOOTER.boxH + FOOTER.bottomGap + 6;
 

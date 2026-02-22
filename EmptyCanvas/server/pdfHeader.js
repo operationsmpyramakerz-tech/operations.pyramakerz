@@ -12,7 +12,7 @@ const DEFAULT_COLORS = {
  * - Logo on the LEFT
  * - Title next to it
  * - Subtitle under the title
- * - Divider line
+ * - (No divider line — kept compact to maximize table space)
  *
  * @param {import('pdfkit')} doc
  * @param {{
@@ -74,24 +74,16 @@ function drawStocktakingHeader(doc, opts = {}) {
       .text(subtitle, headerX, headerTopY + 22);
   }
 
-  // Ensure we have enough vertical space before drawing the divider.
+  // Ensure we have enough vertical space after the subtitle.
   // (PDFKit's internal cursor depends on the last drawn text block.)
   const minY = headerTopY + (variant === "compact" ? 34 : 38);
   if (doc.y < minY) doc.y = minY;
 
-  // Match the Stocktaking PDFs spacing before the divider line.
-  // (They do: moveDown(1.2) then draw the line.)
-  doc.moveDown(variant === "compact" ? 0.9 : 1.2);
-
-  // Divider line
-  doc
-    .moveTo(mL, doc.y)
-    .lineTo(pageW - mR, doc.y)
-    .lineWidth(1)
-    .strokeColor(colors.border)
-    .stroke();
-
-  doc.moveDown(variant === "compact" ? 0.6 : 0.8);
+  // IMPORTANT (layout optimization):
+  // The user requested removing the horizontal divider line under the page title
+  // to gain vertical space and fit more table rows per page.
+  // Keep only a small breathing space after the header.
+  doc.y += variant === "compact" ? 6 : 8;
 }
 
 module.exports = {
