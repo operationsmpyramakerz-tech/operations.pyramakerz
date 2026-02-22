@@ -209,6 +209,150 @@ function formatLastSettledAt(iso) {
   });
 }
 
+// ------------------------
+// View All (Bottom sheet): split by last settlement
+// ------------------------
+
+let VIEW_ALL_SHOW_PAST = false;
+let VIEW_ALL_RECENT_ITEMS = [];
+let VIEW_ALL_PAST_ITEMS = [];
+let VIEW_ALL_LAST_SETTLED_AT = null;
+
+function normalizeFundsType(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
+function getExpenseTimeValue(it) {
+  // Prefer createdTime from the API (Notion created_time)
+  const raw = it?.createdTime || it?.created_time || "";
+  if (raw) {
+    const t = new Date(raw).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+
+  // Fallback: Notion Date property (YYYY-MM-DD)
+  const dRaw = it?.date || "";
+  const t2 = dRaw ? new Date(dRaw).getTime() : NaN;
+  return Number.isFinite(t2) ? t2 : 0;
+}
+
+function splitExpensesByLastSettlement(items, lastSettledAt) {
+  const all = Array.isArray(items) ? items : [];
+  const settledAt = String(lastSettledAt || "").trim();
+  if (!settledAt) {
+    return { recent: [...all], past: [] };
+  }
+
+  const cutoff = new Date(settledAt).getTime();
+  if (!Number.isFinite(cutoff)) {
+    return { recent: [...all], past: [] };
+  }
+
+  const recent = [];
+  const past = [];
+  for (const it of all) {
+    const t = getExpenseTimeValue(it);
+    if (t > cutoff) recent.push(it);
+    else past.push(it);
+  }
+
+  return { recent, past };
+}
+
+function buildExpenseItemHtmlForModal(it) {
+  const isIn = Number(it?.cashIn || 0) > 0;
+  const arrow = isIn
+    ? `<span class="arrow-icon arrow-in">↙</span>`
+    : `<span class="arrow-icon arrow-out">↗</span>`;
+
+  const title = isIn ? "Cash In" : (it?.fundsType || "Cash Out");
+  const dateLine = it?.date
+    ? `<div class="expense-person"><strong>Date:</strong> ${escapeHtml(it.date)}</div>`
+    : "";
+
+  const line1 = isIn
+    ? (
+        it?.reason
+          ? `<div class="expense-person"><strong>Receipt number:</strong> ${escapeHtml(it.reason)}</div>`
+          : `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
+      )
+    : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it?.reason || "")}</div>`;
+
+  const line2 = (!isIn && (it?.from || it?.to))
+    ? `<div class="expense-person">${escapeHtml(it.from || "")} ← ${escapeHtml(it.to || "")}</div>`
+    : "";
+
+  const screenshotHtml = (!isIn) ? renderReceiptImagesHtml(it) : "";
+
+  return `
+    <div class="expense-item">
+      <div class="expense-icon">${arrow}</div>
+      <div class="expense-details">
+        <div class="expense-title">${escapeHtml(title)}</div>
+        ${dateLine}
+        ${line1}
+        ${line2}
+        ${screenshotHtml}
+      </div>
+      <div class="expense-amount">
+        ${it?.cashIn ? `<span class="amount-in">+£${Number(it.cashIn).toLocaleString()}</span>` : ""}
+        ${it?.cashOut ? `<span class="amount-out">-£${Number(it.cashOut).toLocaleString()}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderAllExpensesModalList(listEl) {
+  if (!listEl) return;
+
+  const recent = Array.isArray(VIEW_ALL_RECENT_ITEMS) ? VIEW_ALL_RECENT_ITEMS : [];
+  const past = Array.isArray(VIEW_ALL_PAST_ITEMS) ? VIEW_ALL_PAST_ITEMS : [];
+
+  let html = "";
+
+  // Empty states
+  if (recent.length === 0) {
+    if (past.length > 0 && !VIEW_ALL_SHOW_PAST) {
+      html += `<div class="expenses-empty">No expenses since your last settlement.</div>`;
+    } else if (past.length === 0) {
+      html += `<div class="expenses-empty">No expenses yet.</div>`;
+    }
+  }
+
+  // Recent items
+  html += recent.map(buildExpenseItemHtmlForModal).join("");
+
+  // Past items (optional)
+  if (VIEW_ALL_SHOW_PAST && past.length > 0) {
+    html += `
+      <div class="expenses-separator"><span>Past expenses</span></div>
+    `;
+    html += past.map(buildExpenseItemHtmlForModal).join("");
+  }
+
+  // Toggle button
+  if (past.length > 0) {
+    const label = VIEW_ALL_SHOW_PAST ? "Hide past expenses" : "Show past expenses";
+    html += `
+      <div class="past-expenses-wrapper">
+        <button type="button" id="togglePastExpensesBtn" class="past-expenses-btn">${label}</button>
+      </div>
+    `;
+  }
+
+  listEl.innerHTML = html;
+
+  // Bind toggle (re-render)
+  const toggleBtn = document.getElementById("togglePastExpensesBtn");
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      VIEW_ALL_SHOW_PAST = !VIEW_ALL_SHOW_PAST;
+      renderAllExpensesModalList(listEl);
+    });
+  }
+}
+
 /* =============================
    LOAD FUNDS TYPES FROM SERVER
    ============================= */
@@ -620,7 +764,9 @@ async function loadExpenses() {
     const container = document.getElementById("expensesContent");
     const totalBox = document.getElementById("totalAmount");
 
-    container.innerHTML = `<p style="color:#999;">Loading...</p>`;
+    if (container) {
+      container.innerHTML = `<div class="loader" role="status" aria-label="Loading"></div>`;
+    }
 
     try {
         const res = await fetch("/api/expenses");
@@ -836,64 +982,37 @@ function openAllExpensesModal() {
         sheet.style.transform = "translateY(0)";
     }, 10);
 
-    list.innerHTML = "Loading...";
+    if (list) {
+      list.innerHTML = `<div class="loader" role="status" aria-label="Loading"></div>`;
+    }
+
+    // Reset toggle each time we open
+    VIEW_ALL_SHOW_PAST = false;
+    VIEW_ALL_RECENT_ITEMS = [];
+    VIEW_ALL_PAST_ITEMS = [];
+    VIEW_ALL_LAST_SETTLED_AT = null;
 
     fetch("/api/expenses")
-        .then(res => res.json())
-        .then(data => {
-            if (!data.success) {
-                list.innerHTML = "<p>Error loading expenses</p>";
-                return;
-            }
+      .then(res => res.json())
+      .then(data => {
+        if (!data?.success) {
+          if (list) list.innerHTML = "<p>Error loading expenses</p>";
+          return;
+        }
 
-            const items = data.items || [];
-            if (!items.length) {
-                list.innerHTML = "<p>No expenses yet.</p>";
-                return;
-            }
+        const items = Array.isArray(data.items) ? data.items : [];
+        VIEW_ALL_LAST_SETTLED_AT = data.lastSettledAt || null;
 
-            list.innerHTML = "";
-            items.forEach(it => {
-                const isIn = it.cashIn > 0;
-                const arrow = isIn
-                    ? `<span class="arrow-icon arrow-in">↙</span>`
-                    : `<span class="arrow-icon arrow-out">↗</span>`;
+        const split = splitExpensesByLastSettlement(items, VIEW_ALL_LAST_SETTLED_AT);
+        VIEW_ALL_RECENT_ITEMS = split.recent;
+        VIEW_ALL_PAST_ITEMS = split.past;
 
-                const title = isIn ? "Cash In" : (it.fundsType || "Cash Out");
-                const dateLine = it.date ? `<div class="expense-person"><strong>Date:</strong> ${escapeHtml(it.date)}</div>` : "";
-                const line1 = isIn
-                  ? (
-                      it.reason
-                        ? `<div class="expense-person"><strong>Receipt number:</strong> ${escapeHtml(it.reason)}</div>`
-                        : `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(it.cashInFrom || "-")}</div>`
-                    )
-                  : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it.reason || "")}</div>`;
-                const line2 = (!isIn && (it.from || it.to))
-                  ? `<div class="expense-person">${escapeHtml(it.from || "")} ← ${escapeHtml(it.to || "")}</div>`
-                  : "";
-                const screenshotHtml = (!isIn) ? renderReceiptImagesHtml(it) : "";
-
-                list.innerHTML += `
-                    <div class="expense-item">
-                        <div class="expense-icon">${arrow}</div>
-                        <div class="expense-details">
-                            <div class="expense-title">${escapeHtml(title)}</div>
-                            ${dateLine}
-                            ${line1}
-                            ${line2}
-                            ${screenshotHtml}
-                        </div>
-                        <div class="expense-amount">
-                            ${it.cashIn ? `<span class="amount-in">+£${Number(it.cashIn).toLocaleString()}</span>` : ""}
-                            ${it.cashOut ? `<span class="amount-out">-£${Number(it.cashOut).toLocaleString()}</span>` : ""}
-                        </div>
-                    </div>`;
-            });
-        })
-        .catch(err => {
-            console.error("Error loading all expenses:", err);
-            list.innerHTML = "<p>Error loading expenses</p>";
-        });
+        renderAllExpensesModalList(list);
+      })
+      .catch(err => {
+        console.error("Error loading all expenses:", err);
+        if (list) list.innerHTML = "<p>Error loading expenses</p>";
+      });
 }
 
 // CLOSE

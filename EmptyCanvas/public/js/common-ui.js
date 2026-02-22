@@ -1322,23 +1322,37 @@ function initFloatingSearchWidget() {
 
   const mount =
     document.querySelector(".main-header .header-row1 .right") ||
+    document.querySelector(".main-header .topbar-right") ||
     document.querySelector(".main-header .header-row1") ||
     document.querySelector(".tasks-v2-actions") ||
     null;
 
   if (!mount) return;
 
+  const notifWrap = mount.querySelector(".notif-wrap") || null;
+  const userEl =
+    mount.querySelector("a.header-user") ||
+    mount.querySelector("a.account-mini") ||
+    null;
+
   // Create button if needed
   if (!btn) {
     btn = document.createElement("button");
     btn.type = "button";
     btn.id = "searchIconBtn";
-    // Insert before bell if exists, otherwise prepend
-    const bell = document.getElementById("notifBellBtn") || mount.querySelector(".notif-bell-btn");
-    if (bell && bell.parentElement === mount) {
-      mount.insertBefore(btn, bell);
-    } else {
-      mount.insertBefore(btn, mount.firstChild);
+  }
+
+  // Ensure the button is mounted in the right place on every page
+  if (btn.parentElement !== mount) {
+    if (notifWrap) mount.insertBefore(btn, notifWrap);
+    else if (userEl) mount.insertBefore(btn, userEl);
+    else mount.insertBefore(btn, mount.firstChild);
+  } else {
+    // Keep the order: Search → Bell → User
+    if (notifWrap && btn.nextSibling !== notifWrap) {
+      mount.insertBefore(btn, notifWrap);
+    } else if (!notifWrap && userEl && btn.nextSibling !== userEl) {
+      mount.insertBefore(btn, userEl);
     }
   }
 
@@ -1351,9 +1365,9 @@ function initFloatingSearchWidget() {
   // Some pages/themes might set button/icon colors globally.
   // Force the icon color so it never renders "invisible".
   try {
-    btn.style.setProperty("color", "#1f2d4d", "important");
+    btn.style.setProperty("color", "#0F172A", "important");
   } catch {
-    btn.style.color = "#1f2d4d";
+    btn.style.color = "#0F172A";
   }
 
   // Use the SAME icon used inside the floating searchbar (SVG) so it always renders.
@@ -1399,43 +1413,71 @@ function initFloatingSearchWidget() {
 
   function openPanel() {
     positionPanel();
+
+    // Ensure the panel starts from the "closed" state so the CSS transition plays.
+    panel.classList.remove("is-open");
     panel.hidden = false;
-    setTimeout(() => { try { input && input.focus(); } catch {} }, 0);
+    btn.setAttribute("aria-expanded", "true");
+
+    // Trigger the transition in the next frame.
+    requestAnimationFrame(() => {
+      panel.classList.add("is-open");
+    });
+
+    setTimeout(() => {
+      try { input && input.focus(); } catch {}
+    }, 0);
   }
 
   function closePanel() {
-    panel.hidden = true;
+    if (panel.hidden) return;
+    btn.setAttribute("aria-expanded", "false");
+    panel.classList.remove("is-open");
+
+    const finish = () => {
+      panel.hidden = true;
+      panel.removeEventListener("transitionend", finish);
+    };
+
+    // Wait for the CSS transition before hiding (fallback timer in case transitionend doesn't fire)
+    panel.addEventListener("transitionend", finish);
+    setTimeout(finish, 220);
   }
 
-  btn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // Bind only once per page lifecycle
+  if (btn.dataset.floatingSearchBound !== "1") {
+    btn.dataset.floatingSearchBound = "1";
 
-    // Close the user menu/notifications if they are open.
-    try { window.__opsCloseUserMenu && window.__opsCloseUserMenu(); } catch {}
-    try {
-      const notif = document.getElementById("notifPanel");
-      if (notif && !notif.hidden) notif.hidden = true;
-    } catch {}
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    if (panel.hidden) openPanel();
-    else closePanel();
-  });
+      // Close the user menu/notifications if they are open.
+      try { window.__opsCloseUserMenu && window.__opsCloseUserMenu(); } catch {}
+      try {
+        const notif = document.getElementById("notifPanel");
+        if (notif && !notif.hidden) notif.hidden = true;
+      } catch {}
 
-  // Close on outside click / ESC
-  document.addEventListener("click", (e) => {
-    if (panel.hidden) return;
-    if (panel.contains(e.target) || btn.contains(e.target)) return;
-    closePanel();
-  });
+      if (panel.hidden) openPanel();
+      else closePanel();
+    });
 
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closePanel();
-  });
+    // Close on outside click / ESC
+    document.addEventListener("click", (e) => {
+      if (panel.hidden) return;
+      if (panel.contains(e.target) || btn.contains(e.target)) return;
+      closePanel();
+    });
 
-  window.addEventListener("resize", () => {
-    if (!panel.hidden) positionPanel();
-  });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closePanel();
+    });
+
+    window.addEventListener("resize", () => {
+      if (!panel.hidden) positionPanel();
+    });
+  }
 }
 
 
