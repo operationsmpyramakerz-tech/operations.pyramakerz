@@ -51,31 +51,47 @@ function drawStocktakingHeader(doc, opts = {}) {
   const mR = doc.page.margins.right;
   const headerTopY = doc.y;
 
-  // Logo (left)
+  // Keep a consistent content width for title measurement/wrapping.
+  const headerX = mL + logoW + 10;
+  const titleW = Math.max(10, pageW - mR - headerX);
+
+  // ---------------- Title metrics (for vertical centering) ----------------
+  // We measure the title block height first, then position the logo so that
+  // its vertical center aligns with the title's vertical center.
+  const titleToMeasure = title || " ";
+  doc.font("Helvetica-Bold").fontSize(titleSize);
+  const titleH = doc.heightOfString(titleToMeasure, { width: titleW, align: "left" });
+
+  // Logo height (approx). We render with a fixed width; the PNG is square in our UI.
+  // Even if the image isn't perfectly square, this still improves alignment.
+  const logoH = logoW;
+
+  // Move logo a bit up/down so the centers match.
+  const logoY = headerTopY + (titleH - logoH) / 2;
+
+  // Logo (left) — vertically centered with the title block
   try {
     if (logoPath && fs.existsSync(logoPath)) {
-      doc.image(logoPath, mL, headerTopY, { width: logoW });
+      doc.image(logoPath, mL, logoY, { width: logoW });
     }
   } catch {
     // Ignore logo errors.
   }
-
-  const headerX = mL + logoW + 10;
 
   // Title
   doc
     .fillColor(colors.text)
     .font("Helvetica-Bold")
     .fontSize(titleSize)
-    .text(title || " ", headerX, headerTopY);
+    .text(titleToMeasure, headerX, headerTopY, { width: titleW, align: "left" });
 
   // 1) Make sure the writing cursor is at least after the title.
   // (PDFKit's internal cursor depends on the last drawn text block.)
-  const minTextBottomY = headerTopY + (variant === "compact" ? 22 : 24);
+  const minTextBottomY = headerTopY + titleH;
   if (doc.y < minTextBottomY) doc.y = minTextBottomY;
 
   // 2) Place the separator line under the logo (and below the title if it wraps).
-  const logoBottomY = headerTopY + logoW;
+  const logoBottomY = logoY + logoH;
   const contentBottomY = Math.max(logoBottomY, doc.y);
   const separatorY = contentBottomY + (variant === "compact" ? 2 : 3);
 
@@ -88,7 +104,7 @@ function drawStocktakingHeader(doc, opts = {}) {
 
   // 3) Start body content shortly after the separator.
   // Keep it tight to preserve vertical space.
-  doc.y = separatorY + (variant === "compact" ? 3 : 4);
+  doc.y = separatorY + (variant === "compact" ? 2 : 3);
 }
 
 module.exports = {
