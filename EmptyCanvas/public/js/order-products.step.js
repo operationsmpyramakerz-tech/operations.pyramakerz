@@ -90,6 +90,10 @@
   let byId = new Map();
   let cart = []; // draft products
 
+  // Preload promises (so we can start loading components/draft as early as possible)
+  let componentsPromise = null;
+  let draftPromise = null;
+
   let globalReason = '';
   let readyToUse = false; // reason entered + components loaded
 
@@ -132,6 +136,15 @@
     } catch {
       // ignore
     }
+  }
+
+  // Start loading in background ASAP (while the user types the reason).
+  // This reduces (or eliminates) the need to show the "Loading components..." overlay.
+  function startPreload() {
+    if (!componentsPromise) componentsPromise = loadComponents();
+    if (!draftPromise) draftPromise = loadDraft();
+    window.__cartLoadPromises = { componentsPromise, draftPromise };
+    return { componentsPromise, draftPromise };
   }
 
   // ---------------------------- Draft persistence ----------------------------
@@ -703,11 +716,7 @@
     setReady(false);
 
     // Start loading data in the background while the user types the reason
-    const componentsPromise = loadComponents();
-    const draftPromise = loadDraft();
-
-    // Keep promises accessible to reason submit handler
-    window.__cartLoadPromises = { componentsPromise, draftPromise };
+    const { componentsPromise: cp, draftPromise: dp } = startPreload();
 
     // =======================
     // Edit mode behavior
@@ -719,7 +728,7 @@
 
       try {
         // Ensure draft loaded first so we can pull its existing reason
-        await draftPromise;
+        await dp;
       } catch {}
 
       // Derive reason from the existing order items (best effort)
@@ -729,7 +738,7 @@
 
       // Wait for components DB
       try {
-        await componentsPromise;
+        await cp;
       } catch {}
 
       hideSaving();
@@ -760,7 +769,7 @@
     openOrderReasonModal({ force: true });
 
     // When draft loads, try to prefill the reason input (best effort)
-    draftPromise.then(() => {
+    dp.then(() => {
       if (!orderReasonInputEl) return;
       const current = String(orderReasonInputEl.value || '').trim();
       if (current) return;
@@ -772,7 +781,16 @@
     renderCart();
   }
 
-  document.addEventListener('DOMContentLoaded', init);
+  // Kick off background loading immediately.
+  // (Init will still gate interactions until reason + components are ready.)
+  startPreload();
+
+  // Ensure init runs even if this script is loaded after DOMContentLoaded.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 
   // ---------------------------- Reason / gating ----------------------------
   function setReady(isReady) {
@@ -824,7 +842,7 @@
     applyGlobalReason();
 
     // Wait for components to finish loading (if still pending)
-    const promises = window.__cartLoadPromises || {};
+    const promises = window.__cartLoadPromises || startPreload();
     const componentsPromise = promises.componentsPromise;
     const draftPromise = promises.draftPromise;
 
