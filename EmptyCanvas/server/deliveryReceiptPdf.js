@@ -1,6 +1,7 @@
 const PDFDocument = require("pdfkit");
 const path = require("path");
 const { attachPageNumbers } = require("./pdfPageNumbers");
+const { drawStocktakingHeader } = require("./pdfHeader");
 
 function moneyGBP(n) {
   const num = Number(n) || 0;
@@ -141,7 +142,8 @@ function pipeDeliveryReceiptPDF(
     ? groupByReason(safeRows)
     : [{ reason: singleKey, rows: safeRows }];
 
-  const logoPath = path.join(__dirname, "..", "public", "images", "Logo horizontal.png");
+  // Use the same logo/header style as the Stocktaking PDFs
+  const logoPath = path.join(__dirname, "..", "public", "images", "logo.png");
 
   // Footer (signature) layout constants
   const FOOTER = {
@@ -167,52 +169,14 @@ function pipeDeliveryReceiptPDF(
   }
 
   function drawPageHeader({ compact = false } = {}) {
-    const { pageW, mL, mR, mT, contentW } = metrics();
-    const headerTop = mT;
-    const headerH = compact ? 42 : 56;
-
-    // Logo (top-right)
-    try {
-      const logoW = compact ? 140 : 170;
-      const logoX = pageW - mR - logoW;
-      const logoY = headerTop - 4;
-      doc.image(logoPath, logoX, logoY, { width: logoW });
-    } catch {
-      // ignore logo errors (missing asset on env)
-    }
-
-    // Title (left)
-    const titleX = mL;
-    const titleY = headerTop + (compact ? 2 : 6);
-    const titleW = contentW - (compact ? 150 : 180);
-    doc
-      .fillColor(COLORS.text)
-      .font("Helvetica-Bold")
-      .fontSize(compact ? 16 : 20)
-      .text("Delivery Receipt", titleX, titleY, {
-        width: Math.max(120, titleW),
-        align: "left",
-      });
-
-    doc
-      .fillColor(COLORS.muted)
-      .font("Helvetica")
-      .fontSize(10)
-      .text("Operations Hub", titleX, titleY + (compact ? 18 : 24), {
-        width: Math.max(120, titleW),
-        align: "left",
-      });
-
-    // Divider line
-    const lineY = headerTop + headerH;
-    doc
-      .moveTo(mL, lineY)
-      .lineTo(pageW - mR, lineY)
-      .lineWidth(1)
-      .strokeColor(COLORS.border)
-      .stroke();
-
-    doc.y = lineY + 14;
+    // Match Stocktaking header style (logo LEFT + title + subtitle + divider)
+    drawStocktakingHeader(doc, {
+      title: "Delivery Receipt",
+      subtitle: `Order: ${String(orderId || "-")}  •  Generated: ${formatDateTime(createdAt)}`,
+      variant: compact ? "compact" : "default",
+      logoPath,
+      colors: COLORS,
+    });
   }
 
   function drawFooterSignature() {
@@ -258,28 +222,6 @@ function pipeDeliveryReceiptPDF(
       doc
         .moveTo(lineStartX + 55, y + 69)
         .lineTo(lineEndX, y + 69)
-        .lineWidth(1)
-        .strokeColor(COLORS.border)
-        .stroke();
-
-      doc.text("Date", lineStartX, y + 82);
-      doc
-        .moveTo(lineStartX + 30, y + 93)
-        .lineTo(lineStartX + 95, y + 93)
-        .lineWidth(1)
-        .strokeColor(COLORS.border)
-        .stroke();
-      doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 102, y + 84);
-      doc
-        .moveTo(lineStartX + 110, y + 93)
-        .lineTo(lineStartX + 175, y + 93)
-        .lineWidth(1)
-        .strokeColor(COLORS.border)
-        .stroke();
-      doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 182, y + 84);
-      doc
-        .moveTo(lineStartX + 190, y + 93)
-        .lineTo(lineEndX, y + 93)
         .lineWidth(1)
         .strokeColor(COLORS.border)
         .stroke();

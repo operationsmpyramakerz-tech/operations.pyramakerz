@@ -4,6 +4,7 @@ const path = require("path");
 const { Client } = require("@notionhq/client");
 const PDFDocument = require("pdfkit"); // PDF
 const { attachPageNumbers } = require("./pdfPageNumbers");
+const { drawStocktakingHeader } = require("./pdfHeader");
 
 // Web Push (Notifications)
 let webpush = null;
@@ -7424,11 +7425,10 @@ app.get(
       doc.pipe(res);
       attachPageNumbers(doc);
 
-      doc.font("Helvetica-Bold").fontSize(18).text("Components Receipt", { align: "left" });
-      doc.moveDown(0.3);
-      doc.font("Helvetica").fontSize(10).fillColor("#555")
-        .text(`Generated: ${new Date().toLocaleString()}`, { continued: true })
-        .text(`   •   User: ${req.session.username || "-"}`);
+      drawStocktakingHeader(doc, {
+        title: "Components Receipt",
+        subtitle: `User: ${req.session.username || "-"}  •  Generated: ${formatDateTime(new Date())}`,
+      });
 
       if (reasonTitle) {
         doc.moveDown(0.3);
@@ -7582,10 +7582,10 @@ app.get(
       doc.pipe(res);
       attachPageNumbers(doc);
 
-      doc.font("Helvetica-Bold").fontSize(16).text("Assigned Orders — Shortage List", { align: "left" });
-      doc.moveDown(0.2);
-      doc.font("Helvetica").fontSize(10).fillColor("#555").text(`Generated: ${new Date().toLocaleString()}`);
-      doc.moveDown(0.6);
+      drawStocktakingHeader(doc, {
+        title: "Assigned Orders — Shortage List",
+        subtitle: `User: ${req.session.username || "-"}  •  Generated: ${formatDateTime(new Date())}`,
+      });
 
       const pageInnerWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
       const colNameW = Math.floor(pageInnerWidth * 0.5);
@@ -9206,28 +9206,6 @@ app.all(
           doc
             .moveTo(lineStartX + 55, y + 69)
             .lineTo(lineEndX, y + 69)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-
-          doc.text("Date", lineStartX, y + 82);
-          doc
-            .moveTo(lineStartX + 30, y + 93)
-            .lineTo(lineStartX + 95, y + 93)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 102, y + 84);
-          doc
-            .moveTo(lineStartX + 110, y + 93)
-            .lineTo(lineStartX + 175, y + 93)
-            .lineWidth(1)
-            .strokeColor(COLORS.border)
-            .stroke();
-          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("/", lineStartX + 182, y + 84);
-          doc
-            .moveTo(lineStartX + 190, y + 93)
-            .lineTo(lineEndX, y + 93)
             .lineWidth(1)
             .strokeColor(COLORS.border)
             .stroke();
@@ -11912,11 +11890,11 @@ app.get('/api/damaged-assets/report/:reportId/pdf', requireAuth, requirePage('Da
     doc.pipe(res);
     attachPageNumbers(doc);
 
-    doc.font('Helvetica-Bold').fontSize(18).text(`Damaged Report (${reportId})`, { align: 'left' });
-    doc.moveDown(0.3);
-    doc.font('Helvetica').fontSize(10).fillColor('#555')
-      .text(`Generated: ${new Date().toLocaleString()}`);
-    doc.moveDown(1);
+    drawStocktakingHeader(doc, {
+      title: 'Damaged Report',
+      subtitle: `Report ID: ${reportId}  •  Generated: ${formatDateTime(new Date())}`,
+    });
+    doc.moveDown(0.6);
 
     for (const page of resp.results) {
       const props = page.properties || {};

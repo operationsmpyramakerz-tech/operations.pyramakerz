@@ -1,6 +1,6 @@
 const PDFDocument = require("pdfkit");
-const path = require("path");
 const { attachPageNumbers } = require("./pdfPageNumbers");
+const { drawStocktakingHeader } = require("./pdfHeader");
 
 // Helper بسيط جدًا عشان نحسّن شكل العربي في PDFKit
 function fixRTL(text) {
@@ -25,27 +25,28 @@ function generateExpensePDF({ userName, userId, items, dateFrom, dateTo }, callb
     // IMPORTANT: attach after data listeners, so we don't miss any chunks.
     attachPageNumbers(doc);
 
-    // ---------------- LOGO ----------------
-    try {
-      const logoPath = path.join(__dirname, "..", "public", "images", "logo.png");
-      doc.image(logoPath, 45, 45, { width: 95 });
-    } catch (err) {
-      console.error("Logo failed:", err.message);
-    }
-
-    // ---------------- HEADER BOX & TITLE ----------------
-    doc.roundedRect(30, 30, 540, 120, 14).stroke("#CFCFCF");
-    doc.font("Helvetica-Bold").fontSize(22).text("Expenses Report", 160, 50);
-
+    // ---------------- HEADER (Stocktaking style) ----------------
     const now = new Date();
-    const timestamp = now.toISOString().slice(0, 16).replace("T", " ");
-    const leftX = 160, rightX = 380, row1Y = 100, row2Y = 122;
+    const timestamp = now.toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
-    doc.fontSize(12);
-    doc.font("Helvetica-Bold").text("User Name ", leftX, row1Y, { continued: true }).font("Helvetica").text(userName || "-");
-    doc.font("Helvetica-Bold").text("Type ",      rightX, row1Y, { continued: true }).font("Helvetica").text("All");
-    doc.font("Helvetica-Bold").text("User ID ",   leftX, row2Y, { continued: true }).font("Helvetica").text(userId || "-");
-    doc.font("Helvetica-Bold").text("Date ",      rightX, row2Y, { continued: true }).font("Helvetica").text(timestamp);
+    drawStocktakingHeader(doc, {
+      title: "Expenses Report",
+      subtitle: `User: ${String(userName || "-")}  •  Generated: ${timestamp}`,
+    });
+
+    // Small meta line (kept compact so the header stays clean)
+    doc
+      .fillColor("#6B7280")
+      .font("Helvetica")
+      .fontSize(10)
+      .text(`User ID: ${String(userId || "-")}  •  Type: All`, { align: "left" });
+    doc.moveDown(0.8);
 
     // ---------------- DURATION ----------------
     function formatDisplayDate(dateStr) {
@@ -67,7 +68,7 @@ function generateExpensePDF({ userName, userId, items, dateFrom, dateTo }, callb
       toText   = formatDisplayDate(dates[dates.length - 1]);
     }
 
-    const durationY = 170;
+    const durationY = doc.y;
     doc.font("Helvetica-Bold").fontSize(14).fillColor("#000").text("Duration:", 40, durationY);
 
     doc.roundedRect(130, durationY - 5, 170, 30, 8).stroke("#CFCFCF");
