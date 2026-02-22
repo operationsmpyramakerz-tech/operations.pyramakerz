@@ -8,11 +8,14 @@ const DEFAULT_COLORS = {
 };
 
 /**
- * Draw a header styled exactly like the Stocktaking PDF header:
+ * Draw a header styled like the Stocktaking PDFs:
  * - Logo on the LEFT
  * - Title next to it
  * - Subtitle under the title
- * - (No divider line — kept compact to maximize table space)
+ * - A compact separator line UNDER the logo (between header and page body)
+ *
+ * Note:
+ * This replaces the old divider line that used to appear under the subtitle.
  *
  * @param {import('pdfkit')} doc
  * @param {{
@@ -28,7 +31,10 @@ function drawStocktakingHeader(doc, opts = {}) {
 
   const title = String(opts.title || "").trim();
   const subtitle = opts.subtitle != null ? String(opts.subtitle) : "";
-  const variant = String(opts.variant || "default").toLowerCase() === "compact" ? "compact" : "default";
+  const variant =
+    String(opts.variant || "default").toLowerCase() === "compact"
+      ? "compact"
+      : "default";
 
   const colors = {
     ...DEFAULT_COLORS,
@@ -56,7 +62,7 @@ function drawStocktakingHeader(doc, opts = {}) {
     // Ignore logo errors.
   }
 
-  const headerX = mL + logoW + 10; // matches the Stocktaking header spacing
+  const headerX = mL + logoW + 10;
 
   // Title
   doc
@@ -74,16 +80,26 @@ function drawStocktakingHeader(doc, opts = {}) {
       .text(subtitle, headerX, headerTopY + 22);
   }
 
-  // Ensure we have enough vertical space after the subtitle.
+  // 1) Make sure the writing cursor is at least after the subtitle.
   // (PDFKit's internal cursor depends on the last drawn text block.)
-  const minY = headerTopY + (variant === "compact" ? 34 : 38);
-  if (doc.y < minY) doc.y = minY;
+  const minTextBottomY = headerTopY + (variant === "compact" ? 34 : 38);
+  if (doc.y < minTextBottomY) doc.y = minTextBottomY;
 
-  // IMPORTANT (layout optimization):
-  // The user requested removing the horizontal divider line under the page title
-  // to gain vertical space and fit more table rows per page.
-  // Keep only a small breathing space after the header.
-  doc.y += variant === "compact" ? 6 : 8;
+  // 2) Place the separator line under the logo (and below subtitle if it wraps).
+  const logoBottomY = headerTopY + logoW;
+  const contentBottomY = Math.max(logoBottomY, doc.y);
+  const separatorY = contentBottomY + (variant === "compact" ? 2 : 3);
+
+  doc
+    .moveTo(mL, separatorY)
+    .lineTo(pageW - mR, separatorY)
+    .lineWidth(1)
+    .strokeColor(colors.border)
+    .stroke();
+
+  // 3) Start body content shortly after the separator.
+  // Keep it tight to preserve vertical space.
+  doc.y = separatorY + (variant === "compact" ? 3 : 4);
 }
 
 module.exports = {
