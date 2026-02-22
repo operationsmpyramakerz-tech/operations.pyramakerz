@@ -10448,8 +10448,10 @@ app.get("/api/expenses", async (req, res) => {
       cashInFromTitleMap.set(id, t);
     }
 
-    // Last settled time: find the most recent "Settled my account" record for this user.
+    // Last settled time/date: find the most recent "Settled my account" record for this user.
+    // We use Notion created_time as the stable boundary for "after last settlement".
     let lastSettledAt = null;
+    let lastSettledDate = null;
     try {
       for (const pg of results) {
         const p = pg?.properties || {};
@@ -10461,12 +10463,16 @@ app.get("/api/expenses", async (req, res) => {
 
         if (!lastSettledAt) {
           lastSettledAt = ct;
+          lastSettledDate = p?.["Date"]?.date?.start || null;
           continue;
         }
 
         const a = new Date(lastSettledAt).getTime();
         const b = new Date(ct).getTime();
-        if (Number.isFinite(b) && (!Number.isFinite(a) || b > a)) lastSettledAt = ct;
+        if (Number.isFinite(b) && (!Number.isFinite(a) || b > a)) {
+          lastSettledAt = ct;
+          lastSettledDate = p?.["Date"]?.date?.start || null;
+        }
       }
     } catch {}
 
@@ -10512,6 +10518,8 @@ app.get("/api/expenses", async (req, res) => {
 
       return {
         id: page.id,
+        // Notion created_time is used by the UI to split "recent" vs "past" (relative to last settlement).
+        createdTime: page.created_time || null,
         date: props["Date"]?.date?.start || null,
         reason,
         fundsType: props["Funds Type"]?.select?.name || "",
@@ -10527,7 +10535,7 @@ app.get("/api/expenses", async (req, res) => {
       };
     });
 
-    res.json({ success: true, items: formatted, lastSettledAt });
+    res.json({ success: true, items: formatted, lastSettledAt, lastSettledDate });
 
   } catch (err) {
     console.error("Expenses load error:", err.body || err);
