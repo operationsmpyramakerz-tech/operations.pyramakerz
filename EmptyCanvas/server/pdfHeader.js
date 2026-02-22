@@ -11,11 +11,8 @@ const DEFAULT_COLORS = {
  * Draw a header styled like the Stocktaking PDFs:
  * - Logo on the LEFT
  * - Title next to it
- * - Subtitle under the title
+ * - (NO subtitle/meta line under the title — removed across all PDFs)
  * - A compact separator line UNDER the logo (between header and page body)
- *
- * Note:
- * This replaces the old divider line that used to appear under the subtitle.
  *
  * @param {import('pdfkit')} doc
  * @param {{
@@ -30,7 +27,9 @@ function drawStocktakingHeader(doc, opts = {}) {
   if (!doc) return;
 
   const title = String(opts.title || "").trim();
-  const subtitle = opts.subtitle != null ? String(opts.subtitle) : "";
+  // NOTE: We intentionally ignore the provided subtitle to remove the
+  // "School/Order • Generated" meta line from ALL PDFs.
+  // Keep the option in the function signature for backward compatibility.
   const variant =
     String(opts.variant || "default").toLowerCase() === "compact"
       ? "compact"
@@ -46,7 +45,6 @@ function drawStocktakingHeader(doc, opts = {}) {
 
   const logoW = variant === "compact" ? 36 : 42;
   const titleSize = variant === "compact" ? 16 : 18;
-  const subtitleSize = variant === "compact" ? 9 : 10;
 
   const pageW = doc.page.width;
   const mL = doc.page.margins.left;
@@ -71,21 +69,12 @@ function drawStocktakingHeader(doc, opts = {}) {
     .fontSize(titleSize)
     .text(title || " ", headerX, headerTopY);
 
-  // Subtitle
-  if (subtitle) {
-    doc
-      .fillColor(colors.muted)
-      .font("Helvetica")
-      .fontSize(subtitleSize)
-      .text(subtitle, headerX, headerTopY + 22);
-  }
-
-  // 1) Make sure the writing cursor is at least after the subtitle.
+  // 1) Make sure the writing cursor is at least after the title.
   // (PDFKit's internal cursor depends on the last drawn text block.)
-  const minTextBottomY = headerTopY + (variant === "compact" ? 34 : 38);
+  const minTextBottomY = headerTopY + (variant === "compact" ? 22 : 24);
   if (doc.y < minTextBottomY) doc.y = minTextBottomY;
 
-  // 2) Place the separator line under the logo (and below subtitle if it wraps).
+  // 2) Place the separator line under the logo (and below the title if it wraps).
   const logoBottomY = headerTopY + logoW;
   const contentBottomY = Math.max(logoBottomY, doc.y);
   const separatorY = contentBottomY + (variant === "compact" ? 2 : 3);
