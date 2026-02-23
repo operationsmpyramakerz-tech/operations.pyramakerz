@@ -1884,6 +1884,59 @@ body.sidebar-collapsed .main-content { padding-left: 0 !important; }
   align-items: center;
   margin-bottom: .75rem;
 }
+
+/* ===== Stocktaking: Download dropdown menu (single Download button) ===== */
+.download-menu{
+  position: relative;
+  display: inline-flex;
+}
+
+.download-menu__btn svg:last-child{
+  width: 18px;
+  height: 18px;
+  opacity: .8;
+}
+
+.download-menu__panel{
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #E5E7EB;
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 22px 50px rgba(0,0,0,0.18);
+  z-index: 60;
+}
+
+.download-menu__panel[hidden]{ display:none; }
+
+.download-menu__item{
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 10px 10px;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: 13px;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.download-menu__item:hover{ background: #F3F4F6; }
+.download-menu__item:disabled{ opacity: .6; cursor: wait; }
+
+.download-menu__sep{
+  height: 1px;
+  background: #E5E7EB;
+  margin: 6px 6px;
+}
 .btn {
   display: inline-flex;
   align-items: center;
