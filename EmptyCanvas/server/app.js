@@ -2743,7 +2743,7 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
   const id = String(schoolId || "").trim();
   if (!id) return { meta: {}, items: [] };
 
-  const cacheKey = `cache:api:b2b:school-stock:${id}:v5`;
+  const cacheKey = `cache:api:b2b:school-stock:${id}:v6`;
   return await cacheGetOrSet(cacheKey, 60, async () => {
     const school = await _getB2BSchoolById(id);
     if (!school) return { meta: {}, items: [] };
@@ -2846,9 +2846,39 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
             tag = { name: t.name, color: t.color || "default" };
           }
 
+          // Prefer an explicit URL property, fall back to the Notion page URL.
+          const urlProp =
+            _propInsensitive(props, "URL") ||
+            _propInsensitive(props, "Url") ||
+            _propInsensitive(props, "Link") ||
+            _propInsensitive(props, "Website") ||
+            _propInsensitive(props, "Component URL") ||
+            _propInsensitive(props, "Component Link");
+
+          let url = null;
+          try {
+            if (urlProp?.type === "url") url = urlProp.url || null;
+            if (!url && urlProp?.type === "rich_text") {
+              const t = (urlProp.rich_text || [])
+                .map((x) => x?.plain_text || "")
+                .join("")
+                .trim();
+              url = t || null;
+            }
+            if (!url && urlProp?.type === "title") {
+              const t = (urlProp.title || [])
+                .map((x) => x?.plain_text || "")
+                .join("")
+                .trim();
+              url = t || null;
+            }
+          } catch {}
+          if (!url) url = page.url || null;
+
           return {
             id: page.id,
             name: componentName,
+            url,
             idCode: idCode || "",
             doneQuantity: doneQuantity === null ? 0 : Number(doneQuantity) || 0,
             done: !!doneBool,
@@ -3097,7 +3127,7 @@ app.post(
 
       // Invalidate school stock cache so UI shows the new columns immediately.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${id}:v5`);
+        await cacheDel(`cache:api:b2b:school-stock:${id}:v6`);
       } catch {}
 
       return res.json({
@@ -3189,7 +3219,7 @@ app.patch(
 
       // Invalidate school stock cache so UI reflects updates.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v5`);
+        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v6`);
       } catch {}
 
       return res.json({ ok: true, inventoryPropName, inventoryDate, value });
@@ -3279,7 +3309,7 @@ app.patch(
 
       // Invalidate school stock cache so UI reflects updates.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v5`);
+        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v6`);
       } catch {}
 
       return res.json({ ok: true, defectedPropName, defectedDate, value });
@@ -3838,6 +3868,7 @@ app.get(
         .map((r) => ({
           id: r.id,
           name: r.name,
+          url: r.url,
           idCode: r.idCode,
           tag: r.tag,
           quantity: Number(r.doneQuantity) || 0,
@@ -3905,36 +3936,13 @@ app.get(
       ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
       ws.getRow(1).height = 28;
 
-      // Subtitle row
-      ws.mergeCells(`A2:${lastCol}2`);
-      ws.getCell("A2").value = `School: ${schoolName}  •  Generated: ${formattedDate}`;
-      ws.getCell("A2").font = { size: 10, color: { argb: "FF6B7280" } };
-      ws.getCell("A2").alignment = { vertical: "middle", horizontal: "center" };
-      ws.getRow(2).height = 18;
-
-      // Spacer
-      ws.addRow([]);
-
-      // Handover confirmation section
-      ws.mergeCells(`A4:${lastCol}4`);
-      ws.getCell("A4").value = "Handover Confirmation";
-      ws.getCell("A4").font = { size: 14, bold: true };
-      ws.getCell("A4").alignment = { vertical: "middle", horizontal: "left" };
-
-      ws.mergeCells(`A5:${lastCol}5`);
-      ws.getCell("A5").value =
-        "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.";
-      ws.getCell("A5").font = { size: 9, color: { argb: "FF6B7280" } };
-      ws.getCell("A5").alignment = { wrapText: true, vertical: "top" };
-      ws.getRow(5).height = 28;
-
-      // Info boxes (School / Date)
-      ws.getRow(6).height = 22;
-      ws.mergeCells(`A6:${leftEnd}6`);
-      ws.mergeCells(`${rightStart}6:${lastCol}6`);
-      ws.getCell("A6").value = `School: ${schoolName}`;
-      ws.getCell(`${rightStart}6`).value = `Date: ${formattedDate}`;
-      ["A6", `${rightStart}6`].forEach((addr) => {
+      // Meta row (School / Date) — matches the updated template (after)
+      ws.getRow(2).height = 22;
+      ws.mergeCells(`A2:${leftEnd}2`);
+      ws.mergeCells(`${rightStart}2:${lastCol}2`);
+      ws.getCell("A2").value = `School: ${schoolName}`;
+      ws.getCell(`${rightStart}2`).value = `Date: ${formattedDate}`;
+      ["A2", `${rightStart}2`].forEach((addr) => {
         const c = ws.getCell(addr);
         c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
         c.border = {
@@ -3945,32 +3953,6 @@ app.get(
         };
         c.font = { size: 10, bold: true };
         c.alignment = { vertical: "middle", horizontal: "left" };
-      });
-
-      // Signature boxes
-      ws.getRow(7).height = 26;
-      ws.mergeCells(`A7:${leftEnd}7`);
-      ws.mergeCells(`${rightStart}7:${lastCol}7`);
-      ws.getCell("A7").value = "Inventory Team Names / Signatures";
-      ws.getCell(`${rightStart}7`).value = "Stockholder Name / Signature";
-      ["A7", `${rightStart}7`].forEach((addr) => {
-        const c = ws.getCell(addr);
-        c.border = {
-          top: { style: "thin", color: { argb: "FFE5E7EB" } },
-          left: { style: "thin", color: { argb: "FFE5E7EB" } },
-          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-          right: { style: "thin", color: { argb: "FFE5E7EB" } },
-        };
-        c.font = { size: 9, bold: true, color: { argb: "FF6B7280" } };
-        c.alignment = { vertical: "middle", horizontal: "left" };
-      });
-      // Signature line row
-      ws.getRow(8).height = 18;
-      ws.mergeCells(`A8:${leftEnd}8`);
-      ws.mergeCells(`${rightStart}8:${lastCol}8`);
-      ["A8", `${rightStart}8`].forEach((addr) => {
-        const c = ws.getCell(addr);
-        c.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
       });
 
       // Spacer
@@ -4061,6 +4043,14 @@ app.get(
         rowValues.push(price === null ? "" : price);
 
         const row = ws.addRow(rowValues);
+
+        // Component hyperlink (clickable)
+        const idxComponent = columns.indexOf("Component") + 1;
+        if (idxComponent > 0 && r.url) {
+          const cell = row.getCell(idxComponent);
+          cell.value = { text: String(r.name || "-"), hyperlink: r.url };
+          cell.font = { color: { argb: "FF1D4ED8" }, underline: true };
+        }
 
         // Tag pill style
         const tagCell = row.getCell(1);
@@ -9466,9 +9456,39 @@ app.all(
               tag = { name: t.name, color: t.color || "default" };
             }
 
+            // Prefer an explicit URL property, fall back to the Notion page URL.
+            const urlProp =
+              _propInsensitive(props, "URL") ||
+              _propInsensitive(props, "Url") ||
+              _propInsensitive(props, "Link") ||
+              _propInsensitive(props, "Website") ||
+              _propInsensitive(props, "Component URL") ||
+              _propInsensitive(props, "Component Link");
+
+            let url = null;
+            try {
+              if (urlProp?.type === "url") url = urlProp.url || null;
+              if (!url && urlProp?.type === "rich_text") {
+                const t = (urlProp.rich_text || [])
+                  .map((x) => x?.plain_text || "")
+                  .join("")
+                  .trim();
+                url = t || null;
+              }
+              if (!url && urlProp?.type === "title") {
+                const t = (urlProp.title || [])
+                  .map((x) => x?.plain_text || "")
+                  .join("")
+                  .trim();
+                url = t || null;
+              }
+            } catch {}
+            if (!url) url = page.url || null;
+
             return {
               id: page.id,
               name: componentName,
+              url,
               idCode,
               tag,
               quantity: Number(quantity) || 0,
@@ -9533,36 +9553,13 @@ app.all(
       ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
       ws.getRow(1).height = 28;
 
-      // Subtitle row
-      ws.mergeCells(`A2:${lastCol}2`);
-      ws.getCell("A2").value = `School: ${schoolName}  •  Generated: ${formattedDate}`;
-      ws.getCell("A2").font = { size: 10, color: { argb: "FF6B7280" } };
-      ws.getCell("A2").alignment = { vertical: "middle", horizontal: "center" };
-      ws.getRow(2).height = 18;
-
-      // Spacer
-      ws.addRow([]);
-
-      // Handover confirmation section
-      ws.mergeCells(`A4:${lastCol}4`);
-      ws.getCell("A4").value = "Handover Confirmation";
-      ws.getCell("A4").font = { size: 14, bold: true };
-      ws.getCell("A4").alignment = { vertical: "middle", horizontal: "left" };
-
-      ws.mergeCells(`A5:${lastCol}5`);
-      ws.getCell("A5").value =
-        "I hereby confirm receiving the below items in good condition. Any discrepancies were noted at delivery.";
-      ws.getCell("A5").font = { size: 9, color: { argb: "FF6B7280" } };
-      ws.getCell("A5").alignment = { wrapText: true, vertical: "top" };
-      ws.getRow(5).height = 28;
-
-      // Info boxes (School / Date)
-      ws.getRow(6).height = 22;
-      ws.mergeCells(`A6:${leftEnd}6`);
-      ws.mergeCells(`${rightStart}6:${lastCol}6`);
-      ws.getCell("A6").value = `School: ${schoolName}`;
-      ws.getCell(`${rightStart}6`).value = `Date: ${formattedDate}`;
-      ["A6", `${rightStart}6`].forEach((addr) => {
+      // Meta row (School / Date) — matches the updated template (after)
+      ws.getRow(2).height = 22;
+      ws.mergeCells(`A2:${leftEnd}2`);
+      ws.mergeCells(`${rightStart}2:${lastCol}2`);
+      ws.getCell("A2").value = `School: ${schoolName}`;
+      ws.getCell(`${rightStart}2`).value = `Date: ${formattedDate}`;
+      ["A2", `${rightStart}2`].forEach((addr) => {
         const c = ws.getCell(addr);
         c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
         c.border = {
@@ -9573,32 +9570,6 @@ app.all(
         };
         c.font = { size: 10, bold: true };
         c.alignment = { vertical: "middle", horizontal: "left" };
-      });
-
-      // Signature boxes (kept to match B2B-school template)
-      ws.getRow(7).height = 26;
-      ws.mergeCells(`A7:${leftEnd}7`);
-      ws.mergeCells(`${rightStart}7:${lastCol}7`);
-      ws.getCell("A7").value = "Inventory Team Names / Signatures";
-      ws.getCell(`${rightStart}7`).value = "Stockholder Name / Signature";
-      ["A7", `${rightStart}7`].forEach((addr) => {
-        const c = ws.getCell(addr);
-        c.border = {
-          top: { style: "thin", color: { argb: "FFE5E7EB" } },
-          left: { style: "thin", color: { argb: "FFE5E7EB" } },
-          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-          right: { style: "thin", color: { argb: "FFE5E7EB" } },
-        };
-        c.font = { size: 9, bold: true, color: { argb: "FF6B7280" } };
-        c.alignment = { vertical: "middle", horizontal: "left" };
-      });
-      // Signature line row
-      ws.getRow(8).height = 18;
-      ws.mergeCells(`A8:${leftEnd}8`);
-      ws.mergeCells(`${rightStart}8:${lastCol}8`);
-      ["A8", `${rightStart}8`].forEach((addr) => {
-        const c = ws.getCell(addr);
-        c.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
       });
 
       // Spacer
@@ -9682,6 +9653,14 @@ app.all(
         ];
 
         const row = ws.addRow(rowValues);
+
+        // Component hyperlink (clickable)
+        const idxComponent = columns.indexOf("Component") + 1;
+        if (idxComponent > 0 && r.url) {
+          const cell = row.getCell(idxComponent);
+          cell.value = { text: String(r.name || "-"), hyperlink: r.url };
+          cell.font = { color: { argb: "FF1D4ED8" }, underline: true };
+        }
 
         // Tag pill style
         const tagCell = row.getCell(1);
