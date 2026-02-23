@@ -3457,6 +3457,14 @@ app.get(
         }
       };
 
+      const normalizeUrl = (url) => {
+        const s = String(url || "").trim();
+        if (!s) return null;
+        if (/^https?:\/\//i.test(s)) return s;
+        if (s.startsWith("www.")) return `https://${s}`;
+        return null;
+      };
+
       // Group items by tag
       const groupMap = new Map();
       for (const it of filteredStockForPdf) {
@@ -3899,6 +3907,17 @@ app.get(
       const createdAt = new Date();
       const formattedDate = formatDateTime(createdAt);
 
+      // Excel styling helpers
+      // - Use BLACK borders to match Excel's "All Borders" look (as in the user's manual edit)
+      // - Apply header fill per-cell (NOT per-row) so the color doesn't extend beyond the table width
+      const EXCEL_BORDER_COLOR = "FF000000"; // black
+      const borderAll = (argb = EXCEL_BORDER_COLOR) => ({
+        top: { style: "thin", color: { argb } },
+        left: { style: "thin", color: { argb } },
+        bottom: { style: "thin", color: { argb } },
+        right: { style: "thin", color: { argb } },
+      });
+
       // Dynamic columns (based on cols selection)
       const columns = ["Tag", "ID Code", "Component", "In Stock"];
       if (includeInventoryCol) columns.push("Inventory");
@@ -3945,12 +3964,7 @@ app.get(
       ["A2", `${rightStart}2`].forEach((addr) => {
         const c = ws.getCell(addr);
         c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
-        c.border = {
-          top: { style: "thin", color: { argb: "FFE5E7EB" } },
-          left: { style: "thin", color: { argb: "FFE5E7EB" } },
-          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-          right: { style: "thin", color: { argb: "FFE5E7EB" } },
-        };
+        c.border = borderAll();
         c.font = { size: 10, bold: true };
         c.alignment = { vertical: "middle", horizontal: "left" };
       });
@@ -3962,18 +3976,18 @@ app.get(
       const headerRowIndex = ws.lastRow.number + 1;
       ws.addRow(columns);
       const headerRow = ws.getRow(headerRowIndex);
-      headerRow.font = { bold: true, color: { argb: "FF065F46" } };
-      headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
-      headerRow.alignment = { vertical: "middle", horizontal: "left" };
       headerRow.height = 20;
-      headerRow.eachCell((cell) => {
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFE5E7EB" } },
-          left: { style: "thin", color: { argb: "FFE5E7EB" } },
-          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-          right: { style: "thin", color: { argb: "FFE5E7EB" } },
-        };
-      });
+
+      // Apply header styling per-cell so the fill DOES NOT extend beyond the table.
+      const headerFont = { bold: true, color: { argb: "FF065F46" } };
+      const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
+      for (let i = 1; i <= columns.length; i++) {
+        const cell = headerRow.getCell(i);
+        cell.font = headerFont;
+        cell.fill = headerFill;
+        cell.alignment = { vertical: "middle", horizontal: "left" };
+        cell.border = borderAll();
+      }
 
       // Column widths (based on selected columns)
       const widthByHeader = {
@@ -4061,12 +4075,9 @@ app.get(
 
         // Borders
         row.eachCell((cell) => {
-          cell.border = {
-            top: { style: "thin", color: { argb: "FFF3F4F6" } },
-            left: { style: "thin", color: { argb: "FFF3F4F6" } },
-            bottom: { style: "thin", color: { argb: "FFF3F4F6" } },
-            right: { style: "thin", color: { argb: "FFF3F4F6" } },
-          };
+          cell.border = borderAll();
+          // Keep things readable when printing
+          if (!cell.alignment) cell.alignment = { vertical: "middle", horizontal: "left" };
         });
 
         // Numeric alignment
@@ -8980,6 +8991,35 @@ app.all(
             const quantity = firstDefinedNumber(props[schoolName]);
             const idCode = lookupIdCode(componentName, props);
 
+            // Prefer an explicit URL property, fall back to the Notion page URL.
+            const urlProp =
+              _propInsensitive(props, "URL") ||
+              _propInsensitive(props, "Url") ||
+              _propInsensitive(props, "Link") ||
+              _propInsensitive(props, "Website") ||
+              _propInsensitive(props, "Component URL") ||
+              _propInsensitive(props, "Component Link");
+
+            let url = null;
+            try {
+              if (urlProp?.type === "url") url = urlProp.url || null;
+              if (!url && urlProp?.type === "rich_text") {
+                const t = (urlProp.rich_text || [])
+                  .map((x) => x?.plain_text || "")
+                  .join("")
+                  .trim();
+                url = t || null;
+              }
+              if (!url && urlProp?.type === "title") {
+                const t = (urlProp.title || [])
+                  .map((x) => x?.plain_text || "")
+                  .join("")
+                  .trim();
+                url = t || null;
+              }
+            } catch {}
+            if (!url) url = page.url || null;
+
             let tag = null;
             if (props.Tag?.select) {
               tag = {
@@ -9003,6 +9043,7 @@ app.all(
             return {
               id: page.id,
               name: componentName,
+              url,
               idCode,
               quantity: Number(quantity) || 0,
               tag,
@@ -9120,8 +9161,20 @@ app.all(
       const sigFooterReserve = includeSignatureBlocks ? FOOTER_RESERVED : 0;
 
       const bottomLimit = () => doc.page.height - mB - sigFooterReserve;
-      const ensureSpace = (needed) => {
-        if (doc.y + needed > bottomLimit()) doc.addPage();
+      const ensureSpace = (needed, { onNewPage } = {}) => {
+        if (doc.y + needed <= bottomLimit()) return;
+
+        doc.addPage();
+
+        // Match Current Orders PDF behavior: repeat a compact header on every page.
+        drawStocktakingHeader(doc, {
+          title: "Stocktaking",
+          variant: "compact",
+          logoPath,
+          colors: COLORS,
+        });
+
+        if (typeof onNewPage === "function") onNewPage();
       };
 
       const drawFooterSignature = () => {
@@ -9280,69 +9333,128 @@ app.all(
         return pill;
       };
 
+      // Table style should match Current Orders PDF: full grid (all borders)
+      const TABLE = {
+        headerH: 22,
+        cellPadX: 8,
+        zebra: "#FAFAFA",
+        link: "#1D4ED8",
+      };
+
       const drawTableHeader = (pill) => {
         const y = doc.y;
         const bg = pill?.bg || COLORS.tableHeadBg;
         const txt = pill?.text || COLORS.accent;
 
-        doc.rect(mL, y, contentW, 20).fillColor(bg).fill();
+        // Background
+        doc.rect(mL, y, contentW, TABLE.headerH).fillColor(bg).fill();
 
-        doc.fillColor(txt).font("Helvetica-Bold").fontSize(9).text("ID Code", mL + 8, y + 6, { width: colIdW - 10 });
+        // Outer border
         doc
-          .fillColor(txt)
-          .font("Helvetica-Bold")
-          .fontSize(9)
-          .text("Component", mL + colIdW, y + 6, { width: colCompW - 10 });
-        doc
-          .fillColor(txt)
-          .font("Helvetica-Bold")
-          .fontSize(9)
-          .text("In Stock", mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
-
-        doc.y = y + 24;
-      };
-
-      const drawRow = (item) => {
-        const y = doc.y;
-        const rowH = 20;
-
-        doc
-          .fillColor(COLORS.text)
-          .font("Helvetica")
-          .fontSize(9)
-          .text(String(item.idCode || ""), mL + 8, y + 6, { width: colIdW - 10 });
-        doc
-          .fillColor(COLORS.text)
-          .font("Helvetica")
-          .fontSize(9)
-          .text(String(item.name || "-"), mL + colIdW, y + 6, { width: colCompW - 10 });
-        doc
-          .fillColor(COLORS.text)
-          .font("Helvetica")
-          .fontSize(9)
-          .text(String(item.quantity ?? 0), mL + colIdW + colCompW, y + 6, { width: colQtyW - 10, align: "right" });
-
-        doc
-          .moveTo(mL, y + rowH)
-          .lineTo(mL + contentW, y + rowH)
+          .rect(mL, y, contentW, TABLE.headerH)
           .lineWidth(1)
-          .strokeColor("#F3F4F6")
+          .strokeColor(COLORS.border)
           .stroke();
 
-        doc.y = y + rowH + 2;
+        // Vertical grid lines
+        doc.lineWidth(0.6).strokeColor(COLORS.border);
+        doc.moveTo(mL + colIdW, y).lineTo(mL + colIdW, y + TABLE.headerH).stroke();
+        doc
+          .moveTo(mL + colIdW + colCompW, y)
+          .lineTo(mL + colIdW + colCompW, y + TABLE.headerH)
+          .stroke();
+
+        // Labels
+        doc.fillColor(txt).font("Helvetica-Bold").fontSize(9);
+        doc.text("ID Code", mL + TABLE.cellPadX, y + 7, { width: colIdW - TABLE.cellPadX * 2 });
+        doc.text("Component", mL + colIdW + TABLE.cellPadX, y + 7, {
+          width: colCompW - TABLE.cellPadX * 2,
+        });
+        doc.text("In Stock", mL + colIdW + colCompW + TABLE.cellPadX, y + 7, {
+          width: colQtyW - TABLE.cellPadX * 2,
+          align: "right",
+        });
+
+        doc.y = y + TABLE.headerH;
+      };
+
+      const drawRow = (item, idx, { onNewPage } = {}) => {
+        const idText = String(item.idCode || "");
+        const compText = String(item.name || "-");
+        const qtyText = String(item.quantity ?? 0);
+
+        // Measure height (support wrapping like Current Orders PDF)
+        doc.font("Helvetica").fontSize(9);
+        const hId = doc.heightOfString(idText, { width: colIdW - TABLE.cellPadX * 2 });
+        const hComp = doc.heightOfString(compText, { width: colCompW - TABLE.cellPadX * 2 });
+        const hQty = doc.heightOfString(qtyText, { width: colQtyW - TABLE.cellPadX * 2 });
+        const rowH = Math.max(20, hId, hComp, hQty) + 8;
+
+        ensureSpace(rowH + 6, { onNewPage });
+        const y = doc.y;
+
+        // Zebra background
+        if (idx % 2 === 0) {
+          doc.rect(mL, y, contentW, rowH).fillColor(TABLE.zebra).fill();
+        }
+
+        // Grid lines (all borders)
+        doc.lineWidth(0.6).strokeColor(COLORS.border);
+        // left / right borders
+        doc.moveTo(mL, y).lineTo(mL, y + rowH).stroke();
+        doc.moveTo(mL + contentW, y).lineTo(mL + contentW, y + rowH).stroke();
+        // vertical separators
+        doc.moveTo(mL + colIdW, y).lineTo(mL + colIdW, y + rowH).stroke();
+        doc
+          .moveTo(mL + colIdW + colCompW, y)
+          .lineTo(mL + colIdW + colCompW, y + rowH)
+          .stroke();
+        // bottom line
+        doc.moveTo(mL, y + rowH).lineTo(mL + contentW, y + rowH).stroke();
+
+        // Text
+        doc.fillColor(COLORS.text).font("Helvetica").fontSize(9);
+        doc.text(idText, mL + TABLE.cellPadX, y + 6, { width: colIdW - TABLE.cellPadX * 2 });
+
+        const componentLink = normalizeUrl(item?.url);
+        const compOpts = {
+          width: colCompW - TABLE.cellPadX * 2,
+          align: "left",
+        };
+        if (componentLink) {
+          compOpts.link = componentLink;
+          compOpts.underline = true;
+          doc.fillColor(TABLE.link);
+        } else {
+          doc.fillColor(COLORS.text);
+        }
+        doc.text(compText, mL + colIdW + TABLE.cellPadX, y + 6, compOpts);
+
+        doc.fillColor(COLORS.text);
+        doc.text(qtyText, mL + colIdW + colCompW + TABLE.cellPadX, y + 6, {
+          width: colQtyW - TABLE.cellPadX * 2,
+          align: "right",
+        });
+
+        doc.y = y + rowH;
       };
 
       for (const group of groups) {
         ensureSpace(60);
-        const pill = drawGroupHeader(group.name, group.color, group.items.length);
-        drawTableHeader(pill);
+
+        let pill = null;
+        const drawGroupHeaderAndTable = () => {
+          pill = drawGroupHeader(group.name, group.color, group.items.length);
+          drawTableHeader(pill);
+        };
+
+        drawGroupHeaderAndTable();
 
         (group.items || [])
           .slice()
           .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
-          .forEach((it) => {
-            ensureSpace(28);
-            drawRow(it);
+          .forEach((it, idx) => {
+            drawRow(it, idx, { onNewPage: drawGroupHeaderAndTable });
           });
 
         doc.moveDown(0.5);
@@ -9519,6 +9631,17 @@ app.all(
       const createdAt = new Date();
       const formattedDate = formatDateTime(createdAt);
 
+      // Excel styling helpers
+      // - Use BLACK borders to match Excel's "All Borders" look
+      // - Apply header fill per-cell (NOT per-row) so the color doesn't extend beyond the table width
+      const EXCEL_BORDER_COLOR = "FF000000"; // black
+      const borderAll = (argb = EXCEL_BORDER_COLOR) => ({
+        top: { style: "thin", color: { argb } },
+        left: { style: "thin", color: { argb } },
+        bottom: { style: "thin", color: { argb } },
+        right: { style: "thin", color: { argb } },
+      });
+
       // Stocktaking exports should NOT have Inventory/Defected
       const columns = ["Tag", "ID Code", "Component", "In Stock", "Unity Price"];
 
@@ -9562,12 +9685,7 @@ app.all(
       ["A2", `${rightStart}2`].forEach((addr) => {
         const c = ws.getCell(addr);
         c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
-        c.border = {
-          top: { style: "thin", color: { argb: "FFE5E7EB" } },
-          left: { style: "thin", color: { argb: "FFE5E7EB" } },
-          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-          right: { style: "thin", color: { argb: "FFE5E7EB" } },
-        };
+        c.border = borderAll();
         c.font = { size: 10, bold: true };
         c.alignment = { vertical: "middle", horizontal: "left" };
       });
@@ -9579,18 +9697,18 @@ app.all(
       const headerRowIndex = ws.lastRow.number + 1;
       ws.addRow(columns);
       const headerRow = ws.getRow(headerRowIndex);
-      headerRow.font = { bold: true, color: { argb: "FF065F46" } };
-      headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
-      headerRow.alignment = { vertical: "middle", horizontal: "left" };
       headerRow.height = 20;
-      headerRow.eachCell((cell) => {
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFE5E7EB" } },
-          left: { style: "thin", color: { argb: "FFE5E7EB" } },
-          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-          right: { style: "thin", color: { argb: "FFE5E7EB" } },
-        };
-      });
+
+      // Apply header styling per-cell so the fill DOES NOT extend beyond the table.
+      const headerFont = { bold: true, color: { argb: "FF065F46" } };
+      const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
+      for (let i = 1; i <= columns.length; i++) {
+        const cell = headerRow.getCell(i);
+        cell.font = headerFont;
+        cell.fill = headerFill;
+        cell.alignment = { vertical: "middle", horizontal: "left" };
+        cell.border = borderAll();
+      }
 
       // Column widths
       const widthByHeader = {
@@ -9671,12 +9789,8 @@ app.all(
 
         // Borders
         row.eachCell((cell) => {
-          cell.border = {
-            top: { style: "thin", color: { argb: "FFF3F4F6" } },
-            left: { style: "thin", color: { argb: "FFF3F4F6" } },
-            bottom: { style: "thin", color: { argb: "FFF3F4F6" } },
-            right: { style: "thin", color: { argb: "FFF3F4F6" } },
-          };
+          cell.border = borderAll();
+          if (!cell.alignment) cell.alignment = { vertical: "middle", horizontal: "left" };
         });
 
         // Numeric alignment
