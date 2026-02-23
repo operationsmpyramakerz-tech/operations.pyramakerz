@@ -6148,17 +6148,12 @@ app.post(
         }
       };
 
-      const borderThin = {
-        top: { style: "thin", color: { argb: "FFDDDDDD" } },
-        left: { style: "thin", color: { argb: "FFDDDDDD" } },
-        bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
-        right: { style: "thin", color: { argb: "FFDDDDDD" } },
-      };
-      const borderLight = {
-        top: { style: "thin", color: { argb: "FFEEEEEE" } },
-        left: { style: "thin", color: { argb: "FFEEEEEE" } },
-        bottom: { style: "thin", color: { argb: "FFEEEEEE" } },
-        right: { style: "thin", color: { argb: "FFEEEEEE" } },
+      // User requested: "make all border for tables" (strong borders)
+      const borderStrong = {
+        top: { style: "thin", color: { argb: "FF000000" } },
+        left: { style: "thin", color: { argb: "FF000000" } },
+        bottom: { style: "thin", color: { argb: "FF000000" } },
+        right: { style: "thin", color: { argb: "FF000000" } },
       };
 
       // ---- Meta small table (top) ----
@@ -6886,17 +6881,12 @@ app.post(
         }
       };
 
-      const borderThin = {
-        top: { style: "thin", color: { argb: "FFDDDDDD" } },
-        left: { style: "thin", color: { argb: "FFDDDDDD" } },
-        bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
-        right: { style: "thin", color: { argb: "FFDDDDDD" } },
-      };
-      const borderLight = {
-        top: { style: "thin", color: { argb: "FFEEEEEE" } },
-        left: { style: "thin", color: { argb: "FFEEEEEE" } },
-        bottom: { style: "thin", color: { argb: "FFEEEEEE" } },
-        right: { style: "thin", color: { argb: "FFEEEEEE" } },
+      // User requested: "make all boarder for tables" (strong borders)
+      const borderStrong = {
+        top: { style: "thin", color: { argb: "FF000000" } },
+        left: { style: "thin", color: { argb: "FF000000" } },
+        bottom: { style: "thin", color: { argb: "FF000000" } },
+        right: { style: "thin", color: { argb: "FF000000" } },
       };
 
       // ---- Meta small table (top) ----
@@ -6915,7 +6905,7 @@ app.post(
         row.height = 20;
         for (let c = 1; c <= 4; c++) {
           const cell = row.getCell(c);
-          cell.border = borderThin;
+          cell.border = borderStrong;
           cell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
         }
         [1, 3].forEach((c) => {
@@ -6961,8 +6951,6 @@ app.post(
         "ID Code",
         "Component",
         "Quantity",
-        "Reason",
-        "Component link",
         "Unit cost",
         "Total cost",
       ];
@@ -6975,7 +6963,7 @@ app.post(
       header.alignment = { vertical: "middle" };
       header.eachCell((cell) => {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colors.header } };
-        cell.border = borderThin;
+        cell.border = borderStrong;
       });
 
       const items = (rows || []).slice().sort((a, b) =>
@@ -6987,8 +6975,6 @@ app.post(
           row.idCode || "",
           row.component,
           row.qty,
-          row.reason,
-          row.link || "",
           row.unit === null || typeof row.unit === "undefined" ? "" : Number(row.unit),
           row.total === null || typeof row.total === "undefined" ? "" : Number(row.total),
         ]);
@@ -6997,28 +6983,22 @@ app.post(
           // Make the component name clickable
           r.getCell(2).value = { text: row.component, hyperlink: row.link };
           r.getCell(2).font = { color: { argb: "FF2563EB" }, underline: true };
-
-          // Keep the raw link column clickable as well
-          r.getCell(5).value = { text: row.link, hyperlink: row.link };
-          r.getCell(5).font = { color: { argb: "FF2563EB" }, underline: true };
         }
 
         r.getCell(3).numFmt = "0";
-        r.getCell(6).numFmt = '"£"#,##0.00';
-        r.getCell(7).numFmt = '"£"#,##0.00';
+        r.getCell(4).numFmt = '"£"#,##0.00';
+        r.getCell(5).numFmt = '"£"#,##0.00';
 
         r.eachCell((cell) => {
-          cell.border = borderLight;
+          cell.border = borderStrong;
           cell.alignment = { vertical: "middle", wrapText: true };
         });
       }
 
       ws.columns = [
         { width: 14 },
-        { width: 32 },
+        { width: 36 },
         { width: 10 },
-        { width: 24 },
-        { width: 48 },
         { width: 12 },
         { width: 12 },
       ];
