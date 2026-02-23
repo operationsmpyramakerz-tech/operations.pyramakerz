@@ -1,7 +1,12 @@
 document.addEventListener('DOMContentLoaded', function() {
   const groupsContainer = document.getElementById('stock-groups');
   const searchInput     = document.getElementById('stockSearch');
-  const downloadPdfBtn  = document.getElementById('downloadPdfBtn');
+
+  // Download dropdown (single button)
+  const downloadMenuWrap = document.getElementById('downloadMenuWrap');
+  const downloadMenuBtn  = document.getElementById('downloadMenuBtn');
+  const downloadMenuPanel = document.getElementById('downloadMenuPanel');
+  const downloadPdfBtn   = document.getElementById('downloadPdfBtn');
   const downloadExcelBtn = document.getElementById('downloadExcelBtn');
 
   let allStock = [];
@@ -205,6 +210,46 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
+  // ---------- Download dropdown ----------
+  const closeDownloadMenu = () => {
+    if (!downloadMenuPanel) return;
+    downloadMenuPanel.hidden = true;
+    if (downloadMenuBtn) downloadMenuBtn.setAttribute('aria-expanded', 'false');
+  };
+
+  const openDownloadMenu = () => {
+    if (!downloadMenuPanel) return;
+    downloadMenuPanel.hidden = false;
+    if (downloadMenuBtn) downloadMenuBtn.setAttribute('aria-expanded', 'true');
+    // Render feather icons inside the dropdown
+    if (window.feather) feather.replace();
+  };
+
+  const toggleDownloadMenu = () => {
+    if (!downloadMenuPanel) return;
+    if (downloadMenuPanel.hidden) openDownloadMenu();
+    else closeDownloadMenu();
+  };
+
+  if (downloadMenuBtn && downloadMenuPanel && downloadMenuWrap) {
+    downloadMenuBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleDownloadMenu();
+    });
+
+    // Click outside closes
+    document.addEventListener('click', (e) => {
+      if (downloadMenuPanel.hidden) return;
+      if (downloadMenuWrap.contains(e.target)) return;
+      closeDownloadMenu();
+    });
+
+    // Escape closes
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeDownloadMenu();
+    });
+  }
+
   // ---------- Export helpers (PDF / Excel) ----------
 
   const downloadBlobResponse = async (res, fallbackName) => {
@@ -253,6 +298,7 @@ document.addEventListener('DOMContentLoaded', function() {
   if (downloadPdfBtn) {
     downloadPdfBtn.addEventListener('click', (e) => {
       e.preventDefault();
+      closeDownloadMenu();
       exportFile(downloadPdfBtn, '/api/stock/pdf', 'Stocktaking.pdf');
     });
   }
@@ -260,6 +306,7 @@ document.addEventListener('DOMContentLoaded', function() {
   if (downloadExcelBtn) {
     downloadExcelBtn.addEventListener('click', (e) => {
       e.preventDefault();
+      closeDownloadMenu();
       exportFile(downloadExcelBtn, '/api/stock/excel', 'Stocktaking.xlsx');
     });
   }
