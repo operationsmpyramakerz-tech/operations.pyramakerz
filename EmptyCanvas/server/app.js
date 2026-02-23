@@ -4186,7 +4186,7 @@ app.get(
       if (!userId) return res.status(404).json({ error: "User not found." });
 
       // Cache the Notion-derived list briefly to make reloads fast and reduce Notion load.
-      const listCacheKey = `cache:api:orders:list:${userId}:v4`;
+      const listCacheKey = `cache:api:orders:list:${userId}:v5`;
       const allOrders = await cacheGetOrSet(listCacheKey, 60, async () => {
         const rows = [];
         let hasMore = true;
@@ -4313,6 +4313,14 @@ app.get(
 
             const qtyRequested = props?.["Quantity Requested"]?.number || 0;
 
+            // Quantity Progress (if present)
+            const qtyProgress = _extractPropNumber(
+              getPropLoose(props, "Quantity Progress") ||
+              getPropLoose(props, "Qty Progress") ||
+              getPropLoose(props, "Qty progress") ||
+              null,
+            );
+
             // Supervisor-edited quantity (if present)
             const qtyEditedBySupervisor = _extractPropNumber(
               getPropLoose(props, "Quantity Edited by supervisor") ||
@@ -4358,6 +4366,10 @@ app.get(
               productPageId,
               unitPriceFromOrder,
               quantityRequested: Number(qtyRequested) || 0,
+              quantityProgress:
+                typeof qtyProgress === "number" && Number.isFinite(qtyProgress)
+                  ? Number(qtyProgress)
+                  : null,
               quantityEditedBySupervisor:
                 typeof qtyEditedBySupervisor === "number" && Number.isFinite(qtyEditedBySupervisor)
                   ? Number(qtyEditedBySupervisor)
@@ -4403,6 +4415,10 @@ app.get(
             productUrl: p?.url || null,
             unitPrice,
             quantityRequested: typeof r.quantityRequested === "number" ? r.quantityRequested : (Number(r.quantity) || 0),
+            quantityProgress:
+              typeof r.quantityProgress === "number" && Number.isFinite(r.quantityProgress)
+                ? r.quantityProgress
+                : null,
             quantityEditedBySupervisor:
               typeof r.quantityEditedBySupervisor === "number" && Number.isFinite(r.quantityEditedBySupervisor)
                 ? r.quantityEditedBySupervisor
