@@ -27,6 +27,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const excelBtn = document.getElementById('coDownloadExcelBtn');
   const pdfBtn = document.getElementById('coDownloadPdfBtn');
   const editOrderBtn = document.getElementById('coEditOrderBtn');
+
+  // Sub-modal (Edit password)
+  const editPwdModal = document.getElementById('coEditPwdModal');
+  const editPwdCloseBtn = document.getElementById('coEditPwdClose');
+  const editPwdCancelBtn = document.getElementById('coEditPwdCancel');
+  const editPwdConfirmBtn = document.getElementById('coEditPwdConfirm');
+  const editPwdInput = document.getElementById('coEditPwdInput');
+  const editPwdError = document.getElementById('coEditPwdError');
   const modalEls = {
     statusTitle: document.getElementById('coModalStatusTitle'),
     statusSub: document.getElementById('coModalStatusSub'),
@@ -39,6 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let lastFocusEl = null;
   let activeGroup = null; // currently opened order group in modal
+  let editPwdLastFocusEl = null;
+  let pendingEditOrderIds = null;
 
   const norm = (s) => String(s || '').toLowerCase().trim();
   const toDate = (d) => new Date(d || 0);
@@ -342,6 +352,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function closeOrderModal() {
     if (!modalOverlay) return;
 
+    // If the edit password modal is open, close it first
+    closeEditPasswordModal({ restoreFocus: false });
+
     // Ensure any open download dropdown is closed
     if (downloadMenuPanel) downloadMenuPanel.hidden = true;
     if (downloadMenuBtn) downloadMenuBtn.setAttribute('aria-expanded', 'false');
@@ -352,6 +365,150 @@ document.addEventListener('DOMContentLoaded', () => {
     activeGroup = null;
     if (lastFocusEl && typeof lastFocusEl.focus === 'function') {
       lastFocusEl.focus();
+    }
+  }
+
+  // ---------- Edit password sub-modal helpers ----------
+  function setEditPwdError(message) {
+    if (!editPwdError) return;
+    editPwdError.textContent = String(message || '');
+  }
+
+  function isEditPwdOpen() {
+    return !!editPwdModal && editPwdModal.classList.contains('is-open');
+  }
+
+  function openEditPasswordModal(orderIds) {
+    // Fallback to prompt if the sub-modal markup isn't present
+    if (!editPwdModal || !editPwdInput || !editPwdConfirmBtn || !editPwdCancelBtn) {
+      const adminPassword = window.prompt('Enter admin password to edit this order:');
+      if (adminPassword === null) return null;
+      const pwd = String(adminPassword || '').trim();
+      return pwd || null;
+    }
+
+    pendingEditOrderIds = Array.isArray(orderIds) ? orderIds.slice() : null;
+    setEditPwdError('');
+    editPwdInput.value = '';
+
+    // Reset button states
+    editPwdConfirmBtn.disabled = false;
+    editPwdCancelBtn.disabled = false;
+    if (editPwdCloseBtn) editPwdCloseBtn.disabled = false;
+
+    editPwdLastFocusEl = document.activeElement;
+    editPwdModal.hidden = false;
+    editPwdModal.classList.add('is-open');
+    editPwdModal.setAttribute('aria-hidden', 'false');
+
+    // Focus input
+    window.requestAnimationFrame(() => {
+      try {
+        editPwdInput.focus();
+      } catch {}
+    });
+
+    return true;
+  }
+
+  function closeEditPasswordModal(opts = {}) {
+    const { restoreFocus = true } = opts || {};
+    if (!editPwdModal) return;
+    if (!isEditPwdOpen()) return;
+
+    editPwdModal.classList.remove('is-open');
+    editPwdModal.setAttribute('aria-hidden', 'true');
+    editPwdModal.hidden = true;
+    pendingEditOrderIds = null;
+    setEditPwdError('');
+
+    if (restoreFocus && editPwdLastFocusEl && typeof editPwdLastFocusEl.focus === 'function') {
+      try {
+        editPwdLastFocusEl.focus();
+      } catch {}
+    }
+  }
+
+  async function submitEditPassword() {
+    const orderIds = Array.isArray(pendingEditOrderIds) ? pendingEditOrderIds.slice() : [];
+    if (!orderIds.length) {
+      closeEditPasswordModal();
+      return;
+    }
+
+    const pwd = String(editPwdInput?.value || '').trim();
+    if (!pwd) {
+      setEditPwdError('Password is required.');
+      try {
+        editPwdInput?.focus();
+      } catch {}
+      return;
+    }
+
+    setEditPwdError('');
+
+    // Disable sub-modal actions
+    if (editPwdConfirmBtn) {
+      editPwdConfirmBtn.disabled = true;
+      editPwdConfirmBtn.dataset.prevHtml = editPwdConfirmBtn.innerHTML;
+      editPwdConfirmBtn.textContent = 'Checking...';
+    }
+    if (editPwdCancelBtn) editPwdCancelBtn.disabled = true;
+    if (editPwdCloseBtn) editPwdCloseBtn.disabled = true;
+
+    try {
+      const res = await fetch('/api/orders/current/edit/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ orderIds, adminPassword: pwd }),
+      });
+
+      if (res.status === 401) {
+        setEditPwdError('Wrong password. Please try again.');
+        editPwdInput.value = '';
+        try {
+          editPwdInput.focus();
+        } catch {}
+        return;
+      }
+
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({}));
+        toast('error', 'Not allowed', data?.error || 'You are not allowed to edit this order.');
+        closeEditPasswordModal();
+        return;
+      }
+
+      if (res.status === 404) {
+        toast('error', 'Not found', 'Order not found.');
+        closeEditPasswordModal();
+        return;
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to init edit');
+      }
+
+      // Success: close modals and go to edit page
+      closeEditPasswordModal({ restoreFocus: false });
+      closeOrderModal();
+      window.location.href = '/orders/new/products?edit=1';
+    } catch (e) {
+      console.error(e);
+      setEditPwdError(e?.message || 'Failed to start editing.');
+    } finally {
+      // Re-enable sub-modal actions
+      if (editPwdConfirmBtn) {
+        editPwdConfirmBtn.disabled = false;
+        const prev = editPwdConfirmBtn.dataset.prevHtml;
+        if (prev) editPwdConfirmBtn.innerHTML = prev;
+        else editPwdConfirmBtn.textContent = 'Continue';
+      }
+      if (editPwdCancelBtn) editPwdCancelBtn.disabled = false;
+      if (editPwdCloseBtn) editPwdCloseBtn.disabled = false;
+      if (window.feather) window.feather.replace();
     }
   }
 
@@ -489,11 +646,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const orderIds = groupOrderIds(g);
     if (!orderIds.length) return;
 
-    // Prompt for admin password
-    const adminPassword = window.prompt('Enter admin password to edit this order:');
-    if (adminPassword === null) return; // cancelled
+    // Prefer the modern sub-modal; fallback to native prompt if missing
+    const opened = openEditPasswordModal(orderIds);
+    if (opened === null) return; // cancelled
+    if (opened === true) return; // sub-modal opened (it will handle submission)
 
-    const pwd = String(adminPassword || '').trim();
+    // opened is a string password in fallback mode
+    const pwd = String(opened || '').trim();
     if (!pwd) {
       toast('error', 'Password required', 'Please enter the admin password.');
       return;
@@ -872,6 +1031,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if (isEditPwdOpen()) {
+      e.preventDefault();
+      closeEditPasswordModal();
+      return;
+    }
     if (downloadMenuPanel && !downloadMenuPanel.hidden) {
       e.preventDefault();
       closeDownloadMenu();
@@ -880,6 +1044,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modalOverlay?.classList.contains('is-open')) {
       e.preventDefault();
       closeOrderModal();
+    }
+  });
+
+  // Edit password sub-modal events
+  if (editPwdModal) {
+    // Click outside closes
+    editPwdModal.addEventListener('click', (e) => {
+      if (e.target === editPwdModal) closeEditPasswordModal();
+    });
+  }
+
+  editPwdCloseBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    closeEditPasswordModal();
+  });
+  editPwdCancelBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    closeEditPasswordModal();
+  });
+  editPwdConfirmBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    submitEditPassword();
+  });
+  editPwdInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitEditPassword();
     }
   });
 
