@@ -892,6 +892,9 @@ body.co-modal-open{ overflow: hidden; }
   margin-top: 12px;
 }
 
+/* Align actions to the right (used by Current Orders modal) */
+.ro-actions--right{ justify-content: flex-end; }
+
 .ro-action-btn{
   display: inline-flex;
   align-items: center;

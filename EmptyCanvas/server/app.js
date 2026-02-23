@@ -4186,7 +4186,7 @@ app.get(
       if (!userId) return res.status(404).json({ error: "User not found." });
 
       // Cache the Notion-derived list briefly to make reloads fast and reduce Notion load.
-      const listCacheKey = `cache:api:orders:list:${userId}:v3`;
+      const listCacheKey = `cache:api:orders:list:${userId}:v4`;
       const allOrders = await cacheGetOrSet(listCacheKey, 60, async () => {
         const rows = [];
         let hasMore = true;
@@ -4201,6 +4201,20 @@ app.get(
           const target = String(name).trim().toLowerCase();
           for (const [k, v] of Object.entries(props)) {
             if (String(k).trim().toLowerCase() === target) return v;
+          }
+          return null;
+        };
+
+        // Like getPropInsensitive, but also matches keys ignoring punctuation/spaces.
+        // Example: "S.V Approval" === "SV Approval" === "S V Approval"
+        const normKey = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+        const getPropLoose = (props, name) => {
+          const direct = getPropInsensitive(props, name);
+          if (direct) return direct;
+          if (!props || !name) return null;
+          const target = normKey(name);
+          for (const [k, v] of Object.entries(props)) {
+            if (normKey(k) === target) return v;
           }
           return null;
         };
@@ -4298,6 +4312,15 @@ app.get(
             const statusColor = statusProp?.select?.color || statusProp?.status?.color || "default";
 
             const qtyRequested = props?.["Quantity Requested"]?.number || 0;
+
+            // Supervisor-edited quantity (if present)
+            const qtyEditedBySupervisor = _extractPropNumber(
+              getPropLoose(props, "Quantity Edited by supervisor") ||
+              getPropLoose(props, "Quantity Edited by Supervisor") ||
+              getPropLoose(props, "Quantity Edited") ||
+              null,
+            );
+
             const qtyReceived =
               receivedProp && props?.[receivedProp]
                 ? props?.[receivedProp]?.number
@@ -4306,6 +4329,17 @@ app.get(
               qtyReceived !== null && qtyReceived !== undefined && Number.isFinite(Number(qtyReceived))
                 ? Number(qtyReceived)
                 : Number(qtyRequested) || 0;
+
+            // S.V Approval (Notion select/status)
+            const svApprovalProp =
+              getPropLoose(props, "S.V Approval") ||
+              getPropLoose(props, "SV Approval") ||
+              getPropLoose(props, "S V Approval") ||
+              null;
+            const svApproval =
+              svApprovalProp?.select?.name || svApprovalProp?.status?.name || null;
+            const svApprovalColor =
+              svApprovalProp?.select?.color || svApprovalProp?.status?.color || null;
 
             const unitPriceProp =
               getPropInsensitive(props, "Unit price") ||
@@ -4323,9 +4357,20 @@ app.get(
               reason: props?.Reason?.title?.[0]?.plain_text || "No Reason",
               productPageId,
               unitPriceFromOrder,
+              quantityRequested: Number(qtyRequested) || 0,
+              quantityEditedBySupervisor:
+                typeof qtyEditedBySupervisor === "number" && Number.isFinite(qtyEditedBySupervisor)
+                  ? Number(qtyEditedBySupervisor)
+                  : null,
+              quantityReceived:
+                qtyReceived !== null && qtyReceived !== undefined && Number.isFinite(Number(qtyReceived))
+                  ? Number(qtyReceived)
+                  : null,
               quantity: qtyForUI,
               status: statusName,
               statusColor,
+              svApproval,
+              svApprovalColor,
               createdById,
               createdTime: page.created_time,
             });
@@ -4357,9 +4402,20 @@ app.get(
             productImage: p?.image || null,
             productUrl: p?.url || null,
             unitPrice,
+            quantityRequested: typeof r.quantityRequested === "number" ? r.quantityRequested : (Number(r.quantity) || 0),
+            quantityEditedBySupervisor:
+              typeof r.quantityEditedBySupervisor === "number" && Number.isFinite(r.quantityEditedBySupervisor)
+                ? r.quantityEditedBySupervisor
+                : null,
+            quantityReceived:
+              typeof r.quantityReceived === "number" && Number.isFinite(r.quantityReceived)
+                ? r.quantityReceived
+                : null,
             quantity: r.quantity,
             status: r.status,
             statusColor: r.statusColor,
+            svApproval: r.svApproval || null,
+            svApprovalColor: r.svApprovalColor || null,
             createdById: r.createdById,
             createdByName: r.createdById ? (memberMap.get(r.createdById) || "") : "",
             createdTime: r.createdTime,

@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // This file is included on multiple pages, so only run when the Current Orders list exists.
   if (!ordersListDiv) return;
 
-  const CACHE_KEY = 'ordersDataV4';
+  const CACHE_KEY = 'ordersDataV5';
   const CACHE_TTL_MS = 30 * 1000;
 
   let allOrders = [];
@@ -20,9 +20,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // Modal (Order details)
   const modalOverlay = document.getElementById('coOrderModal');
   const modalCloseBtn = document.getElementById('coModalClose');
-  // Actions (PDF / Excel / Edit)
-  const excelBtn = document.getElementById('coExcelBtn');
-  const pdfBtn = document.getElementById('coPdfBtn');
+  // Actions (Download dropdown / Edit)
+  const downloadMenuWrap = document.getElementById('coDownloadMenuWrap');
+  const downloadMenuBtn = document.getElementById('coDownloadMenuBtn');
+  const downloadMenuPanel = document.getElementById('coDownloadMenuPanel');
+  const excelBtn = document.getElementById('coDownloadExcelBtn');
+  const pdfBtn = document.getElementById('coDownloadPdfBtn');
   const editOrderBtn = document.getElementById('coEditOrderBtn');
   const modalEls = {
     statusTitle: document.getElementById('coModalStatusTitle'),
@@ -239,14 +242,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // and an Operations-adjusted quantity (Quantity Received by operations).
     // The UI should:
     // - show the Qty normally by default
-    // - only strike the old number and show the new one IF Operations edited it
+    // - only strike the old number and show the new one IF Supervisor edited it
     const effectiveQty = (x) => {
       const baseCandidate = Number(x?.quantityRequested);
       const base = Number.isFinite(baseCandidate) ? baseCandidate : (Number(x?.quantity) || 0);
-      const rec = (typeof x?.quantityReceived === 'number' && Number.isFinite(x.quantityReceived))
-        ? Number(x.quantityReceived)
-        : null;
-      return rec !== null && rec !== undefined ? rec : base;
+
+      const editedCandidate = Number(x?.quantityEditedBySupervisor);
+      const edited = Number.isFinite(editedCandidate) ? editedCandidate : null;
+
+      return edited !== null && edited !== undefined ? edited : base;
     };
 
     // Meta
@@ -275,17 +279,16 @@ document.addEventListener('DOMContentLoaded', () => {
           // Base qty = original requested (if provided), else fall back to the qty returned.
           const baseCandidate = Number(it?.quantityRequested);
           const qtyBase = Number.isFinite(baseCandidate) ? baseCandidate : (Number(it.quantity) || 0);
-          const qtyReceived = (typeof it?.quantityReceived === 'number' && Number.isFinite(it.quantityReceived))
-            ? Number(it.quantityReceived)
-            : null;
-          const qty = qtyReceived !== null && qtyReceived !== undefined ? qtyReceived : qtyBase;
+          const editedCandidate = Number(it?.quantityEditedBySupervisor);
+          const qtyEdited = Number.isFinite(editedCandidate) ? editedCandidate : null;
+          const qty = qtyEdited !== null && qtyEdited !== undefined ? qtyEdited : qtyBase;
           const unit = Number(it.unitPrice) || 0;
           const lineTotal = qty * unit;
 
-          // Show old qty normally, and only strike it when Operations changed it
-          const showDiff = qtyReceived !== null && qtyReceived !== undefined && qtyReceived !== qtyBase;
+          // Show old qty normally, and only strike it when Supervisor changed it
+          const showDiff = qtyEdited !== null && qtyEdited !== undefined && qtyEdited !== qtyBase;
           const qtyHTML = showDiff
-            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new">${escapeHTML(String(qtyReceived))}</strong></span>`
+            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new">${escapeHTML(String(qtyEdited))}</strong></span>`
             : `<strong>${escapeHTML(String(qtyBase))}</strong>`;
 
           const safeUrl = safeHttpUrl(it.productUrl);
@@ -293,7 +296,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ? `<a class="co-item-link" href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer" title="Open link" aria-label="Open component link"><i data-feather="external-link"></i></a>`
             : '';
 
-          const sVars = notionColorVars(it.statusColor);
+          const approvalLabel = it.svApproval || it.status || '—';
+          const approvalColor = it.svApprovalColor || it.statusColor;
+          const sVars = notionColorVars(approvalColor);
           const sStyle = `--tag-bg:${sVars.bg};--tag-fg:${sVars.fg};--tag-border:${sVars.bd};`;
 
           const row = document.createElement('div');
@@ -304,11 +309,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="co-item-name">${escapeHTML(it.productName || 'Unknown Product')}</div>
                 ${linkHTML}
               </div>
-              <div class="co-item-sub">Reason: ${escapeHTML(it.reason || '—')} · Qty: ${qtyHTML} · Unit: ${escapeHTML(fmtMoney(unit))}</div>
+              <div class="co-item-sub">Unit: ${escapeHTML(fmtMoney(unit))} · Total: ${escapeHTML(fmtMoney(lineTotal))}</div>
             </div>
             <div class="co-item-right">
-              <div class="co-item-total">${escapeHTML(fmtMoney(lineTotal))}</div>
-              <div class="co-item-status" style="${sStyle}">${escapeHTML(it.status || '—')}</div>
+              <div class="co-item-total">Qty: ${qtyHTML}</div>
+              <div class="co-item-status" style="${sStyle}">${escapeHTML(approvalLabel)}</div>
             </div>
           `;
           frag.appendChild(row);
@@ -334,6 +339,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function closeOrderModal() {
     if (!modalOverlay) return;
+
+    // Ensure any open download dropdown is closed
+    if (downloadMenuPanel) downloadMenuPanel.hidden = true;
+    if (downloadMenuBtn) downloadMenuBtn.setAttribute('aria-expanded', 'false');
+
     modalOverlay.classList.remove('is-open');
     modalOverlay.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('co-modal-open');
@@ -624,14 +634,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const itemsCount = items.length;
 
-    // Use the same "effective" quantity logic as the modal (Operations edits override).
+    // Use the same "effective" quantity logic as the modal (Supervisor edits override).
     const effectiveQty = (x) => {
       const baseCandidate = Number(x?.quantityRequested);
       const base = Number.isFinite(baseCandidate) ? baseCandidate : (Number(x?.quantity) || 0);
-      const rec = (typeof x?.quantityReceived === 'number' && Number.isFinite(x.quantityReceived))
-        ? Number(x.quantityReceived)
-        : null;
-      return rec !== null && rec !== undefined ? rec : base;
+
+      const editedCandidate = Number(x?.quantityEditedBySupervisor);
+      const edited = Number.isFinite(editedCandidate) ? editedCandidate : null;
+
+      return edited !== null && edited !== undefined ? edited : base;
     };
 
     // "Components price" = total cost of all items (qty * unitPrice)
@@ -822,8 +833,49 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.target === modalOverlay) closeOrderModal();
     });
   }
+
+  // Download dropdown (modal)
+  const closeDownloadMenu = () => {
+    if (!downloadMenuPanel) return;
+    downloadMenuPanel.hidden = true;
+    if (downloadMenuBtn) downloadMenuBtn.setAttribute('aria-expanded', 'false');
+  };
+
+  const openDownloadMenu = () => {
+    if (!downloadMenuPanel) return;
+    downloadMenuPanel.hidden = false;
+    if (downloadMenuBtn) downloadMenuBtn.setAttribute('aria-expanded', 'true');
+    if (window.feather) window.feather.replace();
+  };
+
+  const toggleDownloadMenu = () => {
+    if (!downloadMenuPanel) return;
+    if (downloadMenuPanel.hidden) openDownloadMenu();
+    else closeDownloadMenu();
+  };
+
+  if (downloadMenuBtn && downloadMenuPanel && downloadMenuWrap) {
+    downloadMenuBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleDownloadMenu();
+    });
+
+    // Click outside closes
+    document.addEventListener('click', (e) => {
+      if (downloadMenuPanel.hidden) return;
+      if (downloadMenuWrap.contains(e.target)) return;
+      closeDownloadMenu();
+    });
+  }
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modalOverlay?.classList.contains('is-open')) {
+    if (e.key !== 'Escape') return;
+    if (downloadMenuPanel && !downloadMenuPanel.hidden) {
+      e.preventDefault();
+      closeDownloadMenu();
+      return;
+    }
+    if (modalOverlay?.classList.contains('is-open')) {
       e.preventDefault();
       closeOrderModal();
     }
@@ -832,10 +884,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // Action buttons
   excelBtn?.addEventListener('click', (e) => {
     e.preventDefault();
+    closeDownloadMenu();
     if (activeGroup) downloadExcel(activeGroup);
   });
   pdfBtn?.addEventListener('click', (e) => {
     e.preventDefault();
+    closeDownloadMenu();
     if (activeGroup) downloadPdf(activeGroup);
   });
   editOrderBtn?.addEventListener('click', (e) => {

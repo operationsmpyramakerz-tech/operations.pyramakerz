@@ -173,17 +173,27 @@
         <div class="co-meta-row"><span>Estimated cost</span><strong id="coModalTotalPrice">—</strong></div>
       </div>
 
-      <!-- Actions (same style as Operations Orders: PDF + Excel + Edit) -->
-      <div class="co-modal-actions ro-actions" id="coModalActions">
-        <button type="button" class="ro-action-btn" id="coExcelBtn">
-          <i data-feather="download"></i>
-          Download Excel
-        </button>
+      <!-- Actions (Download dropdown + Edit) -->
+      <div class="co-modal-actions ro-actions ro-actions--right" id="coModalActions">
+        <div class="download-menu" id="coDownloadMenuWrap">
+          <button type="button" class="ro-action-btn download-menu__btn" id="coDownloadMenuBtn" aria-haspopup="menu" aria-expanded="false">
+            <i data-feather="download"></i>
+            <span>Download</span>
+            <i data-feather="chevron-down"></i>
+          </button>
 
-        <button type="button" class="ro-action-btn" id="coPdfBtn">
-          <i data-feather="file-text"></i>
-          Download PDF
-        </button>
+          <div class="download-menu__panel" id="coDownloadMenuPanel" role="menu" aria-label="Download options" hidden>
+            <button class="download-menu__item" id="coDownloadPdfBtn" role="menuitem" type="button">
+              <span>Download PDF</span>
+              <i data-feather="file-text"></i>
+            </button>
+            <div class="download-menu__sep" role="separator"></div>
+            <button class="download-menu__item" id="coDownloadExcelBtn" role="menuitem" type="button">
+              <span>Download Excel</span>
+              <i data-feather="grid"></i>
+            </button>
+          </div>
+        </div>
 
         <button type="button" class="ro-action-btn" id="coEditOrderBtn">
           <i data-feather="edit-2"></i>
