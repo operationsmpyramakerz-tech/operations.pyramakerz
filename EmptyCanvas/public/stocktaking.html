@@ -90,15 +90,25 @@
 <main class="container-full-width">
 <section class="card">
 <div class="card-toolbar">
-<button class="btn btn--light" id="downloadPdfBtn">
-<i data-feather="download"></i>
-<span>Download PDF</span>
-</button>
+  <div class="download-menu" id="downloadMenuWrap">
+    <button class="btn btn--light download-menu__btn" id="downloadMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+      <i data-feather="download"></i>
+      <span>Download</span>
+      <i data-feather="chevron-down"></i>
+    </button>
 
-<button class="btn btn--light" id="downloadExcelBtn" style="margin-left:10px;">
-<i data-feather="download"></i>
-<span>Download Excel</span>
-</button>
+    <div class="download-menu__panel" id="downloadMenuPanel" role="menu" aria-label="Download options" hidden>
+      <button class="download-menu__item" id="downloadPdfBtn" role="menuitem" type="button">
+        <span>Download PDF</span>
+        <i data-feather="file-text"></i>
+      </button>
+      <div class="download-menu__sep" role="separator"></div>
+      <button class="download-menu__item" id="downloadExcelBtn" role="menuitem" type="button">
+        <span>Download Excel</span>
+        <i data-feather="grid"></i>
+      </button>
+    </div>
+  </div>
 </div>
 <div class="groups-grid" id="stock-groups">
   <div class="modern-loading" role="status" aria-live="polite">
