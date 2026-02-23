@@ -32,10 +32,18 @@
 }
 
 /* ---------- App background ---------- */
+html{
+  height: 100%;
+  overflow: hidden;
+}
+
 body{
   background: var(--ui-bg) !important;
   background-image: none !important;
   color: var(--ui-text);
+  height: 100%;
+  overflow: hidden !important;
+
 }
 
 /* ---------- Shell (tablet-like frame) ---------- */
@@ -50,7 +58,8 @@ body{
   display: block !important;
   max-width: 1400px;
   margin: 22px auto;
-  min-height: calc(100vh - 44px);
+  height: calc(100vh - 44px);
+  max-height: calc(100vh - 44px);
   background: var(--ui-shell);
   border-radius: var(--ui-radius-shell);
   box-shadow: var(--ui-shadow-shell);
@@ -62,7 +71,8 @@ body{
 @media (max-width: 900px){
   .app-container{
     margin: 0;
-    min-height: 100vh;
+    height: 100vh;
+    max-height: 100vh;
     border-radius: 0;
     padding: 14px;
   }
@@ -77,6 +87,19 @@ body{
 
   /* Keep the same gap on smaller desktop widths (match app-container padding: 14px) */
   .main-content{ margin-left: calc(88px + 14px) !important; }
+
+ 
+
+/* Make page scrolling happen inside the white surface (inside the black shell) */
+.main-content > main{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+ height: 100%;
+  max-height: 100%;
+  min-height: 0;
 
 }
 
@@ -1108,4 +1131,18 @@ body.has-floating-search .main-header .searchbar{
   height: 1px;
   background: rgba(226,232,240,0.85);
   margin: 10px 8px;
+}
+
+
+/* Stocktaking: component name link */
+.group-table a.component-link{
+  color: #1D4ED8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.group-table a.component-link:visited{
+  color: #1D4ED8;
+}
+.group-table a.component-link:hover{
+  color: #1E40AF;
 }

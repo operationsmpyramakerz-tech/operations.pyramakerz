@@ -8863,6 +8863,36 @@ app.get(
 
             const idCode = _extractIdCodeFromProps(props);
 
+            // Prefer an explicit URL property, fall back to the Notion page URL.
+            const urlProp =
+              _propInsensitive(props, "URL") ||
+              _propInsensitive(props, "Url") ||
+              _propInsensitive(props, "Link") ||
+              _propInsensitive(props, "Website") ||
+              _propInsensitive(props, "Component URL") ||
+              _propInsensitive(props, "Component Link");
+
+            let url = null;
+            try {
+              if (urlProp?.type === "url") url = urlProp.url || null;
+              if (!url && urlProp?.type === "rich_text") {
+                const t = (urlProp.rich_text || [])
+                  .map((x) => x?.plain_text || "")
+                  .join("")
+                  .trim();
+                url = t || null;
+              }
+              if (!url && urlProp?.type === "title") {
+                const t = (urlProp.title || [])
+                  .map((x) => x?.plain_text || "")
+                  .join("")
+                  .trim();
+                url = t || null;
+              }
+            } catch {}
+            if (!url) url = page.url || null;
+
+
             let tag = null;
             if (props.Tag?.select) {
               tag = {
@@ -8886,6 +8916,7 @@ app.get(
             return {
               id: page.id,
               name: componentName,
+              url,
               quantity: Number(quantity) || 0,
               oneKitQuantity: Number(oneKitQuantity) || 0,
               idCode,
@@ -9120,7 +9151,16 @@ app.all(
         }
       };
 
-      // Group items by tag
+      
+      const normalizeUrl = (url) => {
+        const s = String(url || "").trim();
+        if (!s) return null;
+        if (/^https?:\/\//i.test(s)) return s;
+        if (s.startsWith("www.")) return `https://${s}`;
+        return null;
+      };
+
+// Group items by tag
       const groupMap = new Map();
       for (const it of filteredStockForPdf) {
         const tagName = normalizeTagName(it?.tag?.name);

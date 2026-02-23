@@ -13,6 +13,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
   const norm = (s) => String(s || '').toLowerCase().trim();
 
+  const normalizeUrl = (url) => {
+    const s = String(url || '').trim();
+    if (!s) return null;
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.startsWith('www.')) return `https://${s}`;
+    return null;
+  };
+
   const isPositiveQty = (item) => {
     const n = Number(item?.quantity);
     return Number.isFinite(n) && n > 0;
@@ -127,11 +135,21 @@ document.addEventListener('DOMContentLoaded', function() {
       group.items
         .sort((a,b) => (a.name || '').localeCompare(b.name || ''))
         .forEach(item => {
-          const tr = document.createElement('tr');
-
-          const tdName = document.createElement('td');
-          tdName.textContent = item.name || '-';
+          const tr = document.createElement('tr');          const tdName = document.createElement('td');
           tdName.style.fontWeight = '600';
+
+          const link = normalizeUrl(item?.url);
+          if (link) {
+            const a = document.createElement('a');
+            a.href = link;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.className = 'component-link';
+            a.textContent = item.name || '-';
+            tdName.appendChild(a);
+          } else {
+            tdName.textContent = item.name || '-';
+          }
 
           const tdInStock = document.createElement('td');
           tdInStock.className = 'col-num';
