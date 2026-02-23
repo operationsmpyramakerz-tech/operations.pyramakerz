@@ -8,6 +8,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // This file is included on multiple pages, so only run when the Current Orders list exists.
   if (!ordersListDiv) return;
 
+  // Prevent accidental double-execution (e.g. if the script is injected/loaded twice).
+  // Double execution can cause racing fetches and UI flicker (orders appear then disappear)
+  // and can also break card click behavior.
+  if (window.__CURRENT_ORDERS_UI_V6_LOADED__) return;
+  window.__CURRENT_ORDERS_UI_V6_LOADED__ = true;
+
   const CACHE_KEY = 'ordersDataV6';
   const CACHE_TTL_MS = 30 * 1000;
 
@@ -16,6 +22,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Map of rendered groups by their representative groupId
   let groupsById = new Map();
+
+  // ===== Card click delegation (extra safety) =====
+  // If, for any reason, individual card listeners are lost (DOM re-render, library replacing
+  // nodes, etc.), this keeps the "tap on card -> open modal" behavior working.
+  function openModalFromCardEl(cardEl) {
+    if (!cardEl) return;
+    const gid = cardEl?.dataset?.groupId;
+    if (!gid) return;
+    const g = groupsById.get(gid);
+    if (g) openOrderModal(g);
+  }
+
+  ordersListDiv.addEventListener('click', (e) => {
+    // If a card handler already handled this click, don't double-open.
+    if (e.defaultPrevented) return;
+
+    const card = e.target?.closest?.('.co-card');
+    if (!card || !ordersListDiv.contains(card)) return;
+
+    // Ignore clicks on interactive elements inside the card (future-proof).
+    const interactive = e.target?.closest?.('a, button, input, select, textarea');
+    if (interactive && card.contains(interactive)) return;
+
+    e.preventDefault();
+    openModalFromCardEl(card);
+  });
+
+  ordersListDiv.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented) return;
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+
+    const card = e.target?.closest?.('.co-card');
+    if (!card || !ordersListDiv.contains(card)) return;
+
+    e.preventDefault();
+    openModalFromCardEl(card);
+  });
 
   // Modal (Order details)
   const modalOverlay = document.getElementById('coOrderModal');
@@ -869,10 +912,18 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
 
-    card.addEventListener('click', () => openOrderModal(group));
+    card.addEventListener('click', (e) => {
+      // In some layouts a parent element may listen for clicks (or the card could
+      // be wrapped by an accidental link). Prevent any default navigation and
+      // stop bubbling so the click reliably opens the modal only.
+      try { e.preventDefault(); } catch {}
+      try { e.stopPropagation(); } catch {}
+      openOrderModal(group);
+    });
     card.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
+        try { e.stopPropagation(); } catch {}
         openOrderModal(group);
       }
     });
