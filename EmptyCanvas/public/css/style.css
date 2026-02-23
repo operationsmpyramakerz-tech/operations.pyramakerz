@@ -880,6 +880,118 @@ body.co-modal-open{ overflow: hidden; }
 }
 
 /* =================================
+   Current Orders — Edit password (sub-modal)
+   ================================= */
+.co-submodal-overlay{
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(2px);
+  z-index: 1200;
+}
+
+.co-submodal-overlay.is-open{ display: flex; }
+
+.co-submodal-dialog{
+  width: min(460px, 94vw);
+  background: #fff;
+  border: 1px solid #E5E7EB;
+  border-radius: 24px;
+  box-shadow: 0 28px 70px rgba(0,0,0,.24);
+  padding: 18px 18px 16px;
+  position: relative;
+}
+
+.co-submodal-close{
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 0;
+  background: #F3F4F6;
+  color: #000000;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.co-submodal-close:hover{ background: #E5E7EB; }
+.co-submodal-close svg{ width: 20px; height: 20px; display: none; }
+.co-submodal-close i{ display: none; }
+.co-submodal-close::before{
+  content: "×";
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 800;
+  color: currentColor;
+}
+
+.co-submodal-title{
+  font-size: 22px;
+  font-weight: 1000;
+  color: #000000;
+  padding-right: 56px;
+}
+
+.co-submodal-sub{
+  margin-top: 6px;
+  color: #6B7280;
+  font-size: 14px;
+}
+
+.co-submodal-body{ margin-top: 14px; }
+
+.co-submodal-label{
+  display: block;
+  font-weight: 800;
+  color: #111827;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.co-submodal-input{
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid #E5E7EB;
+  background: #F9FAFB;
+  padding: .85rem 1rem;
+  font-weight: 800;
+  font-size: 15px;
+  color: #111827;
+}
+
+.co-submodal-input:focus{
+  outline: none;
+  background: #fff;
+  border-color: rgba(17,24,39,.55);
+  box-shadow: 0 0 0 3px rgba(17,24,39,.10);
+}
+
+.co-submodal-error{
+  min-height: 18px;
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #B91C1C;
+}
+
+.co-submodal-actions{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+/* =================================
    Requested Orders (Operations) — Modal tweaks
    ================================= */
 
@@ -931,6 +1043,40 @@ body.co-modal-open{ overflow: hidden; }
 }
 
 .ro-action-btn svg{ width: 18px; height: 18px; }
+
+/* ===== Modern variants (used in Current Orders modal & sub-modal) ===== */
+.ro-action-btn--dark{
+  border: 1px solid rgba(17, 24, 39, 0.18);
+  background: linear-gradient(180deg, #111827 0%, #0B0F19 100%);
+  box-shadow: 0 16px 34px rgba(17, 24, 39, 0.20);
+}
+
+.ro-action-btn--dark:hover{
+  box-shadow: 0 20px 44px rgba(17, 24, 39, 0.24);
+  filter: brightness(1.03);
+}
+
+.ro-action-btn--dark:active{
+  box-shadow: 0 14px 30px rgba(17, 24, 39, 0.20);
+}
+
+.ro-action-btn--light{
+  border: 1px solid #E5E7EB;
+  background: #FFFFFF;
+  color: #111827;
+  box-shadow: 0 14px 30px rgba(0,0,0,0.10);
+}
+
+.ro-action-btn--light:hover{
+  background: #F9FAFB;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.12);
+  filter: none;
+}
+
+.ro-action-btn--light:active{
+  background: #F3F4F6;
+  box-shadow: 0 12px 26px rgba(0,0,0,0.10);
+}
 
 /* Put the Edit button next to the status pill (same row) */
 .co-item-right-row{
