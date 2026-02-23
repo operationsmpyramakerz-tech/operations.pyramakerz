@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // This file is included on multiple pages, so only run when the Current Orders list exists.
   if (!ordersListDiv) return;
 
-  const CACHE_KEY = 'ordersDataV5';
+  const CACHE_KEY = 'ordersDataV6';
   const CACHE_TTL_MS = 30 * 1000;
 
   let allOrders = [];
@@ -238,19 +238,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modalEls.statusTitle) modalEls.statusTitle.textContent = stage.label;
     if (modalEls.statusSub) modalEls.statusSub.textContent = stage.sub;
 
-    // In Current Orders we may receive BOTH the original quantity (Quantity Requested)
-    // and an Operations-adjusted quantity (Quantity Received by operations).
-    // The UI should:
-    // - show the Qty normally by default
-    // - only strike the old number and show the new one IF Supervisor edited it
+    // In Current Orders we show Qty based on:
+    // - Quantity Requested (original request)
+    // - Quantity Progress (current progress)
+    // If Quantity Requested === Quantity Progress -> show requested normally
+    // If different -> strike requested and show progress next to it
     const effectiveQty = (x) => {
-      const baseCandidate = Number(x?.quantityRequested);
-      const base = Number.isFinite(baseCandidate) ? baseCandidate : (Number(x?.quantity) || 0);
+      const reqCandidate = Number(x?.quantityRequested);
+      const requested = Number.isFinite(reqCandidate) ? reqCandidate : (Number(x?.quantity) || 0);
 
-      const editedCandidate = Number(x?.quantityEditedBySupervisor);
-      const edited = Number.isFinite(editedCandidate) ? editedCandidate : null;
+      const progCandidate = Number(x?.quantityProgress);
+      const progress = Number.isFinite(progCandidate) ? progCandidate : null;
 
-      return edited !== null && edited !== undefined ? edited : base;
+      return progress !== null && progress !== undefined ? progress : requested;
     };
 
     // Meta
@@ -277,19 +277,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const frag = document.createDocumentFragment();
         for (const it of items) {
           // Base qty = original requested (if provided), else fall back to the qty returned.
-          const baseCandidate = Number(it?.quantityRequested);
-          const qtyBase = Number.isFinite(baseCandidate) ? baseCandidate : (Number(it.quantity) || 0);
-          const editedCandidate = Number(it?.quantityEditedBySupervisor);
-          const qtyEdited = Number.isFinite(editedCandidate) ? editedCandidate : null;
-          const qty = qtyEdited !== null && qtyEdited !== undefined ? qtyEdited : qtyBase;
+          const reqCandidate = Number(it?.quantityRequested);
+          const qtyRequested = Number.isFinite(reqCandidate) ? reqCandidate : (Number(it.quantity) || 0);
+
+          const progCandidate = Number(it?.quantityProgress);
+          const qtyProgress = Number.isFinite(progCandidate) ? progCandidate : null;
+
+          const qty = qtyProgress !== null && qtyProgress !== undefined ? qtyProgress : qtyRequested;
           const unit = Number(it.unitPrice) || 0;
           const lineTotal = qty * unit;
 
-          // Show old qty normally, and only strike it when Supervisor changed it
-          const showDiff = qtyEdited !== null && qtyEdited !== undefined && qtyEdited !== qtyBase;
+          // If Quantity Progress differs from Quantity Requested, strike requested and show progress next to it
+          const showDiff = qtyProgress !== null && qtyProgress !== undefined && qtyProgress !== qtyRequested;
           const qtyHTML = showDiff
-            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new">${escapeHTML(String(qtyEdited))}</strong></span>`
-            : `<strong>${escapeHTML(String(qtyBase))}</strong>`;
+            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyRequested))}</span><strong class="sv-qty-new">${escapeHTML(String(qtyProgress))}</strong></span>`
+            : `<strong>${escapeHTML(String(qtyRequested))}</strong>`;
 
           const safeUrl = safeHttpUrl(it.productUrl);
           const linkHTML = safeUrl
@@ -634,15 +636,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const itemsCount = items.length;
 
-    // Use the same "effective" quantity logic as the modal (Supervisor edits override).
+    // Use the same "effective" quantity logic as the modal (Quantity Progress overrides).
     const effectiveQty = (x) => {
-      const baseCandidate = Number(x?.quantityRequested);
-      const base = Number.isFinite(baseCandidate) ? baseCandidate : (Number(x?.quantity) || 0);
+      const reqCandidate = Number(x?.quantityRequested);
+      const requested = Number.isFinite(reqCandidate) ? reqCandidate : (Number(x?.quantity) || 0);
 
-      const editedCandidate = Number(x?.quantityEditedBySupervisor);
-      const edited = Number.isFinite(editedCandidate) ? editedCandidate : null;
+      const progCandidate = Number(x?.quantityProgress);
+      const progress = Number.isFinite(progCandidate) ? progCandidate : null;
 
-      return edited !== null && edited !== undefined ? edited : base;
+      return progress !== null && progress !== undefined ? progress : requested;
     };
 
     // "Components price" = total cost of all items (qty * unitPrice)
