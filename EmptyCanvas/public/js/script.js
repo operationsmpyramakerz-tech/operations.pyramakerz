@@ -1026,7 +1026,17 @@ document.addEventListener('DOMContentLoaded', () => {
       displayOrders(filtered);
     }
 
-    searchInput.addEventListener('input', runFilter);
+    // Some mobile browsers (and Chrome's session restore) can autofill/restore the value of
+    // the search box on first interaction even when the input isn't focused.
+    // That would unexpectedly filter the list to empty. We ignore those events.
+    searchInput.addEventListener('input', (e) => {
+      if (document.activeElement !== searchInput) {
+        // Clear any silent autofill value and keep the current list.
+        try { searchInput.value = ''; } catch {}
+        return;
+      }
+      runFilter();
+    });
     searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && searchInput.value) {
         searchInput.value = '';
