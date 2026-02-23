@@ -176,7 +176,7 @@
       <!-- Actions (Download dropdown + Edit) -->
       <div class="co-modal-actions ro-actions ro-actions--right" id="coModalActions">
         <div class="download-menu" id="coDownloadMenuWrap">
-          <button type="button" class="ro-action-btn download-menu__btn" id="coDownloadMenuBtn" aria-haspopup="menu" aria-expanded="false">
+          <button type="button" class="ro-action-btn ro-action-btn--light download-menu__btn" id="coDownloadMenuBtn" aria-haspopup="menu" aria-expanded="false">
             <i data-feather="download"></i>
             <span>Download</span>
             <i data-feather="chevron-down"></i>
@@ -195,13 +195,45 @@
           </div>
         </div>
 
-        <button type="button" class="ro-action-btn" id="coEditOrderBtn">
+        <button type="button" class="ro-action-btn ro-action-btn--dark" id="coEditOrderBtn">
           <i data-feather="edit-2"></i>
           Edit
         </button>
       </div>
 
       <div class="co-modal-items" id="coModalItems"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== EDIT PASSWORD (SUB-MODAL) ===================== -->
+<div id="coEditPwdModal" class="co-submodal-overlay" aria-hidden="true" hidden>
+  <div class="co-submodal-dialog" role="dialog" aria-modal="true" aria-labelledby="coEditPwdTitle" aria-describedby="coEditPwdSub">
+    <button type="button" class="co-submodal-close" id="coEditPwdClose" aria-label="Close">
+      <i data-feather="x"></i>
+    </button>
+
+    <div class="co-submodal-header">
+      <div class="co-submodal-title" id="coEditPwdTitle">Edit order</div>
+      <div class="co-submodal-sub" id="coEditPwdSub">Enter admin password to continue.</div>
+    </div>
+
+    <div class="co-submodal-body">
+      <label class="co-submodal-label" for="coEditPwdInput">Admin password</label>
+      <input
+        class="co-submodal-input"
+        id="coEditPwdInput"
+        type="password"
+        inputmode="text"
+        autocomplete="current-password"
+        placeholder="••••••••"
+      />
+      <div class="co-submodal-error" id="coEditPwdError" role="alert" aria-live="polite"></div>
+    </div>
+
+    <div class="co-submodal-actions">
+      <button type="button" class="ro-action-btn ro-action-btn--light" id="coEditPwdCancel">Cancel</button>
+      <button type="button" class="ro-action-btn ro-action-btn--dark" id="coEditPwdConfirm">Continue</button>
     </div>
   </div>
 </div>
