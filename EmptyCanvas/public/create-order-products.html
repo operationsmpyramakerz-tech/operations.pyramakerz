@@ -454,7 +454,8 @@
   /* === Create Order tweaks (Feb 2026) === */
 
   /* Show full component names (no 2-letter truncation) */
-  .cart-product{ align-items: flex-start; }
+  /* Keep product cell visually centered with the rest of the row */
+  .cart-product{ align-items: center; }
   .prod-name{
     white-space: normal;
     overflow: visible;
@@ -586,7 +587,17 @@
     background: #e2e8f0;
     color: #0f172a;
   }
-  .modal-card .choices-search-clear svg{ width: 18px; height: 18px; }
+  /* Prefer a plain × character (more reliable than SVG across some mobile browsers) */
+  .modal-card .choices-search-clear{
+    font-size: 20px;
+    font-weight: 900;
+    line-height: 1;
+  }
+  .modal-card .choices-search-clear span{
+    display: block;
+    transform: translateY(-1px);
+  }
+  .modal-card .choices-search-clear svg{ display: none; }
 
   /* Loading state in cart (replaces empty message while components load) */
   .cart-loading{
