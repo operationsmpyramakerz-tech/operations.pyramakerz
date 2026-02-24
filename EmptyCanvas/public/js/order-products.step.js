@@ -53,6 +53,17 @@
     // Keep readonly until user focuses (prevents many autofill flows)
     try {
       el.setAttribute('readonly', 'readonly');
+
+      // On mobile, focusing a readonly input often prevents the keyboard from
+      // opening on the first tap. Remove readonly *before* focus when the user
+      // interacts (pointerdown/touch), and keep the focus handler as a fallback.
+      const unlock = () => {
+        try { el.removeAttribute('readonly'); } catch {}
+      };
+      el.addEventListener('pointerdown', unlock, { once: true, capture: true });
+      el.addEventListener('touchstart', unlock, { once: true, capture: true });
+      el.addEventListener('mousedown', unlock, { once: true, capture: true });
+
       el.addEventListener(
         'focus',
         () => {
@@ -175,6 +186,9 @@
   let componentsPromise = null;
   let draftPromise = null;
 
+  // Avoid double init races if the modal is opened while components are loading
+  let ensureComponentsPromise = null;
+
   // ---------------------------- Data loading ----------------------------
   async function loadComponents() {
     try {
@@ -217,12 +231,34 @@
     return { componentsPromise, draftPromise };
   }
 
+  async function ensureComponentsReady() {
+    if (componentsLoaded) return true;
+    if (ensureComponentsPromise) return ensureComponentsPromise;
+
+    ensureComponentsPromise = (async () => {
+      // Ensure the fetch has started
+      if (!componentsPromise) startPreload();
+
+      try { await componentsPromise; } catch {}
+
+      if (!Array.isArray(components) || components.length === 0) return false;
+
+      initComponentChoices();
+      componentsLoaded = true;
+      updateReady();
+      return true;
+    })().finally(() => {
+      ensureComponentsPromise = null;
+    });
+
+    return ensureComponentsPromise;
+  }
+
   // ---------------------------- Ready gating ----------------------------
   function setReady(isReady) {
     readyToUse = Boolean(isReady);
-    try {
-      if (updateCartBtn) updateCartBtn.disabled = !readyToUse;
-    } catch {}
+    // Do NOT disable the "Update Cart" button.
+    // We keep validation on "Add/Update" and on checkout.
   }
 
   function updateReady() {
@@ -536,30 +572,90 @@
     setModalOpen(false);
   }
 
+  function setModalLoading(loading, text = 'Loading components...') {
+    const isOn = !!loading;
+    try {
+      if (qtyInputEl) qtyInputEl.disabled = isOn;
+      if (addToCartBtn) addToCartBtn.disabled = isOn;
+
+      if (choicesInst && typeof choicesInst.disable === 'function') {
+        if (isOn) choicesInst.disable();
+        else choicesInst.enable();
+      }
+
+      if (componentSelectEl) {
+        componentSelectEl.disabled = isOn;
+
+        // If Choices isn't initialized yet, show a friendly placeholder
+        // so the user sees the modal immediately.
+        if (isOn && !choicesInst) {
+          componentSelectEl.innerHTML = '';
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.disabled = true;
+          opt.selected = true;
+          opt.textContent = text;
+          componentSelectEl.appendChild(opt);
+        }
+      }
+    } catch {}
+  }
+
   function openModalForAdd() {
     editingId = null;
     if (addToCartBtn) addToCartBtn.textContent = 'Add';
 
-    if (!componentsLoaded || !components.length) {
-      toast('error', 'No components', 'Components list is empty.');
+    if (qtyInputEl) qtyInputEl.value = '1';
+
+    // Open the modal immediately so "Update Cart" always shows the small window.
+    setModalOpen(true);
+
+    // If components are already ready, just clear the selection and focus.
+    if (componentsLoaded && Array.isArray(components) && components.length) {
+      setModalLoading(false);
+
+      if (choicesInst) {
+        try { choicesInst.removeActiveItems(); } catch {}
+      } else if (componentSelectEl) {
+        componentSelectEl.value = '';
+      }
+
+      window.setTimeout(() => {
+        try {
+          const focusEl = modalEl?.querySelector?.('.choices__inner') || componentSelectEl;
+          focusEl?.focus?.();
+        } catch {}
+      }, 50);
+
       return;
     }
 
-    if (qtyInputEl) qtyInputEl.value = '1';
+    // Otherwise show loading state and initialize once ready.
+    setModalLoading(true);
 
-    if (choicesInst) {
-      choicesInst.removeActiveItems();
-    } else if (componentSelectEl) {
-      componentSelectEl.value = '';
-    }
+    ensureComponentsReady().then((ok) => {
+      if (!ok) {
+        toast('error', 'Error', 'Failed to load components list. Please reload the page.');
+        closeModal();
+        return;
+      }
 
-    setModalOpen(true);
-    window.setTimeout(() => {
-      try {
-        const focusEl = modalEl.querySelector('.choices__inner') || componentSelectEl;
-        focusEl?.focus?.();
-      } catch {}
-    }, 50);
+      setModalLoading(false);
+
+      // Clear selection for "Add" mode
+      if (choicesInst) {
+        try { choicesInst.removeActiveItems(); } catch {}
+      } else if (componentSelectEl) {
+        componentSelectEl.value = '';
+      }
+
+      window.setTimeout(() => {
+        try {
+          const focusEl = modalEl?.querySelector?.('.choices__inner') || componentSelectEl;
+          focusEl?.focus?.();
+        } catch {}
+      }, 50);
+    });
   }
 
   function openModalForEdit(id) {
@@ -573,17 +669,37 @@
     if (addToCartBtn) addToCartBtn.textContent = 'Update';
     if (qtyInputEl) qtyInputEl.value = String(normalizeQty(Number(item.quantity), 1));
 
-    if (choicesInst) {
-      try {
-        choicesInst.setChoiceByValue(String(item.id));
-      } catch {
+    // Open first, then ensure components list is ready.
+    setModalOpen(true);
+
+    const applySelection = () => {
+      if (choicesInst) {
+        try {
+          choicesInst.setChoiceByValue(String(item.id));
+        } catch {
+          try { componentSelectEl.value = String(item.id); } catch {}
+        }
+      } else if (componentSelectEl) {
         componentSelectEl.value = String(item.id);
       }
-    } else if (componentSelectEl) {
-      componentSelectEl.value = String(item.id);
+    };
+
+    if (componentsLoaded && Array.isArray(components) && components.length) {
+      setModalLoading(false);
+      applySelection();
+      return;
     }
 
-    setModalOpen(true);
+    setModalLoading(true);
+    ensureComponentsReady().then((ok) => {
+      if (!ok) {
+        toast('error', 'Error', 'Failed to load components list. Please reload the page.');
+        closeModal();
+        return;
+      }
+      setModalLoading(false);
+      applySelection();
+    });
   }
 
   function initComponentChoices() {
@@ -800,16 +916,6 @@
 
     updateCartBtn?.addEventListener('click', () => {
       syncReasonFromInput();
-
-      if (!componentsLoaded) {
-        toast('error', 'Loading', 'Components are still loading. Please wait.');
-        return;
-      }
-      if (!String(globalReason || '').trim()) {
-        toast('error', 'Reason required', 'Please enter the order reason first.');
-        try { reasonInput?.focus?.(); } catch {}
-        return;
-      }
       openModalForAdd();
     });
 
@@ -890,14 +996,11 @@
       try { await cp; } catch {}
       hideSaving();
 
-      if (!Array.isArray(components) || components.length === 0) {
+      const ok = await ensureComponentsReady();
+      if (!ok) {
         toast('error', 'Error', 'Failed to load components list. Please reload the page.');
         return;
       }
-
-      initComponentChoices();
-      componentsLoaded = true;
-      updateReady();
 
       renderCart();
       await persistDraft({ silent: true });
@@ -917,14 +1020,11 @@
 
     try { await cp; } catch {}
 
-    if (!Array.isArray(components) || components.length === 0) {
+    const ok = await ensureComponentsReady();
+    if (!ok) {
       toast('error', 'Error', 'Failed to load components list. Please reload the page.');
       return;
     }
-
-    initComponentChoices();
-    componentsLoaded = true;
-    updateReady();
 
     renderCart();
 
