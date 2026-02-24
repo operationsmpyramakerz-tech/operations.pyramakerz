@@ -154,14 +154,9 @@
     }
   }
 
-  // Convert 1..N to Arabic-Indic digits: ١٢٣...
-  function toArabicIndicDigits(num) {
-    const map = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
-    return String(num)
-      .split('')
-      .map((ch) => (ch >= '0' && ch <= '9' ? map[ch.charCodeAt(0) - 48] : ch))
-      .join('');
-  }
+  // NOTE:
+  // The cart thumbnail uses a sequential number when there is no image.
+  // Requirement: keep it in English digits (1,2,3,...) regardless of locale.
 
   // ---------------------------- State ----------------------------
   const MIN_QTY = 0.01;
@@ -410,8 +405,8 @@
         img.src = c.imageUrl;
         thumb.appendChild(img);
       } else {
-        // Requested: show sequential number (١,٢,٣,...) instead of first letter
-        thumb.textContent = toArabicIndicDigits(idx + 1);
+        // Show sequential number (1,2,3,...) instead of first letter
+        thumb.textContent = String(idx + 1);
       }
 
       const meta = document.createElement('div');
