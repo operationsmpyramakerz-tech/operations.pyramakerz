@@ -43,6 +43,56 @@
     alert([title, message].filter(Boolean).join('\n'));
   }
 
+  // ---------------------------- Autofill guards ----------------------------
+  // Mobile Chrome sometimes treats the Reason + Password fields like a login form
+  // and auto-fills username/password. We explicitly disable autofill and clear any
+  // prefilled values so the user must type them.
+  function hardDisableAutofill(el, { clearNow = true } = {}) {
+    if (!el) return;
+
+    // Keep readonly until user focuses (prevents many autofill flows)
+    try {
+      el.setAttribute('readonly', 'readonly');
+      el.addEventListener(
+        'focus',
+        () => {
+          try { el.removeAttribute('readonly'); } catch {}
+        },
+        { once: true },
+      );
+    } catch {}
+
+    // Clear any values that were injected by the browser/password manager.
+    if (clearNow) {
+      try { el.value = ''; } catch {}
+    }
+
+    // If the browser tries to autofill later (often without user interaction),
+    // clear it unless the user actually interacted with the field.
+    let userInteracted = false;
+    el.addEventListener('keydown', () => (userInteracted = true));
+    el.addEventListener('paste', () => (userInteracted = true));
+    el.addEventListener('input', () => {
+      if (document.activeElement === el) userInteracted = true;
+    });
+
+    const clearIfInjected = () => {
+      if (userInteracted) return;
+      if (document.activeElement === el) return;
+      if (String(el.value || '').trim()) {
+        try { el.value = ''; } catch {}
+      }
+    };
+
+    // Run a few times after paint (Chrome sometimes autofills after load)
+    window.setTimeout(clearIfInjected, 0);
+    window.setTimeout(clearIfInjected, 200);
+    window.setTimeout(clearIfInjected, 800);
+
+    // Also watch for silent autofill triggers
+    el.addEventListener('change', clearIfInjected);
+  }
+
   function showSaving(text = 'Saving...') {
     if (!savingOverlayEl) return;
     if (savingTextEl) savingTextEl.textContent = text;
@@ -112,6 +162,8 @@
   let globalReason = '';
 
   let choicesInst = null;
+  let choicesShowHandler = null;
+  let choicesHideHandler = null;
   let saveTimer = null;
   let isSavingNow = false;
   let editingId = null; // when modal opened for editing an existing cart item
@@ -270,6 +322,16 @@
       <div class="cart-empty">
         <strong>Your cart is empty</strong>
         <div>Click <b>Update Cart</b> to add a component.</div>
+      </div>
+    `;
+  }
+
+  function renderLoadingState(text = 'Loading components...') {
+    if (!cartItemsEl) return;
+    cartItemsEl.innerHTML = `
+      <div class="cart-loading" role="status" aria-live="polite">
+        <div class="cart-loading-spinner" aria-hidden="true"></div>
+        <div><strong>${escapeHtml(text)}</strong></div>
       </div>
     `;
   }
@@ -560,10 +622,90 @@
         position: 'bottom',
         searchResultLimit: 500,
       });
+
+      // Add a clear (x) button inside the dropdown search input
+      setupChoicesSearchClearButton();
     } catch (e) {
       console.warn('Choices init failed:', e);
       choicesInst = null;
     }
+  }
+
+  function setupChoicesSearchClearButton() {
+    if (!componentSelectEl) return;
+
+    // Ensure we (re)inject whenever the dropdown opens
+    if (choicesShowHandler) componentSelectEl.removeEventListener('showDropdown', choicesShowHandler);
+    if (choicesHideHandler) componentSelectEl.removeEventListener('hideDropdown', choicesHideHandler);
+
+    choicesShowHandler = () => window.setTimeout(ensureChoicesSearchClearButton, 0);
+    choicesHideHandler = () => {
+      try {
+        const root = componentSelectEl.closest('.choices');
+        const dropdown = root?.querySelector('.choices__list--dropdown');
+        const btn = dropdown?.querySelector('.choices-search-clear');
+        if (btn) btn.style.display = 'none';
+      } catch {}
+    };
+
+    componentSelectEl.addEventListener('showDropdown', choicesShowHandler);
+    componentSelectEl.addEventListener('hideDropdown', choicesHideHandler);
+
+    // Try once now as well
+    ensureChoicesSearchClearButton();
+  }
+
+  function ensureChoicesSearchClearButton() {
+    try {
+      const root = componentSelectEl.closest('.choices');
+      if (!root) return;
+
+      const dropdown = root.querySelector('.choices__list--dropdown');
+      if (!dropdown) return;
+
+      const input = dropdown.querySelector('input.choices__input');
+      if (!input) return;
+
+      let btn = dropdown.querySelector('.choices-search-clear');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'choices-search-clear';
+        btn.setAttribute('aria-label', 'Clear search');
+        btn.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6L6 18"></path>
+            <path d="M6 6l12 12"></path>
+          </svg>
+        `;
+        dropdown.appendChild(btn);
+      }
+
+      const update = () => {
+        const has = Boolean(String(input.value || '').trim());
+        btn.style.display = has ? 'flex' : 'none';
+      };
+
+      if (!btn.dataset.bound) {
+        btn.dataset.bound = '1';
+
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          input.value = '';
+          // Trigger Choices filtering refresh
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('keyup', { bubbles: true }));
+          update();
+          try { input.focus(); } catch {}
+        });
+
+        input.addEventListener('input', update);
+        input.addEventListener('keyup', update);
+      }
+
+      update();
+    } catch {}
   }
 
   function getPasswordValue() {
@@ -720,6 +862,10 @@
 
   // ---------------------------- Init ----------------------------
   async function init() {
+    // Disable browser autofill on Reason + Password (user should type)
+    hardDisableAutofill(reasonInput, { clearNow: true });
+    hardDisableAutofill(passwordInput, { clearNow: true });
+
     bindEvents();
 
     // disable until reason+components loaded
@@ -727,8 +873,8 @@
 
     const { componentsPromise: cp, draftPromise: dp } = startPreload();
 
-    // Render early
-    renderCart();
+    // Show loading state instead of "Your cart is empty" until data is ready
+    renderLoadingState();
 
     if (isEditMode) {
       showSaving('Loading order...');
