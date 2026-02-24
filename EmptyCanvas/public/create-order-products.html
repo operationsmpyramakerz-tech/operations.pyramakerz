@@ -538,7 +538,7 @@
     background: #f1f5f9 !important;
     border: 1px solid transparent !important;
     border-radius: 12px !important;
-    padding: 10px 12px 10px 42px !important;
+    padding: 10px 44px 10px 42px !important; /* room for clear (x) button */
     margin: 10px !important;
     width: calc(100% - 20px) !important;
     box-sizing: border-box !important;
@@ -562,6 +562,49 @@
 
   .modal-card .choices__list--dropdown .choices__item--choice.is-highlighted{
     background: #f1f5f9 !important;
+  }
+
+  /* Add a clear (x) button for the dropdown search input */
+  .modal-card .choices__list--dropdown{ position: relative; }
+  .modal-card .choices-search-clear{
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 0;
+    background: transparent;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #64748b;
+    z-index: 5;
+  }
+  .modal-card .choices-search-clear:hover{
+    background: #e2e8f0;
+    color: #0f172a;
+  }
+  .modal-card .choices-search-clear svg{ width: 18px; height: 18px; }
+
+  /* Loading state in cart (replaces empty message while components load) */
+  .cart-loading{
+    padding: 2rem 1.25rem;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .cart-loading strong{ color:#0f172a; }
+  .cart-loading-spinner{
+    width: 22px;
+    height: 22px;
+    border: 3px solid #e5e7eb;
+    border-top-color: #0b1220;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+    flex: 0 0 auto;
   }
 </style>
 </head>
@@ -668,12 +711,34 @@
 
                         <div class="summary-field">
               <label for="orderReasonSummary">Reason</label>
-              <input id="orderReasonSummary" placeholder="Reason..." type="text" autocomplete="off"/>
+              <input
+                id="orderReasonSummary"
+                name="order_reason"
+                placeholder="Reason..."
+                type="text"
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                data-form-type="other"
+                readonly
+              />
             </div>
 
 <!-- Password required to checkout (requested: under Total) -->
             <div class="voucher-row">
-              <input id="voucherInput" placeholder="Your password" type="password" autocomplete="current-password"/>
+              <input
+                id="voucherInput"
+                name="order_passcode"
+                placeholder="Your password"
+                type="password"
+                autocomplete="new-password"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                data-form-type="other"
+                readonly
+              />
             </div>
 
             <button class="checkout-btn" id="checkoutBtn" type="button">Checkout Now</button>
