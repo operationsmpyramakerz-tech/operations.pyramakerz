@@ -449,6 +449,120 @@
       align-items: center;
     }
   }
+
+
+  /* === Create Order tweaks (Feb 2026) === */
+
+  /* Show full component names (no 2-letter truncation) */
+  .cart-product{ align-items: flex-start; }
+  .prod-name{
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.25;
+  }
+
+  /* Remove per-item reason row (reason is now per-order in summary) */
+  .prod-reason{ display: none !important; }
+
+  /* Trash icon should be red */
+  .trash-btn{
+    color: #ef4444;
+  }
+  .trash-btn:hover{
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+
+  /* Order summary: Reason input */
+  .summary-field{
+    margin-top: 1rem;
+  }
+  .summary-field label{
+    display: block;
+    font-weight: 800;
+    color: #0f172a;
+    font-size: 0.9rem;
+    margin-bottom: 0.35rem;
+  }
+  .summary-field input{
+    width: 100%;
+    height: 40px;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    padding: 0 0.95rem;
+    outline: none;
+  }
+  .summary-field input:focus{
+    border-color: #94a3b8;
+    box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.25);
+  }
+
+  /* Components dropdown (Choices.js) — modern look like Qty field */
+  .modal-card .choices{
+    width: 100%;
+    margin: 0;
+  }
+  .modal-card .choices__inner{
+    min-height: 44px !important;
+    border-radius: 12px !important;
+    border: 1px solid #e5e7eb !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    padding: 6px 42px 6px 12px !important;
+  }
+  .modal-card .choices.is-focused .choices__inner,
+  .modal-card .choices.is-open .choices__inner{
+    border-color: #94a3b8 !important;
+    box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.25) !important;
+  }
+
+  /* Make selected text wrap (show full component name) */
+  .modal-card .choices__inner .choices__item--selectable{
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    line-height: 1.2;
+  }
+
+  .modal-card .choices__list--dropdown{
+    border: 1px solid #e5e7eb !important;
+    border-radius: 14px !important;
+    box-shadow: 0 30px 70px -50px rgba(15, 23, 42, 0.55) !important;
+    margin-top: 8px !important;
+    overflow: hidden !important;
+  }
+
+  /* Modern search bar inside dropdown */
+  .modal-card .choices__list--dropdown .choices__input{
+    background: #f1f5f9 !important;
+    border: 1px solid transparent !important;
+    border-radius: 12px !important;
+    padding: 10px 12px 10px 42px !important;
+    margin: 10px !important;
+    width: calc(100% - 20px) !important;
+    box-sizing: border-box !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='M21 21l-4.3-4.3'/></svg>") !important;
+    background-repeat: no-repeat !important;
+    background-position: 12px center !important;
+    background-size: 18px 18px !important;
+  }
+
+  /* Dropdown options: show full names */
+  .modal-card .choices__list--dropdown .choices__item--choice{
+    padding: 12px 14px !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    line-height: 1.25 !important;
+    word-break: break-word !important;
+  }
+
+  .modal-card .choices__list--dropdown .choices__item--choice.is-highlighted{
+    background: #f1f5f9 !important;
+  }
 </style>
 </head>
 
@@ -476,7 +590,7 @@
       <ul class="nav-list">
         <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
         <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
-        <li><a class="nav-link active" href="/orders/new"><i data-feather="plus-circle"></i><span class="nav-label">Create New Order</span></a></li>
+        <li><a class="nav-link active" href="/orders/new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.6 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"></path></svg><span class="nav-label">Create New Order</span></a></li>
         <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
         <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
         <li>
@@ -552,7 +666,12 @@
               <div class="summary-line summary-total"><span>Total</span><span class="val" id="summaryTotal">—</span></div>
             </div>
 
-            <!-- Password required to checkout (requested: under Total) -->
+                        <div class="summary-field">
+              <label for="orderReasonSummary">Reason</label>
+              <input id="orderReasonSummary" placeholder="Reason..." type="text" autocomplete="off"/>
+            </div>
+
+<!-- Password required to checkout (requested: under Total) -->
             <div class="voucher-row">
               <input id="voucherInput" placeholder="Your password" type="password" autocomplete="current-password"/>
             </div>
@@ -583,24 +702,6 @@
         <div class="modal-actions">
           <button class="btn-ghost" id="updateCartClose" type="button">Close</button>
           <button class="btn-solid" id="addToCartBtn" type="button">Add</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Order Reason Modal (shown on page open) -->
-    <div class="modal-overlay" id="orderReasonModal" aria-hidden="true">
-      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="orderReasonTitle">
-        <h3 class="modal-title" id="orderReasonTitle">Order Reason</h3>
-
-        <div class="modal-grid" style="grid-template-columns: 1fr;">
-          <div class="mfield full">
-            <label for="orderReasonInput">Reason <span class="req-star">*</span></label>
-            <input id="orderReasonInput" placeholder="Reason..." type="text" autocomplete="off"/>
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn-solid" id="orderReasonContinue" type="button">Continue</button>
         </div>
       </div>
     </div>
