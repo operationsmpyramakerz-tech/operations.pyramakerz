@@ -58,6 +58,8 @@ body{
   display: block !important;
   max-width: 1400px;
   margin: 22px auto;
+  /* Override legacy layout rule in style.css: .app-container{ min-height:100vh } */
+  min-height: 0 !important;
   height: calc(100vh - 44px);
   max-height: calc(100vh - 44px);
   background: var(--ui-shell);
@@ -68,9 +70,19 @@ body{
   gap: 18px;
 }
 
+/* Use the *visible* viewport height on mobile/tablets so the bottom border stays visible
+   even when the browser address bar expands/collapses. */
+@supports (height: 100dvh){
+  .app-container{
+    height: calc(100dvh - 44px);
+    max-height: calc(100dvh - 44px);
+  }
+}
+
 @media (max-width: 900px){
   .app-container{
     margin: 0;
+    min-height: 0 !important;
     height: 100vh;
     max-height: 100vh;
     border-radius: 0;
@@ -88,6 +100,15 @@ body{
   .main-content{ margin-left: calc(88px + 14px) !important; }
 }
 
+@supports (height: 100dvh){
+  @media (max-width: 900px){
+    .app-container{
+      height: 100dvh;
+      max-height: 100dvh;
+    }
+  }
+}
+
 /* Make page scrolling happen inside the white surface (inside the black shell)
    - Header stays fixed
    - Only <main> scrolls */
@@ -103,6 +124,7 @@ body{
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .main-content > header{
