@@ -4129,13 +4129,16 @@ app.post(
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ error: "No products provided." });
     }
+    // NOTE:
+    // We allow saving a cart draft even if the user hasn't entered a reason yet.
+    // Reason will be validated on checkout (/api/submit-order).
     const clean = products
-  .map((p) => ({
-    id: String(p.id),
-    quantity: Number(p.quantity) || 0,
-    reason: String(p.reason || "").trim(),   // ← أضف هذا السطر
-  }))
-  .filter((p) => p.id && p.quantity > 0 && p.reason);
+      .map((p) => ({
+        id: String(p.id),
+        quantity: Number(p.quantity) || 0,
+        reason: String(p.reason || "").trim(),
+      }))
+      .filter((p) => p.id && p.quantity > 0);
 
     if (clean.length === 0) {
       return res
@@ -8016,10 +8019,17 @@ app.get(
               getPropInsensitive(page.properties, 'Thumbnail') ||
               getPropInsensitive(page.properties, 'Icon');
             const imageUrl = extractFirstFileUrl(imageProp);
-            if (titleProperty?.title?.length > 0) {
+            // Notion titles are arrays of rich-text fragments. Using only [0]
+            // can truncate names (e.g. showing just "A4" instead of the full title).
+            const fullName = (titleProperty?.title || [])
+              .map((t) => t?.plain_text || '')
+              .join('')
+              .trim();
+
+            if (fullName) {
               return {
                 id: page.id,
-                name: titleProperty.title[0].plain_text,
+                name: fullName,
                 url: extractUrl(urlProperty),
                 unitPrice: typeof unitPrice === 'number' && Number.isFinite(unitPrice) ? unitPrice : null,
                 displayId: displayId || null,
