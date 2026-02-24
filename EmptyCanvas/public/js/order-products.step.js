@@ -297,12 +297,11 @@
         return true;
       }
 
-      const r = String(globalReason || '').trim();
-      if (!r) {
-        if (!silent) toast('error', 'Reason required', 'Please enter a reason first.');
-        return false;
-      }
-
+      // IMPORTANT:
+      // We allow saving a draft cart even if the user hasn't written the order
+      // reason yet. Reason will be validated on checkout ("Checkout Now").
+      //
+      // If a global reason exists, copy it into each item before saving.
       applyGlobalReason();
 
       const clean = cart
@@ -543,16 +542,11 @@
       toast('error', 'Missing field', 'Please enter a valid quantity.');
       return false;
     }
-    if (!r) {
-      toast('error', 'Reason required', 'Please enter the order reason first.');
-      try { reasonInput?.focus?.(); } catch {}
-      return false;
-    }
-
     const idx = cart.findIndex((p) => String(p.id) === cleanId);
     if (idx >= 0) {
       cart[idx].quantity = cleanQty;
-      cart[idx].reason = r;
+      // Only overwrite the stored reason if the user already entered one.
+      if (r) cart[idx].reason = r;
     } else {
       cart.push({ id: cleanId, quantity: cleanQty, reason: r });
     }
