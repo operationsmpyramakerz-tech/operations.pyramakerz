@@ -1103,6 +1103,16 @@ body.co-modal-open{ overflow: hidden; }
   background: #F3F4F6;
 }
 
+/* Requested Orders: inline Edit button (dark variant: black bg + white text) */
+.ro-edit-dark{
+  background: #111827;
+  color: #FFFFFF;
+  border: 1px solid #111827;
+  box-shadow: 0 10px 22px rgba(0,0,0,0.10);
+}
+.ro-edit-dark:hover{ background: #0B1220; }
+.ro-edit-dark:active{ background: #000000; }
+
 @media (max-width: 560px){
   .ro-action-btn{ flex: 1; }
 }
@@ -3657,6 +3667,11 @@ main:has(#sv-list) {
   transform: rotate(45deg);
 }
 .sv-qty-popover__body { position: relative; }
+.sv-qty-hint{
+  font-size: 0.80rem;
+  color: #6B7280;
+  margin: 2px 0 8px;
+}
 .sv-qty-row {
   display: grid;
   grid-template-columns: 36px 1fr 36px;
