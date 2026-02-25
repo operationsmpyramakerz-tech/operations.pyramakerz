@@ -4834,7 +4834,7 @@ app.get(
     res.set("Cache-Control", "no-store");
     try {
       // Cache version is bumped when response logic/shape changes.
-      const cacheKey = "cache:api:orders:requested:v4";
+      const cacheKey = "cache:api:orders:requested:v5";
       const data = await cacheGetOrSet(cacheKey, 60, async () => {
       const all = [];
       let hasMore = true,
@@ -5178,6 +5178,14 @@ const qtyRemainingComputed = Math.max(
 
 const qtyRemaining = qtyRemainingStored !== null ? qtyRemainingStored : qtyRemainingComputed;
 
+// If 'Quantity Received by operations' is 0 by default in Notion templates,
+// we should NOT treat it as an edited value unless Quantity Remaining was actually stored.
+// This flag lets the UI decide whether to show strike-through + the edited value in Not Started.
+const qtyReceivedEdited =
+  qtyReceived !== null &&
+  qtyReceived !== undefined &&
+  (Number(qtyReceived) !== 0 || qtyRemainingStored !== null);
+
 // Status + Notion label color
 const statusPropObj = getPropInsensitive(props, "Status") || props["Status"];
 const status =
@@ -5284,7 +5292,9 @@ if (svApproval !== "Approved") continue;
     unitPrice,
     quantity: qty,
     quantityReceived: qtyReceived,
+    quantityReceivedEdited: qtyReceivedEdited,
     quantityRemaining: qtyRemaining,
+    quantityRemainingStored: qtyRemainingStored,
     status,
     statusColor,
     operationsByIds,
@@ -5361,7 +5371,7 @@ app.post(
       );
 
       // Invalidate caches so lists reflect the assignment immediately.
-      await cacheDel("cache:api:orders:requested:v4");
+      await cacheDel("cache:api:orders:requested:v5");
       const memberIdsNorm = (memberIds || [])
         .map((x) => String(x || "").trim())
         .filter(Boolean)
@@ -5608,8 +5618,21 @@ app.post(
                   ? Number(recValRaw)
                   : null;
 
-            // Fill only if it's missing (null/undefined/NaN)
-            if (recVal === null) {
+            // If the DB/template sets Quantity Received by operations = 0 by default,
+            // we should treat it as "not edited" until Quantity Remaining is actually stored
+            // (which happens when Operations edits the qty via the UI).
+            let hasStoredRemaining = false;
+            if (remainingProp && pageProps && pageProps[remainingProp]) {
+              const remValRaw = parseNumberProp(pageProps[remainingProp]);
+              hasStoredRemaining =
+                remValRaw !== null &&
+                remValRaw !== undefined &&
+                Number.isFinite(Number(remValRaw));
+            }
+
+            const shouldAutoFill = recVal === null || (recVal === 0 && !hasStoredRemaining);
+
+            if (shouldAutoFill) {
               receivedFinal = safeBaseQty;
               updateProps[receivedProp] = { number: receivedFinal };
             } else {
@@ -5635,7 +5658,7 @@ app.post(
       );
 
       // Invalidate cached lists (Operations view).
-      await cacheDel("cache:api:orders:requested:v4");
+      await cacheDel("cache:api:orders:requested:v5");
 
       res.json({
         success: true,
@@ -5723,7 +5746,7 @@ app.post(
         ),
       );
 
-      await cacheDel("cache:api:orders:requested:v4");
+      await cacheDel("cache:api:orders:requested:v5");
 
       res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
     } catch (e) {
@@ -5847,7 +5870,7 @@ app.post(
       });
 
       // Invalidate caches so quantities update immediately.
-      await cacheDel("cache:api:orders:requested:v4");
+      await cacheDel("cache:api:orders:requested:v5");
       try {
         const page = await notion.pages.retrieve({ page_id: id });
         const rel = page?.properties?.["Teams Members"]?.relation || [];
