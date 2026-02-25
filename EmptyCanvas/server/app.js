@@ -1112,6 +1112,23 @@ async function detectReceivedQtyPropName() {
   return null;
 }
 
+// === Helper: Remaining Quantity (number) ===
+// Property expected: "Quantity Remaining" (Number)
+async function detectRemainingQtyPropName() {
+  const envName = (process.env.NOTION_REMAINING_PROP || "").trim();
+  const props = await getOrdersDBProps();
+  if (envName && props[envName] && props[envName].type === "number") return envName;
+
+  const candidate = pickPropName(props, [
+    "Quantity Remaining",
+    "Remaining Qty",
+    "Qty Remaining",
+    "Remaining",
+  ]);
+  if (candidate && props[candidate] && props[candidate].type === "number") return candidate;
+  return null;
+}
+
 // Logout
 app.post("/api/logout", (req, res) => {
   req.session.destroy((err) => {
@@ -5142,6 +5159,25 @@ const qtyReceived =
       ? Number(qtyReceivedRaw)
       : null;
 
+// Quantity Remaining (Number)
+const qtyRemainingRaw =
+  parseNumberProp(getPropInsensitive(props, "Quantity Remaining")) ??
+  parseNumberProp(getPropInsensitive(props, "Quantity remaining"));
+
+const qtyRemainingStored =
+  qtyRemainingRaw === null || qtyRemainingRaw === undefined
+    ? null
+    : Number.isFinite(Number(qtyRemainingRaw))
+      ? Number(qtyRemainingRaw)
+      : null;
+
+const qtyRemainingComputed = Math.max(
+  0,
+  (Number.isFinite(Number(qty)) ? Number(qty) : 0) - (qtyReceived === null || qtyReceived === undefined ? 0 : Number(qtyReceived)),
+);
+
+const qtyRemaining = qtyRemainingStored !== null ? qtyRemainingStored : qtyRemainingComputed;
+
 // Status + Notion label color
 const statusPropObj = getPropInsensitive(props, "Status") || props["Status"];
 const status =
@@ -5248,6 +5284,7 @@ if (svApproval !== "Approved") continue;
     unitPrice,
     quantity: qty,
     quantityReceived: qtyReceived,
+    quantityRemaining: qtyRemaining,
     status,
     statusColor,
     operationsByIds,
@@ -5411,6 +5448,9 @@ app.post(
         return await detectReceivedQtyPropName();
       })();
 
+      // Quantity Remaining (Number) — used by the new "Remaining" tab
+      const remainingProp = await detectRemainingQtyPropName();
+
       // Helpers local to this route
       const getPropInsensitive = (props, name) => {
         const target = normKey(name);
@@ -5533,6 +5573,32 @@ app.post(
 
           const updateProps = { ...propsToUpdate };
 
+          // Base quantity for this row (Quantity Progress fallback Requested)
+          let baseQtyNum = 0;
+          if (pageProps) {
+            const qtyProgressRaw =
+              parseNumberProp(getPropInsensitive(pageProps, "Quantity Progress")) ??
+              parseNumberProp(getPropInsensitive(pageProps, "Quantity progress"));
+
+            const qtyRequestedRaw =
+              parseNumberProp(getPropInsensitive(pageProps, "Quantity Requested")) ??
+              parseNumberProp(getPropInsensitive(pageProps, "Quantity requested"));
+
+            baseQtyNum =
+              qtyProgressRaw !== null &&
+              qtyProgressRaw !== undefined &&
+              Number.isFinite(Number(qtyProgressRaw))
+                ? Number(qtyProgressRaw)
+                : qtyRequestedRaw !== null &&
+                    qtyRequestedRaw !== undefined &&
+                    Number.isFinite(Number(qtyRequestedRaw))
+                  ? Number(qtyRequestedRaw)
+                  : 0;
+          }
+          const safeBaseQty = Math.max(0, Math.floor(baseQtyNum || 0));
+
+          // Received quantity
+          let receivedFinal = null;
           if (receivedProp && pageProps) {
             const recValRaw = parseNumberProp(pageProps[receivedProp]);
             const recVal =
@@ -5544,28 +5610,21 @@ app.post(
 
             // Fill only if it's missing (null/undefined/NaN)
             if (recVal === null) {
-              const qtyProgressRaw =
-                parseNumberProp(getPropInsensitive(pageProps, "Quantity Progress")) ??
-                parseNumberProp(getPropInsensitive(pageProps, "Quantity progress"));
-
-              const qtyRequestedRaw =
-                parseNumberProp(getPropInsensitive(pageProps, "Quantity Requested")) ??
-                parseNumberProp(getPropInsensitive(pageProps, "Quantity requested"));
-
-              const baseQtyNum =
-                qtyProgressRaw !== null &&
-                qtyProgressRaw !== undefined &&
-                Number.isFinite(Number(qtyProgressRaw))
-                  ? Number(qtyProgressRaw)
-                  : qtyRequestedRaw !== null &&
-                      qtyRequestedRaw !== undefined &&
-                      Number.isFinite(Number(qtyRequestedRaw))
-                    ? Number(qtyRequestedRaw)
-                    : 0;
-
-              const safeQty = Math.max(0, Math.floor(baseQtyNum || 0));
-              updateProps[receivedProp] = { number: safeQty };
+              receivedFinal = safeBaseQty;
+              updateProps[receivedProp] = { number: receivedFinal };
+            } else {
+              receivedFinal = Math.max(0, Math.floor(Number(recVal) || 0));
             }
+          }
+
+          // Remaining quantity (always keep it in sync, if the column exists)
+          if (remainingProp && pageProps) {
+            const recForRemaining =
+              receivedFinal === null || receivedFinal === undefined
+                ? 0
+                : Math.max(0, Math.floor(Number(receivedFinal) || 0));
+            const remainingVal = Math.max(0, safeBaseQty - recForRemaining);
+            updateProps[remainingProp] = { number: remainingVal };
           }
 
           return notion.pages.update({
@@ -5686,10 +5745,12 @@ app.post(
       const id = looksLikeNotionId(rawId) ? toHyphenatedUUID(rawId) : rawId;
       const { value } = req.body || {};
 
-      const vNum = Number(value);
-      if (!Number.isFinite(vNum) || vNum < 0) {
+      const vNumRaw = Number(value);
+      if (!Number.isFinite(vNumRaw) || vNumRaw < 0) {
         return res.status(400).json({ error: "value must be a non-negative number" });
       }
+
+      const vNum = Math.max(0, Math.floor(vNumRaw));
 
       // Detect received quantity property name (Number)
       const receivedProp = (await (async () => {
@@ -5702,11 +5763,87 @@ app.post(
         return res.status(500).json({ error: 'Received-quantity column not found (expected: "Quantity Received by operations")' });
       }
 
+      // Remaining quantity column (optional but expected by the UI)
+      const remainingProp = await detectRemainingQtyPropName();
+
+      // Read base qty to compute remaining = base - received
+      let baseQtyNum = 0;
+      let pageProps = null;
+      try {
+        const page = await notion.pages.retrieve({ page_id: id });
+        pageProps = page?.properties || {};
+      } catch (err) {
+        console.error("received-quantity retrieve error:", err?.body || err);
+        pageProps = null;
+      }
+
+      const normKeyLocal = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      const getPropInsensitive = (props, name) => {
+        const want = normKeyLocal(name);
+        for (const k of Object.keys(props || {})) {
+          if (normKeyLocal(k) === want) return props[k];
+        }
+        return null;
+      };
+
+      const parseNumberProp = (prop) => {
+        if (!prop) return null;
+        try {
+          if (prop.type === "number") return prop.number ?? null;
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "number") return prop.formula.number ?? null;
+            if (prop.formula?.type === "string") {
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              return Number.isFinite(n) ? n : null;
+            }
+          }
+          if (prop.type === "rollup") {
+            if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
+            if (prop.rollup?.type === "array") {
+              const arr = prop.rollup.array || [];
+              for (const x of arr) {
+                if (x.type === "number" && typeof x.number === "number") return x.number;
+                if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
+                if (x.type === "formula" && x.formula?.type === "string") {
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  if (Number.isFinite(n)) return n;
+                }
+              }
+            }
+          }
+        } catch {}
+        return null;
+      };
+
+      if (pageProps) {
+        const qtyProgressRaw =
+          parseNumberProp(getPropInsensitive(pageProps, "Quantity Progress")) ??
+          parseNumberProp(getPropInsensitive(pageProps, "Quantity progress"));
+
+        const qtyRequestedRaw =
+          parseNumberProp(getPropInsensitive(pageProps, "Quantity Requested")) ??
+          parseNumberProp(getPropInsensitive(pageProps, "Quantity requested"));
+
+        baseQtyNum =
+          qtyProgressRaw !== null && qtyProgressRaw !== undefined && Number.isFinite(Number(qtyProgressRaw))
+            ? Number(qtyProgressRaw)
+            : qtyRequestedRaw !== null && qtyRequestedRaw !== undefined && Number.isFinite(Number(qtyRequestedRaw))
+              ? Number(qtyRequestedRaw)
+              : 0;
+      }
+      const safeBaseQty = Math.max(0, Math.floor(baseQtyNum || 0));
+      const remainingVal = Math.max(0, safeBaseQty - vNum);
+
+      const updateProps = {
+        [receivedProp]: { number: vNum },
+      };
+      if (remainingProp) {
+        updateProps[remainingProp] = { number: remainingVal };
+      }
+
       await notion.pages.update({
         page_id: id,
-        properties: {
-          [receivedProp]: { number: vNum },
-        },
+        properties: updateProps,
       });
 
       // Invalidate caches so quantities update immediately.
@@ -5722,7 +5859,7 @@ app.post(
         );
       } catch {}
 
-      return res.json({ success: true, value: vNum });
+      return res.json({ success: true, value: vNum, remaining: remainingVal });
     } catch (e) {
       console.error("received-quantity update error:", e.body || e);
       return res.status(500).json({ error: "Failed to update received quantity" });
