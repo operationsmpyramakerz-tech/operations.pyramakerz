@@ -140,41 +140,89 @@
 
     <div class="co-modal-body">
       <div class="co-modal-meta">
-        <div class="co-meta-row"><span>Order ID</span><strong id="reqModalOrderId">—</strong></div>
-        <div class="co-meta-row"><span>Team member</span><strong id="reqModalCreatedBy">—</strong></div>
+        <div class="co-meta-row"><span>Reason</span><strong id="reqModalReason">—</strong></div>
         <div class="co-meta-row"><span>Date</span><strong id="reqModalDate">—</strong></div>
-<div class="co-meta-row">
-  <span>Received by</span>
-  <strong id="reqModalOperationsBy">—</strong>
-</div>
         <div class="co-meta-row"><span>Components</span><strong id="reqModalComponents">—</strong></div>
-        <div class="co-meta-row"><span>Total quantity</span><strong id="reqModalTotalQty">—</strong></div>
-        <div class="co-meta-row"><span>Estimate total</span><strong id="reqModalTotalPrice">—</strong></div>
+        <div class="co-meta-row"><span>Estimated cost</span><strong id="reqModalTotalPrice">—</strong></div>
+
+        <!-- Extra fields shown for "Received" (and later) tabs only -->
+        <div class="co-meta-row" id="reqReceiptRow" hidden>
+          <span>Receipt Number</span>
+          <strong id="reqModalReceiptNumber">—</strong>
+        </div>
+        <div class="co-meta-row" id="reqReceivedByRow" hidden>
+          <span>Received by</span>
+          <strong id="reqModalOperationsBy">—</strong>
+        </div>
       </div>
 
-      <div class="co-modal-actions ro-actions" id="reqModalActions">
-        <button type="button" class="ro-action-btn" id="reqExcelBtn">
-          <i data-feather="download"></i>
-          Download Excel
-        </button>
+      <div class="co-modal-actions ro-actions ro-actions--right" id="reqModalActions">
+        <!-- Download dropdown (single button like Current Orders) -->
+        <div class="download-menu" id="reqDownloadMenuWrap">
+          <button type="button" class="ro-action-btn ro-action-btn--light download-menu__btn" id="reqDownloadMenuBtn" aria-haspopup="menu" aria-expanded="false">
+            <i data-feather="download"></i>
+            <span>Download</span>
+            <i data-feather="chevron-down"></i>
+          </button>
 
-        <button type="button" class="ro-action-btn" id="reqPdfBtn" style="display:none;">
-          <i data-feather="file-text"></i>
-          Download PDF
-        </button>
+          <div class="download-menu__panel" id="reqDownloadMenuPanel" role="menu" aria-label="Download options" hidden>
+            <button class="download-menu__item" id="reqDownloadPdfBtn" role="menuitem" type="button">
+              <span>Download PDF</span>
+              <i data-feather="file-text"></i>
+            </button>
+            <div class="download-menu__sep" role="separator"></div>
+            <button class="download-menu__item" id="reqDownloadExcelBtn" role="menuitem" type="button">
+              <span>Download Excel</span>
+              <i data-feather="grid"></i>
+            </button>
+          </div>
+        </div>
 
-        <button type="button" class="ro-action-btn" id="reqReceivedBtn">
+        <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqReceivedBtn">
           <i data-feather="truck"></i>
           Received by operations
         </button>
 
-        <button type="button" class="ro-action-btn" id="reqReceivedShippedBtn" style="display:none;">
+        <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqReceivedShippedBtn" style="display:none;">
           <i data-feather="check-circle"></i>
           Received
         </button>
       </div>
 
       <div class="co-modal-items" id="reqModalItems"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== RECEIPT NUMBER (SUB-MODAL) ===================== -->
+<div id="reqReceiptModal" class="co-submodal-overlay" aria-hidden="true" hidden>
+  <div class="co-submodal-dialog" role="dialog" aria-modal="true" aria-labelledby="reqReceiptTitle" aria-describedby="reqReceiptSub">
+    <button type="button" class="co-submodal-close" id="reqReceiptClose" aria-label="Close">
+      <i data-feather="x"></i>
+    </button>
+
+    <div class="co-submodal-header">
+      <div class="co-submodal-title" id="reqReceiptTitle">Receipt Number</div>
+      <div class="co-submodal-sub" id="reqReceiptSub">Enter the receipt number to confirm "Received by operations".</div>
+    </div>
+
+    <div class="co-submodal-body">
+      <label class="co-submodal-label" for="reqReceiptInput">Receipt number</label>
+      <input
+        class="co-submodal-input"
+        id="reqReceiptInput"
+        type="number"
+        inputmode="numeric"
+        min="0"
+        step="1"
+        placeholder="e.g. 12345"
+      />
+      <div class="co-submodal-error" id="reqReceiptError" role="alert" aria-live="polite"></div>
+    </div>
+
+    <div class="co-submodal-actions">
+      <button type="button" class="ro-action-btn ro-action-btn--light" id="reqReceiptCancel">Cancel</button>
+      <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqReceiptConfirm">Confirm</button>
     </div>
   </div>
 </div>
