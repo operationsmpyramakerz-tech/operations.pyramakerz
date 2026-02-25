@@ -781,6 +781,76 @@ async function detectStatusPropName() {
   );
 }
 
+
+
+// ===== Order Group ID (Order - ID) helpers =====
+// This replaces the old Notion unique_id "ID" column (which was per-row).
+// "Order - ID" is a Number property used to group multiple components under one order.
+async function detectOrderGroupIdPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "Order - ID",
+      "Order ID",
+      "Order Id",
+      "Order-ID",
+      "Order Number",
+      "Order No",
+      "Order No.",
+      "Order #",
+    ]) || null
+  );
+}
+
+async function getMaxOrderGroupIdNumberFromNotion(orderIdPropName) {
+  try {
+    if (!ordersDatabaseId || !orderIdPropName) return 0;
+    const resp = await notion.databases.query({
+      database_id: ordersDatabaseId,
+      page_size: 1,
+      filter: { property: orderIdPropName, number: { is_not_empty: true } },
+      sorts: [{ property: orderIdPropName, direction: "descending" }],
+    });
+    const pg = resp?.results?.[0];
+    const n = _extractPropNumber(pg?.properties?.[orderIdPropName] || null);
+    return Number.isFinite(Number(n)) ? Number(n) : 0;
+  } catch (e) {
+    console.warn(
+      "[order-id] failed to read max Order - ID from Notion:",
+      e?.body || e?.message || e,
+    );
+    return 0;
+  }
+}
+
+// Allocate the next Order - ID.
+// Uses Redis INCR when available (avoids collisions), otherwise falls back to Notion max+1.
+async function allocateNextOrderGroupIdNumber(orderIdPropName) {
+  if (!orderIdPropName) return null;
+
+  const redisKey = "cache:orders:order-group-id-counter:v1";
+  if (redisClient && redisClient.isReady) {
+    try {
+      const existing = await redisClient.get(redisKey);
+      if (existing === null || existing === undefined) {
+        const max = await getMaxOrderGroupIdNumberFromNotion(orderIdPropName);
+        // seed only if not exists (race-safe)
+        await redisClient.set(redisKey, String(max), { NX: true });
+      }
+      const next = await redisClient.incr(redisKey);
+      return Number(next);
+    } catch (e) {
+      console.warn(
+        "[order-id] redis counter failed, falling back to Notion:",
+        e?.message || e,
+      );
+    }
+  }
+
+  const max = await getMaxOrderGroupIdNumberFromNotion(orderIdPropName);
+  return Number(max) + 1;
+}
+
 // Authentication middleware
 function requireAuth(req, res, next) {
   if (req.session && req.session.authenticated) return next();
@@ -4189,7 +4259,7 @@ app.get(
       if (!userId) return res.status(404).json({ error: "User not found." });
 
       // Cache the Notion-derived list briefly to make reloads fast and reduce Notion load.
-      const listCacheKey = `cache:api:orders:list:${userId}:v5`;
+      const listCacheKey = `cache:api:orders:list:${userId}:v6`;
       const allOrders = await cacheGetOrSet(listCacheKey, 60, async () => {
         const rows = [];
         let hasMore = true;
@@ -4268,6 +4338,20 @@ app.get(
         };
 
         const getOrderUniqueIdDetails = (props) => {
+          // Prefer the new numeric group id column: "Order - ID" (Number)
+          const orderNumProp =
+            getPropInsensitive(props, "Order - ID") ||
+            getPropInsensitive(props, "Order ID") ||
+            getPropInsensitive(props, "Order-ID") ||
+            getPropInsensitive(props, "Order Id") ||
+            null;
+          const orderNum = _extractPropNumber(orderNumProp);
+          if (Number.isFinite(Number(orderNum))) {
+            const n = Number(orderNum);
+            return { text: `ORD-${n}`, prefix: "ORD", number: n };
+          }
+
+          // Fallback to old unique_id column (legacy)
           const direct = getPropInsensitive(props, "ID");
           const d = extractUniqueIdDetails(direct);
           if (d.text) return d;
@@ -4564,7 +4648,12 @@ app.get(
         tryEtaProp(basePage.properties?.["Delivery time"]) ??
         null;
 
-      // Collect all items for the same Reason (scoped to the current user)
+      // Prefer grouping by Order - ID (Number). Fallback to Reason for legacy rows.
+      const orderGroupIdPropName = await detectOrderGroupIdPropName();
+      const orderGroupIdNumberForGroup =
+        orderGroupIdPropName ? parseNumberProp(basePage.properties?.[orderGroupIdPropName] || null) : null;
+
+      // Collect all items for the same order group (scoped to the current user)
       const items = [];
       let hasMore = true;
       let startCursor = undefined;
@@ -4583,6 +4672,15 @@ app.get(
         return out;
       }
 
+
+      const groupFilter =
+        orderGroupIdPropName && Number.isFinite(Number(orderGroupIdNumberForGroup))
+          ? {
+              property: orderGroupIdPropName,
+              number: { equals: Number(orderGroupIdNumberForGroup) },
+            }
+          : { property: "Reason", title: { equals: reason } };
+
       while (hasMore) {
         const response = await notion.databases.query({
           database_id: ordersDatabaseId,
@@ -4590,7 +4688,7 @@ app.get(
           filter: {
             and: [
               { property: "Teams Members", relation: { contains: userId } },
-              { property: "Reason", title: { equals: reason } },
+              groupFilter,
             ],
           },
           sorts: [{ timestamp: "created_time", direction: "descending" }],
@@ -4709,7 +4807,7 @@ app.get(
     res.set("Cache-Control", "no-store");
     try {
       // Cache version is bumped when response logic/shape changes.
-      const cacheKey = "cache:api:orders:requested:v3";
+      const cacheKey = "cache:api:orders:requested:v4";
       const data = await cacheGetOrSet(cacheKey, 60, async () => {
       const all = [];
       let hasMore = true,
@@ -4909,6 +5007,20 @@ app.get(
       };
 
       const getOrderUniqueIdDetails = (props) => {
+        // Prefer the new numeric group id column: "Order - ID" (Number)
+        const orderNumProp =
+          getPropInsensitive(props, "Order - ID") ||
+          getPropInsensitive(props, "Order ID") ||
+          getPropInsensitive(props, "Order-ID") ||
+          getPropInsensitive(props, "Order Id") ||
+          null;
+        const orderNum = _extractPropNumber(orderNumProp);
+        if (Number.isFinite(Number(orderNum))) {
+          const n = Number(orderNum);
+          return { text: `ORD-${n}`, prefix: "ORD", number: n };
+        }
+
+        // Fallback to old unique_id column (legacy)
         const direct = getPropInsensitive(props, "ID");
         const d = extractUniqueIdDetails(direct);
         if (d.text) return d;
@@ -5193,13 +5305,13 @@ app.post(
       );
 
       // Invalidate caches so lists reflect the assignment immediately.
-      await cacheDel("cache:api:orders:requested:v3");
+      await cacheDel("cache:api:orders:requested:v4");
       const memberIdsNorm = (memberIds || [])
         .map((x) => String(x || "").trim())
         .filter(Boolean)
         .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
       await Promise.all(
-        memberIdsNorm.map((mid) => cacheDel(`cache:api:orders:assigned:${mid}:v2`)),
+        memberIdsNorm.map((mid) => cacheDel(`cache:api:orders:assigned:${mid}:v3`)),
       );
 
       res.json({ success: true });
@@ -5418,7 +5530,7 @@ app.post(
       );
 
       // Invalidate cached lists (Operations view).
-      await cacheDel("cache:api:orders:requested:v3");
+      await cacheDel("cache:api:orders:requested:v4");
 
       res.json({
         success: true,
@@ -5505,7 +5617,7 @@ app.post(
         ),
       );
 
-      await cacheDel("cache:api:orders:requested:v3");
+      await cacheDel("cache:api:orders:requested:v4");
 
       res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
     } catch (e) {
@@ -5551,7 +5663,7 @@ app.post(
       });
 
       // Invalidate caches so quantities update immediately.
-      await cacheDel("cache:api:orders:requested:v3");
+      await cacheDel("cache:api:orders:requested:v4");
       try {
         const page = await notion.pages.retrieve({ page_id: id });
         const rel = page?.properties?.["Teams Members"]?.relation || [];
@@ -5559,7 +5671,7 @@ app.post(
           .map((r) => r?.id)
           .filter(Boolean);
         await Promise.all(
-          memberIds.map((mid) => cacheDel(`cache:api:orders:list:${mid}:v2`)),
+          memberIds.map((mid) => cacheDel(`cache:api:orders:list:${mid}:v6`)),
         );
       } catch {}
 
@@ -5651,6 +5763,20 @@ app.post(
       };
 
       const getOrderUniqueIdDetails = (props) => {
+        // Prefer the new numeric group id column: "Order - ID" (Number)
+        const orderNumProp =
+          getPropInsensitive(props, "Order - ID") ||
+          getPropInsensitive(props, "Order ID") ||
+          getPropInsensitive(props, "Order-ID") ||
+          getPropInsensitive(props, "Order Id") ||
+          null;
+        const orderNum = _extractPropNumber(orderNumProp);
+        if (Number.isFinite(Number(orderNum))) {
+          const n = Number(orderNum);
+          return { text: `ORD-${n}`, prefix: "ORD", number: n };
+        }
+
+        // Fallback to old unique_id column (legacy)
         const direct = getPropInsensitive(props, "ID");
         const d = extractUniqueIdDetails(direct);
         if (d.text) return d;
@@ -5944,6 +6070,20 @@ app.post(
       };
 
       const getOrderUniqueIdDetails = (props) => {
+        // Prefer the new numeric group id column: "Order - ID" (Number)
+        const orderNumProp =
+          getPropInsensitive(props, "Order - ID") ||
+          getPropInsensitive(props, "Order ID") ||
+          getPropInsensitive(props, "Order-ID") ||
+          getPropInsensitive(props, "Order Id") ||
+          null;
+        const orderNum = _extractPropNumber(orderNumProp);
+        if (Number.isFinite(Number(orderNum))) {
+          const n = Number(orderNum);
+          return { text: `ORD-${n}`, prefix: "ORD", number: n };
+        }
+
+        // Fallback to old unique_id column (legacy)
         const direct = getPropInsensitive(props, "ID");
         const d = extractUniqueIdDetails(direct);
         if (d.text) return d;
@@ -6448,6 +6588,20 @@ app.post(
       };
 
       const getOrderUniqueIdDetails = (props) => {
+        // Prefer the new numeric group id column: "Order - ID" (Number)
+        const orderNumProp =
+          getPropInsensitive(props, "Order - ID") ||
+          getPropInsensitive(props, "Order ID") ||
+          getPropInsensitive(props, "Order-ID") ||
+          getPropInsensitive(props, "Order Id") ||
+          null;
+        const orderNum = _extractPropNumber(orderNumProp);
+        if (Number.isFinite(Number(orderNum))) {
+          const n = Number(orderNum);
+          return { text: `ORD-${n}`, prefix: "ORD", number: n };
+        }
+
+        // Fallback to old unique_id column (legacy)
         const direct = getPropInsensitive(props, "ID");
         const d = extractUniqueIdDetails(direct);
         if (d.text) return d;
@@ -6720,6 +6874,20 @@ app.post(
       };
 
       const getOrderUniqueIdDetails = (props) => {
+        // Prefer the new numeric group id column: "Order - ID" (Number)
+        const orderNumProp =
+          getPropInsensitive(props, "Order - ID") ||
+          getPropInsensitive(props, "Order ID") ||
+          getPropInsensitive(props, "Order-ID") ||
+          getPropInsensitive(props, "Order Id") ||
+          null;
+        const orderNum = _extractPropNumber(orderNumProp);
+        if (Number.isFinite(Number(orderNum))) {
+          const n = Number(orderNum);
+          return { text: `ORD-${n}`, prefix: "ORD", number: n };
+        }
+
+        // Fallback to old unique_id column (legacy)
         const direct = getPropInsensitive(props, "ID");
         const d = extractUniqueIdDetails(direct);
         if (d.text) return d;
@@ -7044,7 +7212,7 @@ app.get(
       if (!userId) return res.status(404).json({ error: "User not found." });
 
       // Small TTL cache: this endpoint is hit often (reloads + polling)
-      const cacheKey = `cache:api:orders:assigned:${userId}:v2`;
+      const cacheKey = `cache:api:orders:assigned:${userId}:v3`;
       const items = await cacheGetOrSet(cacheKey, 60, async () => {
         const assignedProp = await detectAssignedPropName();
         const availableProp = await detectAvailableQtyPropName(); // may be null
@@ -7054,6 +7222,8 @@ app.get(
           if (props[REC_PROP_HARDBIND] && props[REC_PROP_HARDBIND].type === "number") return REC_PROP_HARDBIND;
           return await detectReceivedQtyPropName();
         })();
+
+        const orderGroupIdProp = await detectOrderGroupIdPropName();
 
         const raw = [];
         const productIds = new Set();
@@ -7083,6 +7253,7 @@ app.get(
               status: statusProp ? (props[statusProp]?.select?.name || props[statusProp]?.status?.name || "") : "",
               rec: receivedProp ? Number(props[receivedProp]?.number || 0) : 0,
               createdTime: page.created_time,
+              orderIdNumber: orderGroupIdProp ? _extractPropNumber(props[orderGroupIdProp] || null) : null,
             });
           }
 
@@ -7094,8 +7265,14 @@ app.get(
         return raw.map((r) => {
           const productName = r.productPageId ? (productMap.get(r.productPageId)?.name || "Unknown Product") : "Unknown Product";
           const remaining = Math.max(0, Number(r.requested) - Number(r.available));
+          const orderIdNumberSafe = Number(r.orderIdNumber);
+          const orderIdSafe = Number.isFinite(orderIdNumberSafe) ? `ORD-${orderIdNumberSafe}` : null;
+
           return {
             id: r.id,
+            orderId: orderIdSafe,
+            orderIdPrefix: orderIdSafe ? "ORD" : null,
+            orderIdNumber: Number.isFinite(orderIdNumberSafe) ? orderIdNumberSafe : null,
             productName,
             requested: r.requested,
             available: r.available,
@@ -7155,7 +7332,7 @@ app.post(
       // Invalidate the assigned list cache for the current user.
       const userId = await getSessionUserNotionId(req);
       if (userId) {
-        await cacheDel(`cache:api:orders:assigned:${userId}:v2`);
+        await cacheDel(`cache:api:orders:assigned:${userId}:v3`);
       }
 
       res.json({
@@ -7212,7 +7389,7 @@ app.post(
 
       const userId = await getSessionUserNotionId(req);
       if (userId) {
-        await cacheDel(`cache:api:orders:assigned:${userId}:v2`);
+        await cacheDel(`cache:api:orders:assigned:${userId}:v3`);
       }
 
       res.json({ success: true, available: newAvailable, remaining });
@@ -7250,7 +7427,7 @@ app.post(
 
       const userId = await getSessionUserNotionId(req);
       if (userId) {
-        await cacheDel(`cache:api:orders:assigned:${userId}:v2`);
+        await cacheDel(`cache:api:orders:assigned:${userId}:v3`);
       }
 
       res.json({ success: true, updated: orderIds.length });
@@ -8203,6 +8380,42 @@ if (cleanedProducts.some(p => !p.reason)) {
         Array.isArray(editCtx.items) &&
         editCtx.items.length > 0;
 
+      // Resolve Orders DB property name for the new Order - ID column (Number)
+      const orderGroupIdProp = await detectOrderGroupIdPropName();
+
+      // Determine the order number for this submission:
+      // - New order: allocate next number
+      // - Edit order: reuse existing number (or allocate one for legacy orders)
+      let orderGroupIdNumber = null;
+
+      if (editActive) {
+        const fromCtx = Number(editCtx?.orderIdNumber);
+        if (Number.isFinite(fromCtx)) orderGroupIdNumber = fromCtx;
+
+        // If not in session, attempt to read from the first page
+        if (!Number.isFinite(orderGroupIdNumber) && orderGroupIdProp) {
+          try {
+            const firstId = editCtx.items?.[0]?.orderPageId;
+            if (firstId) {
+              const pg = await notion.pages.retrieve({ page_id: firstId });
+              const n = _extractPropNumber(pg?.properties?.[orderGroupIdProp] || null);
+              if (Number.isFinite(Number(n))) orderGroupIdNumber = Number(n);
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        // Legacy orders (created before Order - ID existed): allocate a new number for the whole group
+        if (!Number.isFinite(orderGroupIdNumber) && orderGroupIdProp) {
+          orderGroupIdNumber = await allocateNextOrderGroupIdNumber(orderGroupIdProp);
+        }
+      } else {
+        if (orderGroupIdProp) {
+          orderGroupIdNumber = await allocateNextOrderGroupIdNumber(orderGroupIdProp);
+        }
+      }
+
       if (editActive) {
         const normalizeId = (x) => String(x || "").replace(/-/g, "");
 
@@ -8276,6 +8489,9 @@ if (cleanedProducts.some(p => !p.reason)) {
           const props = {
             Reason: { title: [{ text: { content: String(t.prod.reason || "").trim() } }] },
             "Quantity Requested": { number: Number(t.prod.quantity) },
+            ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
+              ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
+              : {}),
           };
 
           if (t.repurpose) {
@@ -8313,6 +8529,9 @@ if (cleanedProducts.some(p => !p.reason)) {
               Product: { relation: [{ id: product.id }] },
               [createStatusProp]: statusPlaced,
               "Teams Members": { relation: [{ id: userId }] },
+              ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
+                ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
+                : {}),
             },
           });
 
@@ -8333,7 +8552,7 @@ if (cleanedProducts.some(p => !p.reason)) {
         // Invalidate cached Current Orders list for this user
         const currentUserId = await getSessionUserNotionId(req);
         if (currentUserId) {
-          await cacheDel(`cache:api:orders:list:${currentUserId}:v2`);
+          await cacheDel(`cache:api:orders:list:${currentUserId}:v6`);
         }
 
         return res.json({
@@ -8353,6 +8572,9 @@ if (cleanedProducts.some(p => !p.reason)) {
               Product: { relation: [{ id: product.id }] },
               "Status": { select: { name: "Order Placed" } },
               "Teams Members": { relation: [{ id: userId }] },
+              ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
+                ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
+                : {}),
             },
           });
 
@@ -8377,14 +8599,21 @@ if (cleanedProducts.some(p => !p.reason)) {
         }),
       );
 
-      const recentOrders = creations.map((c) => ({
-  id: c.orderPageId,
-  reason: c.reason,
-  productName: c.productName,
-  quantity: c.quantity,
-  status: "Order Placed",
-  createdTime: c.createdTime,
-}));
+      const recentOrders = creations.map((c) => {
+        const n = Number(orderGroupIdNumber);
+        const hasN = Number.isFinite(n);
+        return {
+          id: c.orderPageId,
+          reason: c.reason,
+          productName: c.productName,
+          quantity: c.quantity,
+          status: "Order Placed",
+          createdTime: c.createdTime,
+          orderId: hasN ? `ORD-${n}` : null,
+          orderIdPrefix: hasN ? "ORD" : null,
+          orderIdNumber: hasN ? n : null,
+        };
+      });
       req.session.recentOrders = (req.session.recentOrders || []).concat(
         recentOrders,
       );
@@ -8397,7 +8626,7 @@ if (cleanedProducts.some(p => !p.reason)) {
       // Invalidate cached Current Orders list for this user.
       const currentUserId = await getSessionUserNotionId(req);
       if (currentUserId) {
-        await cacheDel(`cache:api:orders:list:${currentUserId}:v2`);
+        await cacheDel(`cache:api:orders:list:${currentUserId}:v6`);
       }
 
       res.json({
@@ -8438,7 +8667,7 @@ app.post(
       // Invalidate cached Current Orders list for this user (so UI updates instantly).
       const userId = await getSessionUserNotionId(req);
       if (userId) {
-        await cacheDel(`cache:api:orders:list:${userId}:v2`);
+        await cacheDel(`cache:api:orders:list:${userId}:v6`);
       }
       res.json({ success: true });
     } catch (error) {
@@ -8508,6 +8737,19 @@ app.post(
         }
       }
 
+      // Try to capture the Order - ID number from these pages (used to keep the same order number on edits)
+      const orderGroupIdProp = await detectOrderGroupIdPropName();
+      let orderGroupIdNumber = null;
+      if (orderGroupIdProp) {
+        for (const p of pages) {
+          const n = _extractPropNumber(p?.properties?.[orderGroupIdProp] || null);
+          if (Number.isFinite(Number(n))) {
+            orderGroupIdNumber = Number(n);
+            break;
+          }
+        }
+      }
+
       // Build draft products + edit context mapping
       const draft = [];
       const editItems = [];
@@ -8548,6 +8790,7 @@ app.post(
       req.session.editingOrder = {
         expiresAt: Date.now() + EDIT_CTX_TTL_MS,
         items: editItems,
+        orderIdNumber: Number.isFinite(Number(orderGroupIdNumber)) ? Number(orderGroupIdNumber) : null,
       };
 
       return res.json({ ok: true, count: draft.length });
@@ -11395,6 +11638,20 @@ app.get("/api/sv-orders", requireAuth, requirePage("S.V schools orders"), async 
     };
 
     const getOrderUniqueIdDetails = (props) => {
+      // Prefer the new numeric group id column: "Order - ID" (Number)
+      const orderNumProp =
+        getPropInsensitive(props, 'Order - ID') ||
+        getPropInsensitive(props, 'Order ID') ||
+        getPropInsensitive(props, 'Order-ID') ||
+        getPropInsensitive(props, 'Order Id') ||
+        null;
+      const orderNum = _extractPropNumber(orderNumProp);
+      if (Number.isFinite(Number(orderNum))) {
+        const n = Number(orderNum);
+        return { text: `ORD-${n}`, prefix: 'ORD', number: n };
+      }
+
+      // Fallback to old unique_id column (legacy)
       const direct = getPropInsensitive(props, 'ID');
       const d = extractUniqueIdDetails(direct);
       if (d.text) return d;
