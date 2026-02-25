@@ -304,7 +304,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!right) return;
 
     const safeName = String(name || '').trim() || getCachedName() || 'User';
-    const displayName = shortDisplayName(safeName);
 
     // Prefer an existing link (account-mini) so we don't duplicate
     let link = header.querySelector('a.header-user') || header.querySelector('a.account-mini');
@@ -326,9 +325,9 @@ document.addEventListener('DOMContentLoaded', () => {
       ? `<img class="header-user__img" src="${escapeAttr(photoUrl)}" alt="${escapeAttr(safeName)}" />`
       : `<div class="header-user__fallback" aria-hidden="true">${escapeHtml(initials)}</div>`;
 
+    // Requested: top-right profile trigger should be icon only (no name next to it)
     link.innerHTML = `
       <span class="header-user__avatar">${avatarHtml}</span>
-      <span class="header-user__name">${escapeHtml(displayName)}</span>
     `;
   }
 
@@ -677,6 +676,13 @@ if (document.querySelector('.sidebar')) {
       renderSidebarProfile({ name: cached });
       // also prefill header user (then refresh from API)
       renderHeaderUser({ name: cached });
+
+      // Expose basic user info for other widgets (e.g., the profile dropdown header)
+      try {
+        window.__opsUserInfo = Object.assign({}, window.__opsUserInfo || {}, {
+          name: cached,
+        });
+      } catch {}
     }
 
     try {
@@ -705,6 +711,21 @@ if (document.querySelector('.sidebar')) {
         name: name || cached || '',
         photoUrl: data.photoUrl || ''
       });
+
+      // Keep a global snapshot of the user (used by the profile dropdown header)
+      try {
+        window.__opsUserInfo = {
+          name: name || cached || 'User',
+          position: data.position || '',
+          department: data.department || '',
+          photoUrl: data.photoUrl || ''
+        };
+
+        // Notify other widgets that user info changed
+        try {
+          window.dispatchEvent(new CustomEvent('ops:userinfo', { detail: window.__opsUserInfo }));
+        } catch {}
+      } catch {}
 
       if (Array.isArray(data.allowedPages)) {
         cacheAllowedPages(data.allowedPages);
@@ -1529,26 +1550,90 @@ function initUserMenuWidget() {
     panel.style.zIndex = "999999";
     panel.innerHTML = `
       <div class="user-menu-shell">
+        <div class="user-menu-user" aria-label="Signed in user">
+          <span class="user-menu-user__avatar" aria-hidden="true">
+            <img class="user-menu-user__img" data-user-menu-img alt="Profile photo" />
+            <span class="user-menu-user__fallback" data-user-menu-fallback></span>
+          </span>
+          <div class="user-menu-user__meta">
+            <div class="user-menu-user__name" data-user-menu-name>—</div>
+            <div class="user-menu-user__role" data-user-menu-role></div>
+          </div>
+        </div>
+
+        <div class="user-menu-sep user-menu-sep--tight" role="separator"></div>
+
         <button type="button" class="user-menu-item" data-user-menu-action="profile">
           <span class="umi-ico"><i data-feather="user"></i></span>
-          <span class="umi-label">My profile</span>
+          <span class="umi-label">User Profile</span>
         </button>
 
-        <button type="button" class="user-menu-item is-highlight" data-user-menu-action="how">
+        <button type="button" class="user-menu-item" data-user-menu-action="how">
           <span class="umi-ico"><i data-feather="activity"></i></span>
           <span class="umi-label">How it works</span>
-          <span class="umi-tail" aria-hidden="true"><i data-feather="mouse-pointer"></i></span>
         </button>
 
         <div class="user-menu-sep" role="separator"></div>
 
-        <button type="button" class="user-menu-item" data-user-menu-action="logout">
+        <button type="button" class="user-menu-item user-menu-item--danger" data-user-menu-action="logout">
           <span class="umi-ico"><i data-feather="log-out"></i></span>
           <span class="umi-label">Log out</span>
         </button>
       </div>
     `;
     document.body.appendChild(panel);
+  }
+
+  // Keep the header section (avatar + name + position) in sync with the account info.
+  function applyUserInfoToMenu(info) {
+    const safe = info && typeof info === 'object' ? info : {};
+    const name = String(safe.name || localStorage.getItem('username') || 'User').trim() || 'User';
+    const role = String(safe.position || safe.department || '').trim();
+    const photoUrl = String(safe.photoUrl || '').trim();
+
+    const elName = panel.querySelector('[data-user-menu-name]');
+    const elRole = panel.querySelector('[data-user-menu-role]');
+    const img = panel.querySelector('[data-user-menu-img]');
+    const fb = panel.querySelector('[data-user-menu-fallback]');
+
+    if (elName) elName.textContent = name;
+    if (elRole) elRole.textContent = role;
+
+    // Initials helper (kept local to avoid depending on other closures)
+    const initials = (function initialsFrom(n) {
+      const parts = String(n || '').trim().split(/\s+/).filter(Boolean);
+      if (!parts.length) return '';
+      const first = parts[0][0] || '';
+      const last = parts.length > 1 ? (parts[parts.length - 1][0] || '') : '';
+      return (String(first) + String(last)).toUpperCase();
+    })(name);
+
+    if (img) {
+      if (photoUrl) {
+        img.src = photoUrl;
+        img.style.display = 'block';
+        img.alt = name + ' photo';
+        if (fb) fb.style.display = 'none';
+      } else {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+        if (fb) {
+          fb.textContent = initials;
+          fb.style.display = 'grid';
+        }
+      }
+    }
+  }
+
+  // Apply immediately from cache/global (then refresh via /api/account)
+  try { applyUserInfoToMenu(window.__opsUserInfo || {}); } catch {}
+
+  // Listen to updates from ensureGreetingAndPages()
+  if (!window.__opsUserMenuInfoBound) {
+    window.__opsUserMenuInfoBound = true;
+    window.addEventListener('ops:userinfo', (e) => {
+      try { applyUserInfoToMenu(e && e.detail ? e.detail : {}); } catch {}
+    });
   }
 
   function positionPanel() {
