@@ -1089,6 +1089,20 @@ body.co-modal-open{ overflow: hidden; }
 .co-item-right-row .co-item-status{ margin-top: 0; }
 .ro-edit-inline{ white-space: nowrap; }
 
+/* Requested Orders: inline Edit button should be black/white */
+.ro-edit-bw{
+  background: #FFFFFF;
+  color: #111827;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 10px 22px rgba(0,0,0,0.10);
+}
+.ro-edit-bw:hover{
+  background: #F9FAFB;
+}
+.ro-edit-bw:active{
+  background: #F3F4F6;
+}
+
 @media (max-width: 560px){
   .ro-action-btn{ flex: 1; }
 }
