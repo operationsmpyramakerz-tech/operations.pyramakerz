@@ -16,6 +16,9 @@
 
 *{ box-sizing:border-box; margin:0; padding:0; }
 
+/* Ensure the HTML hidden attribute always wins over custom display rules */
+[hidden]{ display:none !important; }
+
 body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   color:var(--text-primary);
