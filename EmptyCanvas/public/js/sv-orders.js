@@ -288,7 +288,11 @@
     const map = new Map();
 
     for (const o of sorted) {
-      const key = `${timeKey(o.createdTime)}|${o.teamMemberId || ""}`;
+      // Prefer grouping by Order - ID (Number). Fallback (legacy rows): created-time (minute) + team member.
+      const oid = Number(o.orderIdNumber);
+      const key = Number.isFinite(oid)
+        ? `ord:${oid}`
+        : `${timeKey(o.createdTime)}|${o.teamMemberId || ""}`;
       let g = map.get(key);
 
       if (!g) {

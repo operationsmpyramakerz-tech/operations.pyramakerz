@@ -97,8 +97,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const toDate = (d) => new Date(d || 0);
 
   // Current Orders groups should be stable when editing/adding items.
-  // The backend tracking endpoint groups items by Reason, so we mirror that here.
+  // Prefer grouping by the new numeric Order - ID (shared across all components in the same order).
+  // Fallback (legacy rows): group by Reason.
   function groupKeyForOrder(o) {
+    const n = Number(o?.orderIdNumber);
+    if (Number.isFinite(n)) return `ord:${n}`;
+
     const r = String(o?.reason || '').trim();
     return norm(r) || 'no reason';
   }

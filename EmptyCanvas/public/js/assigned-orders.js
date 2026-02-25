@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const esc=(s)=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const isReceivedOps = (it)=> String(it?.status||'').toLowerCase()==='received by operations';
 
-  const groupKeyOf=(it)=>{const reason=(it.reason&&String(it.reason).trim())||'No Reason';const bucket=(it.createdTime||'').slice(0,10);return `grp:${reason}|${bucket}`;};
+  const groupKeyOf=(it)=>{const oid=Number(it?.orderIdNumber);if(Number.isFinite(oid))return `ord:${oid}`;const reason=(it.reason&&String(it.reason).trim())||'No Reason';const bucket=(it.createdTime||'').slice(0,10);return `grp:${reason}|${bucket}`;};
 
   function buildGroups(list){
     const map=new Map();
@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       const key=groupKeyOf(it);
       const g=map.get(key)||{
         key,
-        title:(it.reason&&String(it.reason).trim())||'No Reason',
+        title:(it.orderId&&String(it.orderId).trim())||((it.reason&&String(it.reason).trim())||'No Reason'),
         subtitle:new Date(it.createdTime||Date.now()).toLocaleString(),
         items:[]
       };

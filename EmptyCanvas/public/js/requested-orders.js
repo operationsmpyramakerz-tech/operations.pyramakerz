@@ -309,11 +309,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
     for (const it of sorted) {
       const created = toDate(it.createdTime);
-      const gKey = [String(it.createdById || "").trim(), timeKey(created)].join("|");
+
+      // Prefer grouping by Order - ID (Number). Fallback (legacy rows): created-by + created-time (minute).
+      const oid = Number(it.orderIdNumber);
+      const gKey = Number.isFinite(oid)
+        ? `ord:${oid}`
+        : [String(it.createdById || "").trim(), timeKey(created)].join("|");
 
       if (!map.has(gKey)) {
         map.set(gKey, {
           groupId: gKey,
+          orderIdNumber: Number.isFinite(oid) ? oid : null,
           createdById: it.createdById || "",
           createdByName: it.createdByName || "",
           // We keep a group-level summary reason for search only.
