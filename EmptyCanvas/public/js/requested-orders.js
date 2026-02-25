@@ -209,8 +209,18 @@ document.addEventListener("DOMContentLoaded", () => {
   function readTabFromUrl() {
     const url = new URL(window.location.href);
     const tab = norm(url.searchParams.get("tab"));
-    const allowed = new Set(["not-started", "received", "delivered"]);
+    const allowed = new Set(["not-started", "remaining", "received", "delivered"]);
     return allowed.has(tab) ? tab : "not-started";
+  }
+
+  // Stage alone is not enough because we split "Shipped" into:
+  // - Remaining: shipped but not fully received (remaining qty > 0)
+  // - Received: shipped and fully received
+  function tabForGroup(g) {
+    const idx = g?.stage?.idx || 1;
+    if (idx >= 5) return "delivered";
+    if (idx >= 4) return g?.hasRemaining ? "remaining" : "received";
+    return "not-started";
   }
 
   function updateTabUI() {
@@ -295,6 +305,26 @@ document.addEventListener("DOMContentLoaded", () => {
     return rec !== null && rec !== undefined ? rec : base;
   }
 
+  // Quantities helpers
+  function baseQty(it) {
+    const n = Number(it?.quantity);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  }
+
+  function receivedQty(it) {
+    const n = Number(it?.quantityReceived);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+  }
+
+  function receivedQtyOrZero(it) {
+    const r = receivedQty(it);
+    return r === null || r === undefined ? 0 : r;
+  }
+
+  function remainingQty(it) {
+    return Math.max(baseQty(it) - receivedQtyOrZero(it), 0);
+  }
+
 
 
   function buildGroups(items) {
@@ -365,11 +395,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const groups = Array.from(map.values()).map((g) => {
       const itemsArr = g.items || [];
-      const totalQty = itemsArr.reduce((sum, x) => sum + effectiveQty(x), 0);
+      // Base totals (same meaning as Current Orders)
+      const totalQty = itemsArr.reduce((sum, x) => sum + baseQty(x), 0);
       const estimateTotal = itemsArr.reduce(
-        (sum, x) => sum + effectiveQty(x) * (Number(x.unitPrice) || 0),
+        (sum, x) => sum + baseQty(x) * (Number(x.unitPrice) || 0),
         0,
       );
+
+      // Remaining/received breakdown (used by the new "Remaining" tab)
+      const receivedTotalQty = itemsArr.reduce((sum, x) => sum + receivedQtyOrZero(x), 0);
+      const remainingTotalQty = itemsArr.reduce((sum, x) => sum + remainingQty(x), 0);
+      const remainingItemsCount = itemsArr.reduce((sum, x) => sum + (remainingQty(x) > 0 ? 1 : 0), 0);
+      const remainingEstimateTotal = itemsArr.reduce(
+        (sum, x) => sum + remainingQty(x) * (Number(x.unitPrice) || 0),
+        0,
+      );
+      const hasRemaining = remainingItemsCount > 0;
       const stage = computeStage(itemsArr);
       const rs = summarizeReasons(itemsArr);
 
@@ -392,6 +433,11 @@ document.addEventListener("DOMContentLoaded", () => {
         itemsCount: itemsArr.length,
         totalQty,
         estimateTotal,
+        receivedTotalQty,
+        remainingTotalQty,
+        remainingItemsCount,
+        remainingEstimateTotal,
+        hasRemaining,
         stage,
         orderIdRange: computeOrderIdRange(itemsArr),
         operationsByName: operationsSummary(itemsArr),
@@ -434,7 +480,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function getFilteredGroups() {
     const q = norm(searchInput?.value || "");
     return (groups || [])
-      .filter((g) => tabFromStageIdx(g.stage?.idx || 1) === currentTab)
+      .filter((g) => tabForGroup(g) === currentTab)
       .filter((g) => groupMatchesQuery(g, q));
   }
 
@@ -458,6 +504,15 @@ document.addEventListener("DOMContentLoaded", () => {
       ? `<div class="co-received-by">Received by: ${escapeHTML(receivedBy)}</div>`
       : "";
 
+    // In the "Remaining" tab we want the card to reflect ONLY the remaining items/cost
+    const isRemaining = currentTab === "remaining";
+    const displayCount = isRemaining
+      ? Number(g.remainingItemsCount) || 0
+      : Number(g.itemsCount) || 0;
+    const displayTotal = isRemaining
+      ? Number(g.remainingEstimateTotal) || 0
+      : Number(g.estimateTotal) || 0;
+
     const card = document.createElement("article");
     card.className = "co-card";
     card.setAttribute("role", "button");
@@ -474,7 +529,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="co-createdby">${createdBy}</div>
         </div>
 
-        <div class="co-qty">x${Number.isFinite(Number(g.itemsCount)) ? Number(g.itemsCount) : 0}</div>
+        <div class="co-qty">x${Number.isFinite(Number(displayCount)) ? Number(displayCount) : 0}</div>
       </div>
 
       <div class="co-divider"></div>
@@ -482,7 +537,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="co-bottom">
         <div class="co-est">
           <div class="co-est-label">Estimate Total</div>
-          <div class="co-est-value">${fmtMoney(g.estimateTotal)}</div>
+          <div class="co-est-value">${fmtMoney(displayTotal)}</div>
           ${receivedLine}
         </div>
 
@@ -536,8 +591,11 @@ document.addEventListener("DOMContentLoaded", () => {
     closeDownloadMenu();
     closeReceiptModal({ restoreFocus: false });
 
-    const items = g.items || [];
-    const stage = g.stage || computeStage(items);
+    const all = g.items || [];
+    const stage = g.stage || computeStage(all);
+
+    const isRemainingTab = currentTab === "remaining";
+    const items = isRemainingTab ? all.filter((it) => remainingQty(it) > 0) : all;
 
     // Header
     if (modalTitle) modalTitle.textContent = stage.label || "—";
@@ -549,8 +607,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // Meta (match Current Orders)
     if (modalReason) modalReason.textContent = String(g.reason || "—").trim() || "—";
     if (modalDate) modalDate.textContent = fmtDateTime(g.latestCreated) || "—";
-    if (modalComponents) modalComponents.textContent = String(g.itemsCount || 0);
-    if (modalTotalPrice) modalTotalPrice.textContent = fmtMoney(g.estimateTotal);
+    if (modalComponents) {
+      const c = isRemainingTab ? (Number(g.remainingItemsCount) || items.length) : Number(g.itemsCount) || items.length;
+      modalComponents.textContent = String(c);
+    }
+    if (modalTotalPrice) {
+      const t = isRemainingTab
+        ? (Number(g.remainingEstimateTotal) || items.reduce((sum, x) => sum + remainingQty(x) * (Number(x.unitPrice) || 0), 0))
+        : Number(g.estimateTotal) || 0;
+      modalTotalPrice.textContent = fmtMoney(t);
+    }
 
     // Extra fields: show for "Received" and later only
     const shouldShowExtras = (stage?.idx || 1) >= 4;
@@ -565,30 +631,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Actions visibility
     if (shippedBtn) shippedBtn.style.display = stage.idx < 4 ? "inline-flex" : "none";
-    if (arrivedBtn) arrivedBtn.style.display = stage.idx === 4 ? "inline-flex" : "none";
+    // Only allow "Delivered" when the order is fully received (no remaining items)
+    if (arrivedBtn) arrivedBtn.style.display = stage.idx === 4 && !g.hasRemaining ? "inline-flex" : "none";
 
     // Items list
     if (modalItems) {
       modalItems.innerHTML = "";
       const frag = document.createDocumentFragment();
 
-      const canEditQty = (stage?.idx || 1) < 4;
+      const canEditQty = currentTab === "not-started" || currentTab === "remaining";
+
+      if (isRemainingTab && items.length === 0) {
+        const empty = document.createElement("div");
+        empty.style.padding = "10px";
+        empty.textContent = "No remaining components.";
+        frag.appendChild(empty);
+      }
 
       for (const it of items) {
         const product = escapeHTML(it.productName || "Component");
-        const qtyBase = Number(it.quantity) || 0;
-        const qtyReceived =
-          typeof it.quantityReceived === "number" && Number.isFinite(it.quantityReceived)
-            ? Number(it.quantityReceived)
-            : null;
+        const qtyBase = baseQty(it);
+        const qtyReceived = receivedQty(it);
+
         const qtyEffective = qtyReceived !== null && qtyReceived !== undefined ? qtyReceived : qtyBase;
         const unit = Number(it.unitPrice) || 0;
-        const total = qtyEffective * unit;
+        const qtyRem = remainingQty(it);
+        const total = (isRemainingTab ? qtyRem : qtyEffective) * unit;
 
         const showReceived = qtyReceived !== null && qtyReceived !== undefined && qtyReceived !== qtyBase;
-        const qtyHTML = showReceived
-          ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceived))}</strong></span>`
-          : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
+        const qtyHTML = isRemainingTab
+          ? `<strong data-role="qty-val">${escapeHTML(String(qtyRem))}</strong>`
+          : showReceived
+            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceived))}</strong></span>`
+            : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
 
         const href = safeHttpUrl(it.productUrl);
         const linkHTML = href
@@ -598,7 +673,7 @@ document.addEventListener("DOMContentLoaded", () => {
           : "";
 
         const editBtnHTML = canEditQty
-          ? `<button class="btn btn-xs ro-edit ro-edit-inline ro-edit-bw" data-id="${escapeHTML(it.id)}" type="button" title="Edit received qty">
+          ? `<button class="btn btn-xs ro-edit ro-edit-inline ro-edit-dark" data-id="${escapeHTML(it.id)}" type="button" title="Edit received qty">
                <i data-feather="edit-2"></i> Edit
              </button>`
           : "";
@@ -614,7 +689,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="co-item-sub">Unit: ${fmtMoney(unit)} · Total: ${fmtMoney(total)}</div>
           </div>
           <div class="co-item-right">
-            <div class="co-item-total">Qty: ${qtyHTML}</div>
+            <div class="co-item-total">${isRemainingTab ? "Qty remaining:" : "Qty:"} ${qtyHTML}</div>
             <div class="co-item-right-row">
               ${editBtnHTML}
             </div>
@@ -909,35 +984,38 @@ async function postJson(url, body) {
     return postJson(`/api/orders/requested/${encodeURIComponent(id)}/received-quantity`, { value });
   }
 
-  async function openQtyPopover(btn, id) {
+  async function openQtyPopover(btn, id, mode = "set") {
     if (!btn || !id) return;
     if (popEl && popForId === id) { destroyPopover(); return; }
     destroyPopover();
     popForId = id; popAnchor = btn;
 
-    const it = allItems.find((x) => String(x.id) === String(id));
-    const base = Number(it?.quantity) || 0;
-    const rec =
-      it &&
-      typeof it.quantityReceived === "number" &&
-      Number.isFinite(it.quantityReceived)
-        ? Number(it.quantityReceived)
-        : null;
+    const isAddMode = String(mode || "set") === "add";
 
-    const currentVal = rec !== null && rec !== undefined ? rec : base;
+    const it = allItems.find((x) => String(x.id) === String(id));
+    const base = baseQty(it);
+    const recRaw = receivedQty(it);
+    const rec = receivedQtyOrZero(it);
+    const rem = remainingQty(it);
+
+    const currentVal = isAddMode
+      ? rem
+      : (recRaw !== null && recRaw !== undefined ? recRaw : base);
+    const maxVal = isAddMode ? rem : null;
 
     popEl = document.createElement("div");
     popEl.className = "sv-qty-popover";
     popEl.innerHTML = `
       <div class="sv-qty-popover__arrow"></div>
       <div class="sv-qty-popover__body">
+        ${isAddMode ? `<div class="sv-qty-hint">Receive quantity (remaining: ${escapeHTML(String(rem))})</div>` : ""}
         <div class="sv-qty-row">
           <button class="sv-qty-btn sv-qty-dec" type="button" aria-label="Decrease">−</button>
-          <input class="sv-qty-input" type="number" min="0" step="1" value="${escapeHTML(String(currentVal))}" />
+          <input class="sv-qty-input" type="number" min="0" step="1" ${maxVal !== null ? `max="${escapeHTML(String(maxVal))}"` : ""} value="${escapeHTML(String(currentVal))}" />
           <button class="sv-qty-btn sv-qty-inc" type="button" aria-label="Increase">+</button>
         </div>
         <div class="sv-qty-actions">
-          <button class="btn btn-success btn-xs ro-qty-save">Save</button>
+          <button class="btn btn-success btn-xs ro-qty-save">${isAddMode ? "Receive" : "Save"}</button>
           <button class="btn btn-danger btn-xs ro-qty-cancel">Cancel</button>
         </div>
       </div>
@@ -953,26 +1031,44 @@ async function postJson(url, body) {
 
     input.focus(); input.select();
 
-    decBtn.addEventListener("click", () => { input.value = Math.max(0, (Number(input.value) || 0) - 1); });
-    incBtn.addEventListener("click", () => { input.value = Math.max(0, (Number(input.value) || 0) + 1); });
+    const clamp = (n) => {
+      const v = Math.max(0, Math.floor(Number(n) || 0));
+      if (maxVal !== null) return Math.min(maxVal, v);
+      return v;
+    };
+
+    decBtn.addEventListener("click", () => { input.value = clamp((Number(input.value) || 0) - 1); });
+    incBtn.addEventListener("click", () => { input.value = clamp((Number(input.value) || 0) + 1); });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") saveBtn.click(); });
 
     saveBtn.addEventListener("click", async () => {
-      const v = Math.max(0, Math.floor(Number(input.value) || 0));
+      const v = clamp(input.value);
       try {
-        await updateReceivedQty(id, v);
+        const newReceived = isAddMode ? Math.min(base, rec + v) : v;
+        await updateReceivedQty(id, newReceived);
 
         // update in-memory data
         const idx = allItems.findIndex((x) => String(x.id) === String(id));
-        if (idx >= 0) allItems[idx].quantityReceived = v;
+        if (idx >= 0) {
+          allItems[idx].quantityReceived = newReceived;
+          // best-effort mirror for UI; backend is source of truth
+          allItems[idx].quantityRemaining = Math.max(base - newReceived, 0);
+        }
 
         // rebuild + rerender (keep modal open)
         groups = buildGroups(allItems);
+        const updated = activeGroup ? groups.find((x) => x.groupId === activeGroup.groupId) : null;
+
+        // If we just completed all remaining items, move the user to the "Received" tab automatically.
+        if (currentTab === "remaining" && updated && !updated.hasRemaining) {
+          currentTab = "received";
+          updateTabUI();
+        }
+
         render();
 
-        if (activeGroup && orderModal?.classList.contains("is-open")) {
-          const updated = groups.find((x) => x.groupId === activeGroup.groupId);
-          if (updated) openOrderModal(updated);
+        if (updated && orderModal?.classList.contains("is-open")) {
+          openOrderModal(updated);
         }
 
         toast("success", "Updated", "Quantity updated.");
@@ -1199,7 +1295,7 @@ async function markReceivedByOperations(g, receiptNumber) {
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    openQtyPopover(btn, btn.dataset.id);
+    openQtyPopover(btn, btn.dataset.id, currentTab === "remaining" ? "add" : "set");
   });
 
   excelBtn?.addEventListener("click", (e) => {
