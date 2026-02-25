@@ -5226,6 +5226,14 @@ if (svApproval !== "Approved") continue;
             }
           }
 
+          // Receipt Number (Number) — may be used in Operations "Received" tab header
+          const receiptNumber =
+            parseNumberProp(getPropInsensitive(props, "Receipt Number")) ??
+            parseNumberProp(getPropInsensitive(props, "ReceiptNumber")) ??
+            parseNumberProp(getPropInsensitive(props, "Receipt No")) ??
+            parseNumberProp(getPropInsensitive(props, "Receipt #")) ??
+            null;
+
           all.push({
     id: page.id,
     // Human-readable order identifier from Notion "ID" (unique_id)
@@ -5246,6 +5254,7 @@ if (svApproval !== "Approved") continue;
     operationsByNames,
     operationsById,
     operationsByName,
+    receiptNumber,
     createdTime,
     createdById,
     createdByName,
@@ -5340,7 +5349,7 @@ app.post(
   requirePage("Requested Orders"),
   async (req, res) => {
     try {
-      const { orderIds } = req.body || {};
+      const { orderIds, receiptNumber } = req.body || {};
       if (!Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "orderIds required" });
       }
@@ -5482,6 +5491,33 @@ app.post(
         };
       }
 
+      // Receipt Number (Number column) — optional in API for backward compatibility.
+      // If provided, we write it to Notion so it can be shown in the "Received" tab header.
+      const rnRaw = receiptNumber;
+      const rnParsed = rnRaw === null || rnRaw === undefined || rnRaw === "" ? null : Number(rnRaw);
+      const rnNum = Number.isFinite(rnParsed) ? Math.floor(rnParsed) : null;
+
+      if (rnNum !== null) {
+        let receiptProp = null;
+        let receiptMeta = null;
+        const receiptCandidates = ["Receipt Number", "ReceiptNumber", "Receipt No", "Receipt #", "Receipt"];
+
+        for (const cand of receiptCandidates) {
+          for (const [key, meta] of Object.entries(dbProps || {})) {
+            if (normKey(key) === normKey(cand)) {
+              receiptProp = key;
+              receiptMeta = meta;
+              break;
+            }
+          }
+          if (receiptProp) break;
+        }
+
+        if (receiptProp && receiptMeta?.type === "number") {
+          propsToUpdate[receiptProp] = { number: rnNum };
+        }
+      }
+
       await Promise.all(
         ids.map(async (id) => {
           // Retrieve current page to check if received qty is already set
@@ -5547,6 +5583,7 @@ app.post(
         status: shippedName,
         statusColor: shippedColor,
         operationsByName: req.session.username || "",
+        receiptNumber: rnNum,
       });
     } catch (e) {
       console.error("mark-shipped error:", e.body || e);
