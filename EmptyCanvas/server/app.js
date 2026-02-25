@@ -435,7 +435,7 @@ const ALL_PAGES = [
   "Expenses",
   "Expenses Users",
   "Logistics",
-  "S.V schools orders",
+  "Orders Review",
   "Damaged Assets",
   "S.V Schools Assets",
 ];
@@ -473,7 +473,17 @@ function normalizePages(names = []) {
   ) {
     out.push("Expenses Users");
   }
-  if (set.has("logistics")) out.push("Logistics");  if (set.has("s.v schools orders") || set.has("sv schools orders")) out.push("S.V schools orders");
+  if (set.has("logistics")) out.push("Logistics");
+
+  // Orders Review (formerly: "S.V schools orders")
+  if (
+    set.has("orders review") ||
+    set.has("order review") ||
+    set.has("s.v schools orders") ||
+    set.has("sv schools orders")
+  ) {
+    out.push("Orders Review");
+  }
   if (set.has("damaged assets")) out.push("Damaged Assets");
   if (set.has("s.v schools assets") || set.has("sv schools assets")) 
   out.push("S.V Schools Assets");
@@ -545,7 +555,7 @@ function firstAllowedPath(allowed = []) {
   if (list.includes("Current Orders")) return "/orders";
   if (list.includes("Requested Orders")) return "/orders/requested";
   if (list.includes("Assigned Schools Requested Orders")) return "/orders/assigned";
-  if (list.includes("S.V schools orders")) return "/orders/sv-orders";
+  if (list.includes("Orders Review")) return "/orders/sv-orders";
   if (list.includes("Create New Order")) return "/orders/new";
   if (list.includes("Stocktaking")) return "/stocktaking";
   if (list.includes("Tasks")) return "/tasks";
@@ -11385,7 +11395,7 @@ async function writeFilesProp(pageId, propName, newFileObject, mode = 'append') 
 
 // Export Express app for Vercel
 
-// ====== S.V schools orders: helpers ======
+// ====== Orders Review: helpers ======
 async function detectSVSchoolsPropName() {
   const props = await getOrdersDBProps();
   return (
@@ -11397,7 +11407,7 @@ async function detectSVSchoolsPropName() {
 // Team Members DB: return the list of Team Member page IDs that the current
 // logged-in user (S.V) is allowed to review.
 //
-// Requirement: In S.V schools orders page, each user should see ONLY the orders
+// Requirement: In Orders Review page, each user should see ONLY the orders
 // created by the Team Members listed in their "S.V Schools" column (relation)
 // inside the Team Members database.
 async function getVisibleTeamMemberIdsForSV(req) {
@@ -11480,14 +11490,14 @@ async function detectOrderTeamsMembersPropName() {
 }
 
 
-// ====== Page route: S.V schools orders ======
-app.get("/orders/sv-orders", requireAuth, requirePage("S.V schools orders"), (req, res) => {
+// ====== Page route: Orders Review ======
+app.get("/orders/sv-orders", requireAuth, requirePage("Orders Review"), (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "sv-orders.html"));
 });
 
 
     // ====== API: update quantity (number only) ======
-app.post("/api/sv-orders/:id/quantity", requireAuth, requirePage("S.V schools orders"), async (req, res) => {
+app.post("/api/sv-orders/:id/quantity", requireAuth, requirePage("Orders Review"), async (req, res) => {
   try {
     const pageId = req.params.id;
     const value = Number((req.body?.value ?? "").toString().trim());
@@ -11542,7 +11552,7 @@ app.post("/api/sv-orders/:id/quantity", requireAuth, requirePage("S.V schools or
 });
 
 // ====== API: list S.V orders (optionally filtered by tab) ======
-app.get("/api/sv-orders", requireAuth, requirePage("S.V schools orders"), async (req, res) => {
+app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req, res) => {
   try {
     // Map ?tab to S.V Approval label
     // - tab=not-started | approved | rejected → server-side filter
@@ -11853,11 +11863,11 @@ app.get("/api/sv-orders", requireAuth, requirePage("S.V schools orders"), async 
     return res.status(500).json({ error: "Failed to load S.V orders" });
   }
 });
-// --- S.V schools orders: Approve/Reject (updates Notion "S.V Approval") ---
+// --- Orders Review: Approve/Reject (updates Notion "S.V Approval") ---
 app.post(
   ["/api/sv-orders/:id/approval", "/sv-orders/:id/approval"],
   requireAuth,
-  requirePage("S.V schools orders"),
+  requirePage("Orders Review"),
   async (req, res) => {
     try {
       const pageId = req.params.id;
@@ -13414,7 +13424,7 @@ app.get("/api/cron/notifications", async (req, res) => {
         "Requested Orders",
         "Assigned Schools Requested Orders",
         "Logistics",
-        "S.V schools orders",
+        "Orders Review",
       ]);
 
       for (const u of users) {
