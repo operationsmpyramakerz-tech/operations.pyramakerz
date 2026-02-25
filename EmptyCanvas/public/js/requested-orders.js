@@ -12,20 +12,27 @@ document.addEventListener("DOMContentLoaded", () => {
   const modalTitle = document.getElementById("reqModalTitle");
   const modalSub = document.getElementById("reqModalSub");
 
-  const modalOrderId = document.getElementById("reqModalOrderId");
-  const modalCreatedBy = document.getElementById("reqModalCreatedBy");
+  // Meta (match Current Orders header)
+  const modalReason = document.getElementById("reqModalReason");
   const modalDate = document.getElementById("reqModalDate");
-  const modalOperationsBy = document.getElementById("reqModalOperationsBy");
   const modalComponents = document.getElementById("reqModalComponents");
-  const modalTotalQty = document.getElementById("reqModalTotalQty");
   const modalTotalPrice = document.getElementById("reqModalTotalPrice");
+
+  // Extra header rows (shown in "Received" tab)
+  const receiptRow = document.getElementById("reqReceiptRow");
+  const receivedByRow = document.getElementById("reqReceivedByRow");
+  const modalReceiptNumber = document.getElementById("reqModalReceiptNumber");
+  const modalOperationsBy = document.getElementById("reqModalOperationsBy");
+
   const modalItems = document.getElementById("reqModalItems");
-  const excelBtn =
-    document.getElementById("reqExcelBtn") ||
-    document.getElementById("reqDownloadExcelBtn");
-  const pdfBtn =
-    document.getElementById("reqPdfBtn") ||
-    document.getElementById("reqDownloadPdfBtn");
+
+  // Actions (Download dropdown)
+  const downloadMenuWrap = document.getElementById("reqDownloadMenuWrap");
+  const downloadMenuBtn = document.getElementById("reqDownloadMenuBtn");
+  const downloadMenuPanel = document.getElementById("reqDownloadMenuPanel");
+  const excelBtn = document.getElementById("reqDownloadExcelBtn");
+  const pdfBtn = document.getElementById("reqDownloadPdfBtn");
+
   const shippedBtn =
     document.getElementById("reqReceivedBtn") ||
     document.getElementById("reqMarkShippedBtn");
@@ -46,6 +53,14 @@ document.addEventListener("DOMContentLoaded", () => {
     3: document.getElementById("reqConn3"),
     4: document.getElementById("reqConn4"),
   };
+
+  // Receipt sub-modal
+  const receiptModal = document.getElementById("reqReceiptModal");
+  const receiptCloseBtn = document.getElementById("reqReceiptClose");
+  const receiptCancelBtn = document.getElementById("reqReceiptCancel");
+  const receiptConfirmBtn = document.getElementById("reqReceiptConfirm");
+  const receiptInput = document.getElementById("reqReceiptInput");
+  const receiptError = document.getElementById("reqReceiptError");
 
   // ---------- Utils ----------
   const norm = (s) => String(s || "").trim().toLowerCase();
@@ -358,6 +373,17 @@ document.addEventListener("DOMContentLoaded", () => {
       const stage = computeStage(itemsArr);
       const rs = summarizeReasons(itemsArr);
 
+      // Receipt number should be identical for all components in the same order.
+      // We pick the first non-null value; if multiple different values exist, show "Multiple".
+      const receiptVals = (itemsArr || [])
+        .map((x) => (x && x.receiptNumber !== null && x.receiptNumber !== undefined ? x.receiptNumber : null))
+        .filter((x) => x !== null && x !== undefined);
+      let receiptNumber = null;
+      if (receiptVals.length) {
+        const set = new Set(receiptVals.map((x) => String(x)));
+        receiptNumber = set.size === 1 ? receiptVals[0] : "Multiple";
+      }
+
       return {
         ...g,
         reason: rs.title,
@@ -369,6 +395,7 @@ document.addEventListener("DOMContentLoaded", () => {
         stage,
         orderIdRange: computeOrderIdRange(itemsArr),
         operationsByName: operationsSummary(itemsArr),
+        receiptNumber,
       };
     });
 
@@ -393,6 +420,7 @@ document.addEventListener("DOMContentLoaded", () => {
       g.reason,
       ...(Array.isArray(g.reasons) ? g.reasons : []),
       g.orderIdRange,
+      g.receiptNumber,
       g.createdByName,
       g.operationsByName,
       ...(g.items || []).map((x) => x.productName),
@@ -498,8 +526,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // ---------- Modal ----------
   function openOrderModal(g) {
     if (!orderModal) return;
+    const wasOpen = orderModal.classList.contains("is-open");
     activeGroup = g;
-    lastFocus = document.activeElement;
+
+    // Only capture focus when opening the modal the first time.
+    if (!wasOpen) lastFocus = document.activeElement;
+
+    // Reset any open UI inside the modal
+    closeDownloadMenu();
+    closeReceiptModal({ restoreFocus: false });
 
     const items = g.items || [];
     const stage = g.stage || computeStage(items);
@@ -511,19 +546,24 @@ document.addEventListener("DOMContentLoaded", () => {
     // Tracker
     setActiveStep(stage.idx || 1);
 
-    // Meta
-    if (modalOrderId) modalOrderId.textContent = g.orderIdRange || "—";
-    if (modalCreatedBy) modalCreatedBy.textContent = g.createdByName || "—";
+    // Meta (match Current Orders)
+    if (modalReason) modalReason.textContent = String(g.reason || "—").trim() || "—";
     if (modalDate) modalDate.textContent = fmtDateTime(g.latestCreated) || "—";
-    if (modalOperationsBy) modalOperationsBy.textContent = g.operationsByName || "—";
     if (modalComponents) modalComponents.textContent = String(g.itemsCount || 0);
-    if (modalTotalQty) modalTotalQty.textContent = String(g.totalQty || 0);
     if (modalTotalPrice) modalTotalPrice.textContent = fmtMoney(g.estimateTotal);
 
-    // Actions visibility
-    if (excelBtn) excelBtn.style.display = "inline-flex";
-    if (pdfBtn) pdfBtn.style.display = "inline-flex";
+    // Extra fields: show for "Received" and later only
+    const shouldShowExtras = (stage?.idx || 1) >= 4;
+    const receiptVal = g && (g.receiptNumber !== null && g.receiptNumber !== undefined) ? g.receiptNumber : null;
+    const receivedByVal = String(g.operationsByName || "").trim();
 
+    if (receiptRow) receiptRow.hidden = !(shouldShowExtras && receiptVal !== null);
+    if (modalReceiptNumber) modalReceiptNumber.textContent = receiptVal !== null ? String(receiptVal) : "—";
+
+    if (receivedByRow) receivedByRow.hidden = !(shouldShowExtras && receivedByVal);
+    if (modalOperationsBy) modalOperationsBy.textContent = receivedByVal || "—";
+
+    // Actions visibility
     if (shippedBtn) shippedBtn.style.display = stage.idx < 4 ? "inline-flex" : "none";
     if (arrivedBtn) arrivedBtn.style.display = stage.idx === 4 ? "inline-flex" : "none";
 
@@ -536,7 +576,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       for (const it of items) {
         const product = escapeHTML(it.productName || "Component");
-        const reason = escapeHTML(it.reason || "");
         const qtyBase = Number(it.quantity) || 0;
         const qtyReceived =
           typeof it.quantityReceived === "number" && Number.isFinite(it.quantityReceived)
@@ -551,9 +590,6 @@ document.addEventListener("DOMContentLoaded", () => {
           ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceived))}</strong></span>`
           : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
 
-        const stVars = notionColorVars(it.statusColor);
-        const stStyle = `--tag-bg:${stVars.bg};--tag-fg:${stVars.fg};--tag-border:${stVars.bd};`;
-
         const href = safeHttpUrl(it.productUrl);
         const linkHTML = href
           ? `<a class="co-item-link" href="${escapeHTML(href)}" target="_blank" rel="noopener" title="Open link">
@@ -562,7 +598,7 @@ document.addEventListener("DOMContentLoaded", () => {
           : "";
 
         const editBtnHTML = canEditQty
-          ? `<button class="btn btn-warning btn-xs ro-edit ro-edit-inline" data-id="${escapeHTML(it.id)}" type="button" title="Edit received qty">
+          ? `<button class="btn btn-xs ro-edit ro-edit-inline ro-edit-bw" data-id="${escapeHTML(it.id)}" type="button" title="Edit received qty">
                <i data-feather="edit-2"></i> Edit
              </button>`
           : "";
@@ -571,16 +607,15 @@ document.addEventListener("DOMContentLoaded", () => {
         row.className = "co-item";
         row.innerHTML = `
           <div class="co-item-left">
-            <div class="co-item-name">
-              <span>${product}</span>
+            <div class="co-item-title">
+              <div class="co-item-name">${product}</div>
               ${linkHTML}
             </div>
-            <div class="co-item-sub">Reason: ${reason} · Qty: ${qtyHTML} · Unit: ${fmtMoney(unit)}</div>
+            <div class="co-item-sub">Unit: ${fmtMoney(unit)} · Total: ${fmtMoney(total)}</div>
           </div>
           <div class="co-item-right">
-            <div class="co-item-total">${fmtMoney(total)}</div>
+            <div class="co-item-total">Qty: ${qtyHTML}</div>
             <div class="co-item-right-row">
-              <div class="co-item-status" style="${stStyle}">${escapeHTML(it.status || "—")}</div>
               ${editBtnHTML}
             </div>
           </div>
@@ -606,6 +641,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function closeOrderModal() {
     if (!orderModal) return;
+
+    // Close any open dropdown/sub-modals first
+    closeReceiptModal({ restoreFocus: false });
+    closeDownloadMenu();
+
     orderModal.classList.remove("is-open");
     document.body.classList.remove("co-modal-open");
     orderModal.setAttribute("aria-hidden", "true");
@@ -614,6 +654,94 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
     } catch {}
+  }
+
+  // ---------- Download dropdown helpers (single Download button) ----------
+  function closeDownloadMenu() {
+    if (!downloadMenuPanel) return;
+    downloadMenuPanel.hidden = true;
+    if (downloadMenuBtn) downloadMenuBtn.setAttribute("aria-expanded", "false");
+  }
+
+  function openDownloadMenu() {
+    if (!downloadMenuPanel) return;
+    downloadMenuPanel.hidden = false;
+    if (downloadMenuBtn) downloadMenuBtn.setAttribute("aria-expanded", "true");
+    if (window.feather) window.feather.replace();
+  }
+
+  function toggleDownloadMenu() {
+    if (!downloadMenuPanel) return;
+    if (downloadMenuPanel.hidden) openDownloadMenu();
+    else closeDownloadMenu();
+  }
+
+  // ---------- Receipt sub-modal helpers ----------
+  let receiptLastFocus = null;
+
+  function setReceiptError(message) {
+    if (!receiptError) return;
+    receiptError.textContent = String(message || "");
+  }
+
+  function isReceiptOpen() {
+    return !!receiptModal && receiptModal.classList.contains("is-open");
+  }
+
+  function openReceiptModal() {
+    if (!receiptModal || !receiptInput || !receiptConfirmBtn || !receiptCancelBtn) {
+      // Fallback to prompt
+      const raw = window.prompt("Enter receipt number:");
+      if (raw === null) return;
+      const num = Math.floor(Number(String(raw).trim()));
+      if (!Number.isFinite(num) || num < 0) {
+        alert("Please enter a valid receipt number.");
+        return;
+      }
+      markReceivedByOperations(activeGroup, num);
+      return;
+    }
+
+    // Reset
+    setReceiptError("");
+    const preset = activeGroup && activeGroup.receiptNumber !== null && activeGroup.receiptNumber !== undefined
+      ? String(activeGroup.receiptNumber)
+      : "";
+    receiptInput.value = preset;
+
+    receiptConfirmBtn.disabled = false;
+    receiptCancelBtn.disabled = false;
+    if (receiptCloseBtn) receiptCloseBtn.disabled = false;
+
+    receiptLastFocus = document.activeElement;
+    receiptModal.hidden = false;
+    receiptModal.classList.add("is-open");
+    receiptModal.setAttribute("aria-hidden", "false");
+
+    if (window.feather) window.feather.replace();
+
+    window.requestAnimationFrame(() => {
+      try {
+        receiptInput.focus();
+        receiptInput.select();
+      } catch {}
+    });
+  }
+
+  function closeReceiptModal({ restoreFocus = true } = {}) {
+    if (!receiptModal) return;
+    if (!isReceiptOpen() && receiptModal.hidden) return;
+    receiptModal.classList.remove("is-open");
+    receiptModal.setAttribute("aria-hidden", "true");
+    receiptModal.hidden = true;
+    setReceiptError("");
+
+    if (restoreFocus) {
+      try {
+        if (receiptLastFocus && typeof receiptLastFocus.focus === "function") receiptLastFocus.focus();
+      } catch {}
+    }
+    receiptLastFocus = null;
   }
 
   // ---------- Actions ----------
@@ -863,8 +991,14 @@ async function postJson(url, body) {
     }, 0);
   }
 
-async function markReceivedByOperations(g) {
+async function markReceivedByOperations(g, receiptNumber) {
     if (!g || !g.orderIds?.length) return;
+
+    // Normalize receipt number (best-effort). If missing, we still allow the action.
+    const rnRaw = receiptNumber;
+    const rnNum = rnRaw === null || rnRaw === undefined || rnRaw === ""
+      ? null
+      : Math.floor(Number(rnRaw));
 
     if (shippedBtn) {
       shippedBtn.disabled = true;
@@ -873,7 +1007,10 @@ async function markReceivedByOperations(g) {
     }
 
     try {
-      const data = await postJson("/api/orders/requested/mark-shipped", { orderIds: g.orderIds });
+      const data = await postJson("/api/orders/requested/mark-shipped", {
+        orderIds: g.orderIds,
+        receiptNumber: rnNum,
+      });
 
       // Update local state (set status = Shipped + operationsByName)
       const username = String(data.operationsByName || localStorage.getItem("username") || "").trim();
@@ -884,6 +1021,7 @@ async function markReceivedByOperations(g) {
         it.status = "Shipped";
         it.statusColor = data.statusColor || it.statusColor;
         if (username) it.operationsByName = username;
+        if (rnNum !== null && Number.isFinite(rnNum)) it.receiptNumber = rnNum;
       });
 
       groups = buildGroups(allItems);
@@ -896,6 +1034,9 @@ async function markReceivedByOperations(g) {
       }
 
       toast("success", "Received", "Marked as received by operations.");
+
+      // Close receipt prompt (if opened)
+      closeReceiptModal({ restoreFocus: false });
     } catch (e) {
       console.error(e);
       alert(e.message || "Failed to mark as received.");
@@ -1010,8 +1151,47 @@ async function markReceivedByOperations(g) {
   orderModal?.addEventListener("click", (e) => {
     if (e.target === orderModal) closeOrderModal();
   });
+
+  // Download dropdown
+  if (downloadMenuBtn && downloadMenuPanel && downloadMenuWrap) {
+    downloadMenuBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      toggleDownloadMenu();
+    });
+
+    // Click outside closes
+    document.addEventListener("click", (e) => {
+      if (!downloadMenuPanel || downloadMenuPanel.hidden) return;
+      if (downloadMenuWrap.contains(e.target)) return;
+      closeDownloadMenu();
+    });
+  }
+
+  // Receipt modal: click outside closes
+  receiptModal?.addEventListener("click", (e) => {
+    if (e.target === receiptModal) closeReceiptModal();
+  });
+
+  // Global Esc handling (close sub-modal -> dropdown -> main modal)
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && orderModal?.classList.contains("is-open")) closeOrderModal();
+    if (e.key !== "Escape") return;
+
+    if (isReceiptOpen()) {
+      e.preventDefault();
+      closeReceiptModal();
+      return;
+    }
+
+    if (downloadMenuPanel && !downloadMenuPanel.hidden) {
+      e.preventDefault();
+      closeDownloadMenu();
+      return;
+    }
+
+    if (orderModal?.classList.contains("is-open")) {
+      e.preventDefault();
+      closeOrderModal();
+    }
   });
 
   modalItems?.addEventListener("click", (e) => {
@@ -1022,10 +1202,70 @@ async function markReceivedByOperations(g) {
     openQtyPopover(btn, btn.dataset.id);
   });
 
-  excelBtn?.addEventListener("click", () => downloadExcel(activeGroup));
-  pdfBtn?.addEventListener("click", () => downloadPdf(activeGroup));
-  shippedBtn?.addEventListener("click", () => markReceivedByOperations(activeGroup));
+  excelBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeDownloadMenu();
+    downloadExcel(activeGroup);
+  });
+  pdfBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeDownloadMenu();
+    downloadPdf(activeGroup);
+  });
+
+  // "Received by operations" now asks for a receipt number first
+  shippedBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeDownloadMenu();
+    openReceiptModal();
+  });
   arrivedBtn?.addEventListener("click", () => markArrived(activeGroup));
+
+  receiptCloseBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeReceiptModal();
+  });
+  receiptCancelBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeReceiptModal();
+  });
+
+  receiptInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") receiptConfirmBtn?.click();
+  });
+
+  receiptConfirmBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+
+    const raw = String(receiptInput?.value || "").trim();
+    if (!raw) {
+      setReceiptError("Receipt number is required.");
+      return;
+    }
+
+    const num = Math.floor(Number(raw));
+    if (!Number.isFinite(num) || num < 0) {
+      setReceiptError("Please enter a valid receipt number.");
+      return;
+    }
+
+    setReceiptError("");
+
+    // Disable sub-modal buttons while saving
+    if (receiptConfirmBtn) receiptConfirmBtn.disabled = true;
+    if (receiptCancelBtn) receiptCancelBtn.disabled = true;
+    if (receiptCloseBtn) receiptCloseBtn.disabled = true;
+
+    try {
+      await markReceivedByOperations(activeGroup, num);
+    } finally {
+      // Buttons are re-enabled when the modal opens again; keep it simple.
+      // (closeReceiptModal is called on success)
+      if (receiptConfirmBtn) receiptConfirmBtn.disabled = false;
+      if (receiptCancelBtn) receiptCancelBtn.disabled = false;
+      if (receiptCloseBtn) receiptCloseBtn.disabled = false;
+    }
+  });
 
   // ---------- Init ----------
   currentTab = readTabFromUrl();
