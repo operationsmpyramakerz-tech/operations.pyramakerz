@@ -96,6 +96,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const norm = (s) => String(s || '').toLowerCase().trim();
   const toDate = (d) => new Date(d || 0);
 
+  // Safely parse a value into a finite number.
+  // IMPORTANT: Do NOT treat null/undefined as 0.
+  // (Number(null) === 0) which previously caused the UI to briefly show a struck-through
+  // requested quantity with a "0" progress until a refresh.
+  function asFiniteNumber(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    if (typeof v === 'string') {
+      const t = v.trim();
+      if (!t) return null;
+      const n = Number(t);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }
+
   // Current Orders groups should be stable when editing/adding items.
   // Prefer grouping by the new numeric Order - ID (shared across all components in the same order).
   // Fallback (legacy rows): group by Reason.
@@ -301,12 +317,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // If Quantity Requested === Quantity Progress -> show requested normally
     // If different -> strike requested and show progress next to it
     const effectiveQty = (x) => {
-      const reqCandidate = Number(x?.quantityRequested);
-      const requested = Number.isFinite(reqCandidate) ? reqCandidate : (Number(x?.quantity) || 0);
+      const requested =
+        asFiniteNumber(x?.quantityRequested) ??
+        asFiniteNumber(x?.quantity) ??
+        0;
 
-      const progCandidate = Number(x?.quantityProgress);
-      const progress = Number.isFinite(progCandidate) ? progCandidate : null;
-
+      const progress = asFiniteNumber(x?.quantityProgress);
       return progress !== null && progress !== undefined ? progress : requested;
     };
 
@@ -334,11 +350,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const frag = document.createDocumentFragment();
         for (const it of items) {
           // Base qty = original requested (if provided), else fall back to the qty returned.
-          const reqCandidate = Number(it?.quantityRequested);
-          const qtyRequested = Number.isFinite(reqCandidate) ? reqCandidate : (Number(it.quantity) || 0);
+          const qtyRequested =
+            asFiniteNumber(it?.quantityRequested) ??
+            asFiniteNumber(it?.quantity) ??
+            0;
 
-          const progCandidate = Number(it?.quantityProgress);
-          const qtyProgress = Number.isFinite(progCandidate) ? progCandidate : null;
+          const qtyProgress = asFiniteNumber(it?.quantityProgress);
 
           const qty = qtyProgress !== null && qtyProgress !== undefined ? qtyProgress : qtyRequested;
           const unit = Number(it.unitPrice) || 0;
@@ -844,12 +861,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Use the same "effective" quantity logic as the modal (Quantity Progress overrides).
     const effectiveQty = (x) => {
-      const reqCandidate = Number(x?.quantityRequested);
-      const requested = Number.isFinite(reqCandidate) ? reqCandidate : (Number(x?.quantity) || 0);
+      const requested =
+        asFiniteNumber(x?.quantityRequested) ??
+        asFiniteNumber(x?.quantity) ??
+        0;
 
-      const progCandidate = Number(x?.quantityProgress);
-      const progress = Number.isFinite(progCandidate) ? progCandidate : null;
-
+      const progress = asFiniteNumber(x?.quantityProgress);
       return progress !== null && progress !== undefined ? progress : requested;
     };
 
