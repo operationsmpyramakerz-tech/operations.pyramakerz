@@ -13,7 +13,7 @@
 <script src="/pwa-register.js" defer></script>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>S.V schools orders</title>
+  <title>Orders Review</title>
   <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
   <style>
     body.permissions-loading .sidebar li { display: none !important; }
@@ -49,7 +49,7 @@
         <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
         <li><a class="nav-link" href="/orders/new"><i data-feather="shopping-cart"></i><span class="nav-label">Create New Order</span></a></li>
         <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
-        <li><a class="nav-link active" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">S.V schools orders</span></a></li>
+        <li><a class="nav-link active" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">Orders Review</span></a></li>
         <li><a class="nav-link" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
         <li><a class="nav-link" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses by User</span></a></li>
 </ul>
@@ -70,7 +70,7 @@
               </span>
               <div class="greet-text">
                 <div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
-                <div class="greet-sub">Review & approve S.V schools orders</div>
+                <div class="greet-sub">Review & approve orders</div>
               </div>
             </div>
 
@@ -89,7 +89,7 @@
         </div>
 
         <div class="header-row2">
-          <h1 class="page-title">S.V schools orders</h1>
+          <h1 class="page-title">Orders Review</h1>
         </div>
       </header>
 
@@ -143,12 +143,10 @@
 
     <div class="co-modal-body">
       <div class="co-modal-meta">
-        <div class="co-meta-row"><span>Order ID</span><strong id="svModalOrderId">—</strong></div>
+        <div class="co-meta-row"><span>Reason</span><strong id="svModalReason">—</strong></div>
         <div class="co-meta-row"><span>Date</span><strong id="svModalDate">—</strong></div>
-                <div class="co-meta-row"><span>S.V Approval status</span><strong id="svModalApproval">—</strong></div>
         <div class="co-meta-row"><span>Components</span><strong id="svModalComponents">—</strong></div>
-        <div class="co-meta-row"><span>Total quantity</span><strong id="svModalTotalQty">—</strong></div>
-        <div class="co-meta-row"><span>Estimate total</span><strong id="svModalTotalPrice">—</strong></div>
+        <div class="co-meta-row"><span>Estimated cost</span><strong id="svModalTotalPrice">—</strong></div>
       </div>
 
       <div class="co-modal-items" id="svModalItems"></div>
