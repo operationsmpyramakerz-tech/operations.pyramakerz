@@ -1,5 +1,5 @@
 /* public/js/sv-orders.js
-   S.V schools orders — render using the same card UI as Current Orders.
+   Orders Review — render using the same card UI as Current Orders.
    Differences:
    - Status pill shows S.V Approval status (Not Started / Approved / Rejected)
    - Clicking a card opens a modal with order components + Edit / Approve / Reject per item
@@ -21,11 +21,9 @@
   const modalEls = {
     title: document.getElementById("svModalTitle"),
     sub: document.getElementById("svModalSub"),
-    orderId: document.getElementById("svModalOrderId"),
+    reason: document.getElementById("svModalReason"),
     date: document.getElementById("svModalDate"),
-    approval: document.getElementById("svModalApproval"),
     components: document.getElementById("svModalComponents"),
-    totalQty: document.getElementById("svModalTotalQty"),
     totalPrice: document.getElementById("svModalTotalPrice"),
     items: document.getElementById("svModalItems"),
   };
@@ -460,18 +458,9 @@
     const stage = computeStage(group.products || []);
     setSVProgress(stage.idx);
 
-    if (modalEls.orderId) modalEls.orderId.textContent = group.orderIdRange || "—";
+    if (modalEls.reason) modalEls.reason.textContent = String(group?.reason || group?.products?.[0]?.reason || '—').trim() || '—';
     if (modalEls.date) modalEls.date.textContent = fmtCreated(group.latestCreated) || "—";
-    if (modalEls.approval) {
-      modalEls.approval.textContent = approval;
-      modalEls.approval.classList.add("sv-approval-pill");
-      const aVars = notionColorVars(group.approvalColor);
-      modalEls.approval.style.setProperty("--tag-bg", aVars.bg);
-      modalEls.approval.style.setProperty("--tag-fg", aVars.fg);
-      modalEls.approval.style.setProperty("--tag-border", aVars.bd);
-    }
     if (modalEls.components) modalEls.components.textContent = String((group.products || []).length);
-    if (modalEls.totalQty) modalEls.totalQty.textContent = String(group.totals?.totalQty ?? 0);
     if (modalEls.totalPrice) modalEls.totalPrice.textContent = fmtMoney(group.totals?.estimateTotal ?? 0);
 
     if (modalEls.items) {
@@ -511,6 +500,8 @@
             : `<strong data-role="qty-val">${escapeHTML(String(qtyReq))}</strong>`;
 
           const pillVars = notionColorVars(it.approvalColor);
+          const statusLabel = normalizeApproval(it.approval);
+          const statusStyle = `--tag-bg:${pillVars.bg};--tag-fg:${pillVars.fg};--tag-border:${pillVars.bd};`;
 
           const actionButtons = canAct ? `
             <div class="btn-group" style="justify-content:flex-end; margin-top:8px;">
@@ -526,19 +517,15 @@
           return `
             <div class="co-item" data-id="${escapeHTML(it.id)}">
               <div class="co-item-left">
-                <div class="co-item-name">${escapeHTML(it.productName || "Unknown Product")}</div>
-                <div class="co-item-sub">
-                  Reason: ${escapeHTML(it.reason || "—")}
-                  · Qty: ${qtyHTML}
-                  · Unit: ${escapeHTML(fmtMoney(unit))}
+                <div class="co-item-title">
+                  <div class="co-item-name">${escapeHTML(it.productName || "Unknown Product")}</div>
                 </div>
+                <div class="co-item-sub">Unit: ${escapeHTML(fmtMoney(unit))} · Total: ${escapeHTML(fmtMoney(lineTotal))}</div>
               </div>
 
               <div class="co-item-right">
-                <div class="co-item-total">${escapeHTML(fmtMoney(lineTotal))}</div>
-                <div style="margin-top:6px;">
-                  <span class="sv-approval-pill" style="--tag-bg:${pillVars.bg};--tag-fg:${pillVars.fg};--tag-border:${pillVars.bd};">${escapeHTML(normalizeApproval(it.approval))}</span>
-                </div>
+                <div class="co-item-total">Qty: ${qtyHTML}</div>
+                <div class="co-item-status" style="${statusStyle}">${escapeHTML(statusLabel)}</div>
                 ${actionButtons}
               </div>
             </div>

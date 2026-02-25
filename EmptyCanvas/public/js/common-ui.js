@@ -508,6 +508,8 @@ if (document.querySelector('.sidebar')) {
     'assigned schools requested orders': 'a[href="/orders/assigned"]',
     'storage': 'a[href="/orders/assigned"]',
 
+    // Orders Review (formerly: "S.V schools orders")
+    'orders review': 'a[href="/orders/sv-orders"]',
     's.v schools orders': 'a[href="/orders/sv-orders"]',
 
     // ===== B2B =====
@@ -901,7 +903,7 @@ if (document.querySelector('.sidebar')) {
   // لو عندك لينكات بتتعمل inject في صفحات معينة:
     // Home should appear for everyone (not tied to permissions)
   ensureLink({ href: '/home', label: 'Home', icon: 'home', prepend: true });
-ensureLink({ href: '/orders/sv-orders', label: 'S.V schools orders', icon: 'award' });
+ensureLink({ href: '/orders/sv-orders', label: 'Orders Review', icon: 'award' });
   ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
   ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
   ensureLink({ href: '/tasks', label: 'Tasks', icon: 'check-square' });
