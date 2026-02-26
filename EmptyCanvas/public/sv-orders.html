@@ -94,22 +94,24 @@
       </header>
 
       <main class="page-body">
-        <!-- Tabs -->
-        <div id="svTabs" class="portfolio-tabs" role="tablist" aria-label="S.V Approval">
-          <a class="tab-portfolio" data-tab="not-started" role="tab" aria-selected="true"
-             href="/orders/sv-orders?tab=not-started">Not Started</a>
-          <a class="tab-portfolio" data-tab="approved" role="tab" aria-selected="false"
-             href="/orders/sv-orders?tab=approved">Approved</a>
-          <a class="tab-portfolio" data-tab="rejected" role="tab" aria-selected="false"
-             href="/orders/sv-orders?tab=rejected">Rejected</a>
-        </div>
+        <div class="ios-tabs-layout">
+          <!-- Tabs -->
+          <div id="svTabs" class="portfolio-tabs" role="tablist" aria-label="S.V Approval">
+            <a class="tab-portfolio" data-tab="not-started" role="tab" aria-selected="true"
+               href="/orders/sv-orders?tab=not-started">Not Started</a>
+            <a class="tab-portfolio" data-tab="approved" role="tab" aria-selected="false"
+               href="/orders/sv-orders?tab=approved">Approved</a>
+            <a class="tab-portfolio" data-tab="rejected" role="tab" aria-selected="false"
+               href="/orders/sv-orders?tab=rejected">Rejected</a>
+          </div>
 
-        <!-- Orders list (Current Orders card style) -->
-<section class="card" id="sv-orders">
-  <div class="co-cards" id="sv-list">
-    <p><i class="loading-icon" data-feather="loader"></i> Loading orders...</p>
-  </div>
-</section>
+          <!-- Orders list (Current Orders card style) -->
+          <section class="card ios-tabs-sheet" id="sv-orders">
+            <div class="co-cards" id="sv-list">
+              <p><i class="loading-icon" data-feather="loader"></i> Loading orders...</p>
+            </div>
+          </section>
+        </div>
       </main>
     </div>
   </div>

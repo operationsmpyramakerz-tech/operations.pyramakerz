@@ -3264,92 +3264,120 @@ body.sidebar-mini .sidebar-nav .nav-link .icon {
 .form-label { font-size: 12px; color:#6b7280; }
 .form-input { display:block; width:100%; border:1px solid #e5e7eb; border-radius: 10px; padding: 10px; }
 .loading-skeleton { opacity: .6; pointer-events: none; }
-/* ==================== Tabs (Operations Orders + Orders Review) ==================== */
-/*
-  Design goal: match the reference screenshot:
-  - Active tab = simple text with a thick underline.
-  - Inactive tabs = rounded "pill" buttons.
-*/
-
-/* Container */
-.portfolio-tabs{
-  display:flex;
-  gap:14px;
-  align-items:flex-end;
-  padding: 6px 6px 0;
-  margin: 10px 0 0;
-  background: transparent;
-}
-
-/* Base tab (inactive pill) */
-.tab-portfolio{
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 18px;
-  border-radius: 9999px;
-  background: #F3F4F6;
-  color: #6B7280;
-  font-weight: 800;
-  font-size: 15px;
-  line-height: 1;
-  text-decoration: none;
-  user-select: none;
-  border: 1px solid transparent;
-  transition: background .15s ease, color .15s ease, transform .05s ease;
-}
-.tab-portfolio:hover{
-  background: #EEF2F7;
-  color: #111827;
-}
-.tab-portfolio:active{
-  transform: translateY(1px);
-}
-
-/* Active tab (underline)
-   - Some pages toggle `.active` (Orders Review)
-   - Some pages toggle `.is-active` (Operations Orders)
-*/
-.tab-portfolio.active,
-.tab-portfolio.is-active{
-  background: transparent;
-  color: #000000;
-  border-color: transparent;
-  border-radius: 10px; /* keeps the click area nice */
-  padding-bottom: 14px; /* makes room for underline */
-}
-.tab-portfolio.active::after,
-.tab-portfolio.is-active::after{
-  content:"";
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 4px;
-  height: 4px;
-  background: #000000;
-  border-radius: 9999px;
-}
-
-/* Focus ring */
-.tab-portfolio:focus-visible{
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, .18);
-}
-
-/* Orders Review tabs wrapper should not override the shared style */
+/* --- Orders Review: Tabs --- */
 #svTabs{
-  border: none;
-  background: transparent;
-  box-shadow: none;
+  display:flex; align-items:center; gap:.5rem;
+  padding:.35rem; border:1px solid #E5E7EB;
+  background:#F8FAFC; border-radius:12px;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.02);
+}
+
+#svTabs .tab-chip{
+  --tab-pad-x: 1rem; --tab-pad-y: .55rem;
+  display:inline-flex; align-items:center; justify-content:center;
+  padding: var(--tab-pad-y) var(--tab-pad-x);
+  border-radius:9999px;
+  background:#F3F4F6; color:#374151;
+  border:1px solid #E5E7EB;
+  font-weight:600; font-size:.95rem; line-height:1;
+  text-decoration:none; user-select:none;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease, border-color .15s ease, transform .05s ease;
+}
+#svTabs .tab-chip:hover{ background:#EEF2F7; }
+#svTabs .tab-chip:active{ transform:translateY(1px); }
+
+/* Active state */
+#svTabs .tab-chip.active{
+  background:#fff; color:#000000;
+  border-color:#3B82F6;
+  box-shadow:
+    0 1px 2px rgba(16,24,40,.05),
+    0 0 0 4px rgba(59,130,246,.08);
+  position:relative;
+}
+#svTabs .tab-chip.active::after{
+  content:""; position:absolute; left:10%; right:10%; top:-6px; height:3px;
+  border-radius:3px; background:#3B82F6;
+}
+
+/* Focus visibility */
+#svTabs .tab-chip:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(59,130,246,.35);
 }
 
 /* Compact on small screens */
 @media (max-width:640px){
-  .portfolio-tabs{ flex-wrap: wrap; gap: 10px; }
-  .tab-portfolio{ font-size: 14px; padding: 10px 16px; }
-  .tab-portfolio.active,
-  .tab-portfolio.is-active{ padding-bottom: 13px; }
+  #svTabs{ flex-wrap:wrap; gap:.4rem; }
+  #svTabs .tab-chip{ --tab-pad-x:.75rem; --tab-pad-y:.5rem; font-size:.9rem; }
+}
+/* ==================== Portfolio Tabs ==================== */
+.portfolio-tabs{
+  display:flex; gap:12px; align-items:flex-end;
+  padding:6px 10px 0;
+  background:transparent;
+  margin:10px 0 0;
+}
+
+/* Base tab (looks like a folder tab) */
+.tab-portfolio{
+  position:relative;
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:12px 18px 10px;
+  min-width:140px;
+  border:1px solid #DAE3F0;
+  border-bottom:none;
+  border-radius:14px 14px 0 0;
+  background:#EEF2F8;
+  color:#5A6B84; font-weight:700;
+  text-decoration:none; user-select:none;
+  transition:transform .15s ease, box-shadow .2s ease, background .2s ease, color .2s ease, border-color .2s ease;
+}
+
+/* Subtle bevel highlight at top */
+.tab-portfolio::before{
+  content:"";
+  position:absolute; left:10px; right:10px; top:6px; height:8px;
+  background:linear-gradient(180deg, rgba(255,255,255,.65), rgba(255,255,255,0));
+  border-radius:8px;
+  pointer-events:none;
+}
+
+/* Hover */
+.tab-portfolio:hover{
+  background:#E7EDF7; color:#3B4C67;
+}
+
+/* Active tab pops forward and attaches to panel */
+.tab-portfolio.active{
+  background:#FFFFFF; color:#1E2A3B;
+  border-color:#BFD0F7;
+  transform:translateY(-6px);
+  z-index:2;
+  box-shadow:0 10px 22px rgba(63,90,140,.08), 0 2px 0 #FFFFFF inset;
+}
+
+/* Focus ring */
+.tab-portfolio:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(76,125,255,.35);
+}
+
+/* Panel that tabs sit on */
+.portfolio-panel{
+  position:relative;
+  margin-top:-6px;           /* pull panel under active tab bottom edge */
+  background:#FFFFFF;
+  border:1px solid #BFD0F7;
+  border-radius:16px;
+  padding:18px;
+  box-shadow:0 10px 24px rgba(31,41,55,.06);
+}
+
+/* Responsive tweaks */
+@media (max-width: 700px){
+  .portfolio-tabs{ flex-wrap:wrap; gap:8px; }
+  .tab-portfolio{ min-width:unset; padding:10px 14px 8px; font-size:.95rem; }
 }
 /* === Unified Buttons for S.V Orders === */
 .btn {
@@ -4575,4 +4603,109 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
 /* Mobile tweak: keep panel visible */
 @media (max-width: 768px){
   .notif-panel{ width: 92vw; }
+}
+
+/* =========================================================
+   iOS-style tabs + header/content overlap
+   Applied ONLY to Operations Orders & Orders Review pages
+   (those pages wrap the tabs + list with .ios-tabs-layout)
+   ========================================================= */
+
+.ios-tabs-layout{
+  --ios-bg: #F2F2F7;          /* iOS grouped background */
+  --ios-pill: #E5E5EA;        /* Inactive tab pill */
+  --ios-text: #111111;        /* Active tab text */
+  --ios-muted: #6B7280;       /* Inactive tab text */
+  --ios-radius: 22px;
+
+  background: var(--ios-bg);
+  border-radius: var(--ios-radius);
+  padding: 10px 12px 12px;
+  box-shadow: none;
+}
+
+/* Tabs row */
+.ios-tabs-layout .portfolio-tabs{
+  display:flex;
+  align-items:center;
+  gap: 14px;
+  padding: 2px 6px 14px;
+  margin: 0;
+  background: transparent;
+}
+
+/* Base tab (inactive = pill) */
+.ios-tabs-layout .tab-portfolio{
+  position: relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding: 10px 18px;
+  min-width: unset;
+
+  border: none;
+  border-bottom: none;
+  background: var(--ios-pill);
+  color: var(--ios-muted);
+  font-weight: 800;
+  text-decoration:none;
+  line-height: 1;
+
+  border-radius: 9999px;
+  box-shadow: none;
+  transform: none;
+  user-select:none;
+  transition: background .15s ease, color .15s ease, transform .15s ease;
+}
+.ios-tabs-layout .tab-portfolio::before{ display:none !important; }
+
+.ios-tabs-layout .tab-portfolio:hover{
+  background: #DCDCE1;
+  color: #4B5563;
+}
+
+/* Active tab = plain text + underline (like the reference image) */
+.ios-tabs-layout .tab-portfolio.active,
+.ios-tabs-layout .tab-portfolio.is-active{
+  background: transparent;
+  color: var(--ios-text);
+  padding: 10px 10px;
+}
+
+.ios-tabs-layout .tab-portfolio.active::after,
+.ios-tabs-layout .tab-portfolio.is-active::after{
+  content:"";
+  position:absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -8px;
+  height: 4px;
+  background: var(--ios-text);
+  border-radius: 9999px;
+}
+
+/* White content sheet overlaps the header background */
+.ios-tabs-layout .ios-tabs-sheet{
+  background: #FFFFFF;
+  border-radius: calc(var(--ios-radius) - 2px);
+  margin-top: -8px;
+  padding: 14px;
+  border: none;
+  box-shadow: none;
+}
+
+/* Neutralize the default .card look inside the iOS sheet */
+.ios-tabs-layout .ios-tabs-sheet.card{
+  box-shadow: none;
+}
+
+@media (max-width: 700px){
+  .ios-tabs-layout{
+    --ios-radius: 22px;
+    padding: 10px 10px 12px;
+  }
+  .ios-tabs-layout .portfolio-tabs{ gap: 10px; padding: 2px 4px 12px; flex-wrap: wrap; }
+  .ios-tabs-layout .tab-portfolio{ padding: 9px 14px; font-weight: 800; }
+  .ios-tabs-layout .tab-portfolio.active::after,
+  .ios-tabs-layout .tab-portfolio.is-active::after{ bottom: -7px; height: 4px; }
 }
