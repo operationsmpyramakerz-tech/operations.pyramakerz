@@ -748,8 +748,14 @@ document.addEventListener("DOMContentLoaded", () => {
           qtyReceivedDisplay !== undefined &&
           qtyReceivedDisplay !== qtyBase;
 
+        // Check for pending updates in Remaining tab
+        const pendingRem = it.pendingRemaining;
+        const hasPending = pendingRem !== undefined && pendingRem !== null;
+
         const qtyHTML = isRemainingTab
-          ? `<strong data-role="qty-val">${escapeHTML(String(qtyRem))}</strong>`
+          ? (hasPending
+              ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyRem))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(pendingRem))}</strong></span>`
+              : `<strong data-role="qty-val">${escapeHTML(String(qtyRem))}</strong>`)
           : showStrike
             ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceivedDisplay))}</strong></span>`
             : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
@@ -1133,6 +1139,29 @@ async function postJson(url, body) {
       const v = clamp(input.value);
       try {
         const newReceived = isAddMode ? Math.min(base, rec + v) : v;
+
+        // For "Remaining" tab, we delay the API call until "Received by operations" is clicked.
+        if (currentTab === "remaining") {
+          const idx = allItems.findIndex((x) => String(x.id) === String(id));
+          if (idx >= 0) {
+            allItems[idx].pendingReceived = newReceived;
+            allItems[idx].pendingReceivedAdd = v; // used for display context if needed
+            allItems[idx].pendingRemaining = Math.max(0, base - newReceived);
+          }
+
+          // Re-render to show pending state
+          groups = buildGroups(allItems);
+          const updated = activeGroup ? groups.find((x) => x.groupId === activeGroup.groupId) : null;
+          render();
+          if (updated && orderModal?.classList.contains("is-open")) {
+            openOrderModal(updated);
+          }
+
+          toast("success", "Pending", "Update pending confirmation.");
+          destroyPopover();
+          return;
+        }
+
         await updateReceivedQty(id, newReceived);
 
         // update in-memory data
@@ -1195,9 +1224,18 @@ async function markReceivedByOperations(g, receiptNumber) {
     }
 
     try {
+      // Collect any pending quantity updates for the items in this group
+      const quantities = {};
+      (g.items || []).forEach((it) => {
+        if (it.pendingReceived !== undefined && it.pendingReceived !== null) {
+          quantities[it.id] = it.pendingReceived;
+        }
+      });
+
       const data = await postJson("/api/orders/requested/mark-shipped", {
         orderIds: g.orderIds,
         receiptNumber: rnVal,
+        quantities,
       });
 
       // Update local state (set status = Shipped + operationsByName)
@@ -1217,6 +1255,16 @@ async function markReceivedByOperations(g, receiptNumber) {
         // "Quantity Received by operations" for items that were NOT edited.
         // If an item was edited before, we keep the edited value.
         const base = baseQty(it);
+
+        // If we had a pending update, apply it permanently now
+        if (it.pendingReceived !== undefined && it.pendingReceived !== null) {
+          it.quantityReceived = it.pendingReceived;
+          it.quantityReceivedEdited = true;
+          delete it.pendingReceived;
+          delete it.pendingRemaining;
+          delete it.pendingReceivedAdd;
+        }
+
         const edited = !!it.quantityReceivedEdited;
         if (!edited) {
           it.quantityReceived = base;
