@@ -5396,7 +5396,7 @@ app.post(
   requirePage("Requested Orders"),
   async (req, res) => {
     try {
-      const { orderIds, receiptNumber } = req.body || {};
+      const { orderIds, receiptNumber, quantities } = req.body || {};
       if (!Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "orderIds required" });
       }
@@ -5668,7 +5668,14 @@ app.post(
 
           // Received quantity
           let receivedFinal = null;
-          if (receivedProp && pageProps) {
+
+          // If the client provided an explicit quantity override (e.g. from "Remaining" tab edits), use it.
+          const explicitQty = quantities?.[id];
+
+          if (typeof explicitQty === "number" && Number.isFinite(explicitQty) && receivedProp) {
+            receivedFinal = Math.max(0, Math.floor(explicitQty));
+            updateProps[receivedProp] = { number: receivedFinal };
+          } else if (receivedProp && pageProps) {
             const recValRaw = parseNumberProp(pageProps[receivedProp]);
             const recVal =
               recValRaw === null || recValRaw === undefined
