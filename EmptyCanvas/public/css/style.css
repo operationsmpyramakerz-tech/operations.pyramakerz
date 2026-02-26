@@ -3267,18 +3267,27 @@ body.sidebar-mini .sidebar-nav .nav-link .icon {
 /* ==================== Tabs (Operations Orders + Orders Review) ==================== */
 /*
   Design goal: match the reference screenshot:
-  - Active tab = simple text with a thick underline.
-  - Inactive tabs = rounded "pill" buttons.
+  - Trapezoid-like shape with rounded top corners.
+  - Active tab = Black background, White text.
+  - Inactive tabs = White background, Gray text.
+  - Overlapping slightly, sitting on a black line.
 */
 
 /* Container */
 .portfolio-tabs{
-  display:flex;
-  gap:24px;
-  align-items:center;
-  padding: 0 10px 12px;
+  display: flex;
+  align-items: flex-end;
+  padding: 10px 10px 0 10px;
   margin: 10px 0 0;
   background: transparent;
+  border-bottom: 4px solid #000000;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Hide scrollbar for cleaner look */
+  scrollbar-width: none;
+}
+.portfolio-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 /* Base tab (inactive text) */
@@ -3287,50 +3296,71 @@ body.sidebar-mini .sidebar-nav .nav-link .icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 4px;
+  padding: 12px 34px;
+  margin-right: -15px; /* Overlap */
+  margin-bottom: 0; /* Sit on the line */
   background: transparent;
-  color: #9CA3AF;
+  color: #6B7280;
   font-weight: 800;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1;
   text-decoration: none;
   user-select: none;
   border: none;
-  transition: color .2s ease;
+  z-index: 1;
+  transition: color 0.2s ease;
 }
-.tab-portfolio:hover{
-  background: transparent;
+
+/* The Background Shape (Trapezoid with rounded top) */
+.tab-portfolio::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: #FFFFFF;
+  border-radius: 12px 12px 0 0;
+  transform: perspective(100px) rotateX(30deg) scaleY(1.2);
+  transform-origin: bottom center;
+  box-shadow: 0 -2px 5px rgba(0,0,0,0.05);
+  transition: background 0.2s ease;
+}
+
+.tab-portfolio:hover {
   color: #111827;
+  z-index: 2;
 }
+
+.tab-portfolio:hover:not(.active):not(.is-active)::before {
+  background: #f3f4f6;
+}
+
 .tab-portfolio:active{
   transform: translateY(0);
 }
 
-/* Active tab (underline)
-   - Some pages toggle `.active` (Orders Review)
-   - Some pages toggle `.is-active` (Operations Orders)
-*/
+/* Active tab */
 .tab-portfolio.active,
 .tab-portfolio.is-active{
-  background: transparent;
-  color: #000000;
-  padding-bottom: 8px;
+  color: #FFFFFF;
+  z-index: 10;
 }
+
+.tab-portfolio.active::before,
+.tab-portfolio.is-active::before{
+  background: #000000;
+}
+
+/* We don't need the underline pseudo-element anymore */
 .tab-portfolio.active::after,
 .tab-portfolio.is-active::after{
-  content:"";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-  background: #000000;
-  border-radius: 9999px;
+  display: none;
 }
 
 /* Focus ring */
 .tab-portfolio:focus-visible{
   outline: none;
+}
+.tab-portfolio:focus-visible::before{
   box-shadow: 0 0 0 3px rgba(17, 24, 39, .18);
 }
 
@@ -3339,14 +3369,13 @@ body.sidebar-mini .sidebar-nav .nav-link .icon {
   border: none;
   background: transparent;
   box-shadow: none;
+  border-bottom: 4px solid #000000; /* Ensure the line is visible here too */
 }
 
 /* Compact on small screens */
 @media (max-width:640px){
-  .portfolio-tabs{ flex-wrap: wrap; gap: 10px; }
-  .tab-portfolio{ font-size: 14px; padding: 10px 16px; }
-  .tab-portfolio.active,
-  .tab-portfolio.is-active{ padding-bottom: 13px; }
+  .portfolio-tabs{ gap: 0; } /* Remove gap completely as we rely on overlap */
+  .tab-portfolio{ font-size: 14px; padding: 12px 24px; margin-right: -10px; }
 }
 /* === Unified Buttons for S.V Orders === */
 .btn {
