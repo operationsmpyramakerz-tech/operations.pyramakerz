@@ -313,21 +313,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function receivedQty(it) {
     const n = Number(it?.quantityReceived);
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+    if (!Number.isFinite(n)) return null;
+    const v = Math.max(0, Math.floor(n));
+
+    // In "Not Started" we treat the base quantity (Quantity Progress) as the primary value.
+    // We only show a "received override" if the user actually edited the quantity.
+    // This avoids showing an unwanted strike-through when the Notion number field is prefilled with 0.
+    if (currentTab === "not-started" && !it?.quantityReceivedEdited) return null;
+
+    return v;
   }
 
   function receivedQtyOrZero(it) {
     const r = receivedQty(it);
     return r === null || r === undefined ? 0 : r;
-  }
-
-  // Whether Operations explicitly edited the received quantity for this line.
-  // - New backend: `quantityReceivedEdited` boolean.
-  // - Backward compatible fallback: treat any non-zero received qty as edited.
-  function isOpsQtyEdited(it) {
-    if (it && typeof it.quantityReceivedEdited === "boolean") return it.quantityReceivedEdited;
-    const r = receivedQty(it);
-    return r !== null && r !== undefined && Number(r) !== 0;
   }
 
   function remainingQty(it) {
@@ -627,23 +626,16 @@ document.addEventListener("DOMContentLoaded", () => {
       modalTotalPrice.textContent = fmtMoney(t);
     }
 
-    // Extra fields (Receipt Number + Received by)
-    // - Hide them ONLY in the Not Started tab.
-    // - Show them in the other tabs (Remaining / Received / Delivered) as part of the header.
-    const shouldShowExtras = (stage?.idx || 1) >= 4;
-    const isNotStartedTab = currentTab === "not-started";
-
+    // Extra fields: show for "Received" and later only
+    // NOTE: User request: in "Not Started" tab hide Receipt/Received-by even if present.
+    const shouldShowExtras = currentTab !== "not-started" && (stage?.idx || 1) >= 4;
     const receiptVal = g && (g.receiptNumber !== null && g.receiptNumber !== undefined) ? g.receiptNumber : null;
     const receivedByVal = String(g.operationsByName || "").trim();
 
-    if (receiptRow) {
-      receiptRow.hidden = isNotStartedTab || !shouldShowExtras;
-    }
+    if (receiptRow) receiptRow.hidden = !shouldShowExtras;
     if (modalReceiptNumber) modalReceiptNumber.textContent = receiptVal !== null ? String(receiptVal) : "—";
 
-    if (receivedByRow) {
-      receivedByRow.hidden = isNotStartedTab || !shouldShowExtras;
-    }
+    if (receivedByRow) receivedByRow.hidden = !shouldShowExtras;
     if (modalOperationsBy) modalOperationsBy.textContent = receivedByVal || "—";
 
     // Actions visibility
@@ -670,21 +662,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const qtyBase = baseQty(it);
         const qtyReceived = receivedQty(it);
 
-        // In Not Started tab: the primary qty shown is always Quantity Progress (base qty).
-        // We only treat Quantity Received by operations as an "edited" value when Operations explicitly edited it.
-        const treatReceivedAsEdited = currentTab !== "not-started" || isOpsQtyEdited(it);
-        const qtyReceivedForUI = treatReceivedAsEdited ? qtyReceived : null;
-
-        const qtyEffective = qtyReceivedForUI !== null && qtyReceivedForUI !== undefined ? qtyReceivedForUI : qtyBase;
+        const qtyEffective = qtyReceived !== null && qtyReceived !== undefined ? qtyReceived : qtyBase;
         const unit = Number(it.unitPrice) || 0;
         const qtyRem = remainingQty(it);
         const total = (isRemainingTab ? qtyRem : qtyEffective) * unit;
 
-        const showReceived = qtyReceivedForUI !== null && qtyReceivedForUI !== undefined && qtyReceivedForUI !== qtyBase;
+        const showReceived = qtyReceived !== null && qtyReceived !== undefined && qtyReceived !== qtyBase;
         const qtyHTML = isRemainingTab
           ? `<strong data-role="qty-val">${escapeHTML(String(qtyRem))}</strong>`
           : showReceived
-            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceivedForUI))}</strong></span>`
+            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceived))}</strong></span>`
             : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
 
         const href = safeHttpUrl(it.productUrl);
@@ -1020,16 +1007,10 @@ async function postJson(url, body) {
     const rec = receivedQtyOrZero(it);
     const rem = remainingQty(it);
 
-    const edited = isOpsQtyEdited(it);
-
     const currentVal = isAddMode
       ? rem
-      : (currentTab === "not-started" && !edited)
-        ? base
-        : (recRaw !== null && recRaw !== undefined ? recRaw : base);
-
-    // In Not Started tab, clamp to the base qty (Quantity Progress)
-    const maxVal = isAddMode ? rem : (currentTab === "not-started" ? base : null);
+      : (recRaw !== null && recRaw !== undefined ? recRaw : base);
+    const maxVal = isAddMode ? rem : null;
 
     popEl = document.createElement("div");
     popEl.className = "sv-qty-popover";
@@ -1079,7 +1060,7 @@ async function postJson(url, body) {
         const idx = allItems.findIndex((x) => String(x.id) === String(id));
         if (idx >= 0) {
           allItems[idx].quantityReceived = newReceived;
-          // Mark as explicitly edited by Operations (important when received qty can be 0 by default)
+          // Mark as an explicit ops edit (used to decide strike-through in "Not Started")
           allItems[idx].quantityReceivedEdited = true;
           // best-effort mirror for UI; backend is source of truth
           allItems[idx].quantityRemaining = Math.max(base - newReceived, 0);
@@ -1149,18 +1130,18 @@ async function markReceivedByOperations(g, receiptNumber) {
         if (username) it.operationsByName = username;
         if (rnNum !== null && Number.isFinite(rnNum)) it.receiptNumber = rnNum;
 
-        // Sync quantities locally to match backend behavior:
-        // - If Operations already edited this line, keep the edited received qty.
-        // - Otherwise, copy the base qty (Quantity Progress) into Quantity Received by operations.
+        // IMPORTANT: when clicking "Received by operations" we copy the base qty to
+        // "Quantity Received by operations" for items that were NOT edited.
+        // If an item was edited before, we keep the edited value.
         const base = baseQty(it);
-        const rec = receivedQty(it);
-        const edited = isOpsQtyEdited(it) || (rec !== null && rec !== undefined && Number(rec) !== 0);
-
-        const shouldAutofill = rec === null || rec === undefined || (Number(rec) === 0 && !edited);
-        const finalRec = shouldAutofill ? base : Math.max(0, Math.floor(Number(rec) || 0));
-
-        it.quantityReceived = finalRec;
-        it.quantityRemaining = Math.max(base - finalRec, 0);
+        const edited = !!it.quantityReceivedEdited;
+        if (!edited) {
+          it.quantityReceived = base;
+          it.quantityRemaining = 0;
+        } else {
+          const rec = receivedQtyOrZero(it);
+          it.quantityRemaining = Math.max(base - rec, 0);
+        }
       });
 
       groups = buildGroups(allItems);

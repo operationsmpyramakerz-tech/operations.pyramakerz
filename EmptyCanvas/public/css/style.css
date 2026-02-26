@@ -16,7 +16,7 @@
 
 *{ box-sizing:border-box; margin:0; padding:0; }
 
-/* Ensure the HTML hidden attribute always wins over custom display rules */
+/* Ensure HTML "hidden" works even when components define display:flex/grid */
 [hidden]{ display:none !important; }
 
 body{

@@ -4834,7 +4834,7 @@ app.get(
     res.set("Cache-Control", "no-store");
     try {
       // Cache version is bumped when response logic/shape changes.
-      const cacheKey = "cache:api:orders:requested:v5";
+      const cacheKey = "cache:api:orders:requested:v4";
       const data = await cacheGetOrSet(cacheKey, 60, async () => {
       const all = [];
       let hasMore = true,
@@ -5171,20 +5171,20 @@ const qtyRemainingStored =
       ? Number(qtyRemainingRaw)
       : null;
 
+// Was the received quantity explicitly edited by Operations?
+// We rely on the fact that our edit endpoint always writes "Quantity Remaining".
+// This also prevents showing an unwanted strike-through when the received column is prefilled with 0.
+const quantityReceivedEdited =
+  qtyReceived !== null && qtyReceived !== undefined
+    ? (Math.floor(Number(qtyReceived) || 0) !== 0 || qtyRemainingStored !== null)
+    : false;
+
 const qtyRemainingComputed = Math.max(
   0,
   (Number.isFinite(Number(qty)) ? Number(qty) : 0) - (qtyReceived === null || qtyReceived === undefined ? 0 : Number(qtyReceived)),
 );
 
 const qtyRemaining = qtyRemainingStored !== null ? qtyRemainingStored : qtyRemainingComputed;
-
-// If 'Quantity Received by operations' is 0 by default in Notion templates,
-// we should NOT treat it as an edited value unless Quantity Remaining was actually stored.
-// This flag lets the UI decide whether to show strike-through + the edited value in Not Started.
-const qtyReceivedEdited =
-  qtyReceived !== null &&
-  qtyReceived !== undefined &&
-  (Number(qtyReceived) !== 0 || qtyRemainingStored !== null);
 
 // Status + Notion label color
 const statusPropObj = getPropInsensitive(props, "Status") || props["Status"];
@@ -5292,9 +5292,8 @@ if (svApproval !== "Approved") continue;
     unitPrice,
     quantity: qty,
     quantityReceived: qtyReceived,
-    quantityReceivedEdited: qtyReceivedEdited,
     quantityRemaining: qtyRemaining,
-    quantityRemainingStored: qtyRemainingStored,
+    quantityReceivedEdited,
     status,
     statusColor,
     operationsByIds,
@@ -5371,7 +5370,7 @@ app.post(
       );
 
       // Invalidate caches so lists reflect the assignment immediately.
-      await cacheDel("cache:api:orders:requested:v5");
+      await cacheDel("cache:api:orders:requested:v4");
       const memberIdsNorm = (memberIds || [])
         .map((x) => String(x || "").trim())
         .filter(Boolean)
@@ -5618,21 +5617,22 @@ app.post(
                   ? Number(recValRaw)
                   : null;
 
-            // If the DB/template sets Quantity Received by operations = 0 by default,
-            // we should treat it as "not edited" until Quantity Remaining is actually stored
-            // (which happens when Operations edits the qty via the UI).
-            let hasStoredRemaining = false;
-            if (remainingProp && pageProps && pageProps[remainingProp]) {
-              const remValRaw = parseNumberProp(pageProps[remainingProp]);
-              hasStoredRemaining =
-                remValRaw !== null &&
-                remValRaw !== undefined &&
-                Number.isFinite(Number(remValRaw));
+            // Detect if "Quantity Remaining" was already written.
+            // If the received column is prefilled with 0 but remaining is empty,
+            // we treat it as NOT edited and fill base qty.
+            let remainingWasSet = false;
+            if (remainingProp && pageProps?.[remainingProp]) {
+              const remRaw = parseNumberProp(pageProps[remainingProp]);
+              remainingWasSet =
+                remRaw !== null &&
+                remRaw !== undefined &&
+                Number.isFinite(Number(remRaw));
             }
 
-            const shouldAutoFill = recVal === null || (recVal === 0 && !hasStoredRemaining);
+            const placeholderZero = recVal !== null && Math.floor(Number(recVal) || 0) === 0 && !remainingWasSet;
 
-            if (shouldAutoFill) {
+            // Fill only if it's missing (null) OR looks like an unedited placeholder 0
+            if (recVal === null || (placeholderZero && safeBaseQty > 0)) {
               receivedFinal = safeBaseQty;
               updateProps[receivedProp] = { number: receivedFinal };
             } else {
@@ -5658,7 +5658,7 @@ app.post(
       );
 
       // Invalidate cached lists (Operations view).
-      await cacheDel("cache:api:orders:requested:v5");
+      await cacheDel("cache:api:orders:requested:v4");
 
       res.json({
         success: true,
@@ -5746,7 +5746,7 @@ app.post(
         ),
       );
 
-      await cacheDel("cache:api:orders:requested:v5");
+      await cacheDel("cache:api:orders:requested:v4");
 
       res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
     } catch (e) {
@@ -5870,7 +5870,7 @@ app.post(
       });
 
       // Invalidate caches so quantities update immediately.
-      await cacheDel("cache:api:orders:requested:v5");
+      await cacheDel("cache:api:orders:requested:v4");
       try {
         const page = await notion.pages.retrieve({ page_id: id });
         const rel = page?.properties?.["Teams Members"]?.relation || [];
