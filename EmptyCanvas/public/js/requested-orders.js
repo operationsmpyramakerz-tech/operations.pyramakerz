@@ -750,12 +750,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Check for pending updates in Remaining tab
         const pendingRem = it.pendingRemaining;
+        const pendingAdd = it.pendingReceivedAdd;
         const hasPending = pendingRem !== undefined && pendingRem !== null;
 
+        // In Remaining tab, if user edited the value (pendingAdd), we show the *received amount* (pendingAdd)
+        // next to the old remaining amount. If pendingAdd matches the remaining amount, no diff is shown (full receive).
+        const showDiffRemaining = hasPending && pendingAdd !== undefined && Number(pendingAdd) !== qtyRem;
+
         const qtyHTML = isRemainingTab
-          ? (hasPending
-              ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyRem))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(pendingRem))}</strong></span>`
-              : `<strong data-role="qty-val">${escapeHTML(String(qtyRem))}</strong>`)
+          ? (showDiffRemaining
+              ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyRem))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(pendingAdd))}</strong></span>`
+              : `<strong data-role="qty-val">${escapeHTML(String(hasPending ? pendingAdd : qtyRem))}</strong>`)
           : showStrike
             ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceivedDisplay))}</strong></span>`
             : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
