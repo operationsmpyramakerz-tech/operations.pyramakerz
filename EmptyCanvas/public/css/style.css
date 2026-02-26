@@ -817,6 +817,9 @@ body.co-modal-open{ overflow: hidden; }
 .co-meta-row span{ color: #6B7280; }
 .co-meta-row strong{ color: #000000; font-weight: 900; }
 
+/* Allow multiple receipt numbers (stored as Notion rich_text) to wrap on new lines */
+#reqModalReceiptNumber{ white-space: pre-line; text-align: right; }
+
 .co-modal-items{ display: grid; gap: 10px; }
 
 .co-item{

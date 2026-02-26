@@ -213,10 +213,10 @@
       <input
         class="co-submodal-input"
         id="reqReceiptInput"
-        type="number"
+        type="text"
         inputmode="numeric"
-        min="0"
-        step="1"
+        pattern="[0-9]*"
+        autocomplete="off"
         placeholder="e.g. 12345"
       />
       <div class="co-submodal-error" id="reqReceiptError" role="alert" aria-live="polite"></div>

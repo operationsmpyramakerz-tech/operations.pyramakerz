@@ -311,26 +311,36 @@ document.addEventListener("DOMContentLoaded", () => {
     return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
   }
 
-  function receivedQty(it) {
+  // Raw received quantity from Notion (independent of current tab).
+  function receivedQtyRaw(it) {
     const n = Number(it?.quantityReceived);
     if (!Number.isFinite(n)) return null;
-    const v = Math.max(0, Math.floor(n));
+    return Math.max(0, Math.floor(n));
+  }
 
-    // In "Not Started" we treat the base quantity (Quantity Progress) as the primary value.
-    // We only show a "received override" if the user actually edited the quantity.
-    // This avoids showing an unwanted strike-through when the Notion number field is prefilled with 0.
+  // Quantity shown in the UI. In "Not Started" we treat Quantity Progress as the primary value,
+  // and we only show a received override if Operations explicitly edited it.
+  function receivedQtyDisplay(it) {
+    const v = receivedQtyRaw(it);
+    if (v === null || v === undefined) return null;
     if (currentTab === "not-started" && !it?.quantityReceivedEdited) return null;
-
     return v;
   }
 
   function receivedQtyOrZero(it) {
-    const r = receivedQty(it);
+    const r = receivedQtyRaw(it);
     return r === null || r === undefined ? 0 : r;
   }
 
+  // Remaining quantity. Prefer the dedicated Notion column "Quantity Remaining" if present.
   function remainingQty(it) {
+    const stored = Number(it?.quantityRemaining);
+    if (Number.isFinite(stored)) return Math.max(0, Math.floor(stored));
     return Math.max(baseQty(it) - receivedQtyOrZero(it), 0);
+  }
+
+  function hasReceivedNumber(it) {
+    return receivedQtyRaw(it) !== null && receivedQtyRaw(it) !== undefined;
   }
 
 
@@ -412,6 +422,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Remaining/received breakdown (used by the new "Remaining" tab)
       const receivedTotalQty = itemsArr.reduce((sum, x) => sum + receivedQtyOrZero(x), 0);
+      const receivedItemsCount = itemsArr.reduce(
+        (sum, x) => sum + (hasReceivedNumber(x) ? 1 : 0),
+        0,
+      );
+      const receivedEstimateTotal = itemsArr.reduce(
+        (sum, x) => sum + receivedQtyOrZero(x) * (Number(x.unitPrice) || 0),
+        0,
+      );
       const remainingTotalQty = itemsArr.reduce((sum, x) => sum + remainingQty(x), 0);
       const remainingItemsCount = itemsArr.reduce((sum, x) => sum + (remainingQty(x) > 0 ? 1 : 0), 0);
       const remainingEstimateTotal = itemsArr.reduce(
@@ -419,6 +437,7 @@ document.addEventListener("DOMContentLoaded", () => {
         0,
       );
       const hasRemaining = remainingItemsCount > 0;
+      const hasReceived = receivedItemsCount > 0;
       const stage = computeStage(itemsArr);
       const rs = summarizeReasons(itemsArr);
 
@@ -442,10 +461,13 @@ document.addEventListener("DOMContentLoaded", () => {
         totalQty,
         estimateTotal,
         receivedTotalQty,
+        receivedItemsCount,
+        receivedEstimateTotal,
         remainingTotalQty,
         remainingItemsCount,
         remainingEstimateTotal,
         hasRemaining,
+        hasReceived,
         stage,
         orderIdRange: computeOrderIdRange(itemsArr),
         operationsByName: operationsSummary(itemsArr),
@@ -488,7 +510,14 @@ document.addEventListener("DOMContentLoaded", () => {
   function getFilteredGroups() {
     const q = norm(searchInput?.value || "");
     return (groups || [])
-      .filter((g) => tabForGroup(g) === currentTab)
+      .filter((g) => {
+        const idx = g?.stage?.idx || 1;
+        if (currentTab === "not-started") return idx < 4;
+        if (currentTab === "remaining") return idx === 4 && !!g?.hasRemaining;
+        if (currentTab === "received") return idx === 4 && !!g?.hasReceived;
+        if (currentTab === "delivered") return idx >= 5;
+        return false;
+      })
       .filter((g) => groupMatchesQuery(g, q));
   }
 
@@ -512,14 +541,21 @@ document.addEventListener("DOMContentLoaded", () => {
       ? `<div class="co-received-by">Received by: ${escapeHTML(receivedBy)}</div>`
       : "";
 
-    // In the "Remaining" tab we want the card to reflect ONLY the remaining items/cost
+    // Tab-specific card totals:
+    // - Remaining: show only remaining items/cost
+    // - Received: show only received items/cost
     const isRemaining = currentTab === "remaining";
+    const isReceived = currentTab === "received";
     const displayCount = isRemaining
       ? Number(g.remainingItemsCount) || 0
-      : Number(g.itemsCount) || 0;
+      : isReceived
+        ? Number(g.receivedItemsCount) || 0
+        : Number(g.itemsCount) || 0;
     const displayTotal = isRemaining
       ? Number(g.remainingEstimateTotal) || 0
-      : Number(g.estimateTotal) || 0;
+      : isReceived
+        ? Number(g.receivedEstimateTotal) || 0
+        : Number(g.estimateTotal) || 0;
 
     const card = document.createElement("article");
     card.className = "co-card";
@@ -603,7 +639,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const stage = g.stage || computeStage(all);
 
     const isRemainingTab = currentTab === "remaining";
-    const items = isRemainingTab ? all.filter((it) => remainingQty(it) > 0) : all;
+    const isReceivedTab = currentTab === "received";
+
+    // Items shown depend on the active tab:
+    // - Remaining: show items that still have remaining qty.
+    // - Received: show only items that have a value in "Quantity received by operations".
+    // - Others: show all items.
+    const items = isRemainingTab
+      ? all.filter((it) => remainingQty(it) > 0)
+      : isReceivedTab
+        ? all.filter((it) => hasReceivedNumber(it))
+        : all;
 
     // Header
     if (modalTitle) modalTitle.textContent = stage.label || "—";
@@ -616,13 +662,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (modalReason) modalReason.textContent = String(g.reason || "—").trim() || "—";
     if (modalDate) modalDate.textContent = fmtDateTime(g.latestCreated) || "—";
     if (modalComponents) {
-      const c = isRemainingTab ? (Number(g.remainingItemsCount) || items.length) : Number(g.itemsCount) || items.length;
+      const c = isRemainingTab
+        ? (Number(g.remainingItemsCount) || items.length)
+        : isReceivedTab
+          ? (Number(g.receivedItemsCount) || items.length)
+          : Number(g.itemsCount) || items.length;
       modalComponents.textContent = String(c);
     }
     if (modalTotalPrice) {
       const t = isRemainingTab
         ? (Number(g.remainingEstimateTotal) || items.reduce((sum, x) => sum + remainingQty(x) * (Number(x.unitPrice) || 0), 0))
-        : Number(g.estimateTotal) || 0;
+        : isReceivedTab
+          ? (Number(g.receivedEstimateTotal) || items.reduce((sum, x) => sum + receivedQtyOrZero(x) * (Number(x.unitPrice) || 0), 0))
+          : Number(g.estimateTotal) || 0;
       modalTotalPrice.textContent = fmtMoney(t);
     }
 
@@ -639,7 +691,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (modalOperationsBy) modalOperationsBy.textContent = receivedByVal || "—";
 
     // Actions visibility
-    if (shippedBtn) shippedBtn.style.display = stage.idx < 4 ? "inline-flex" : "none";
+    // - Not Started: show "Received by operations" only before shipping
+    // - Remaining: show it again so operations can add another receipt number
+    if (shippedBtn) {
+      shippedBtn.style.display =
+        (currentTab === "not-started" && stage.idx < 4) || currentTab === "remaining"
+          ? "inline-flex"
+          : "none";
+    }
     // Only allow "Delivered" when the order is fully received (no remaining items)
     if (arrivedBtn) arrivedBtn.style.display = stage.idx === 4 && !g.hasRemaining ? "inline-flex" : "none";
 
@@ -657,21 +716,42 @@ document.addEventListener("DOMContentLoaded", () => {
         frag.appendChild(empty);
       }
 
+      if (!isRemainingTab && currentTab === "received" && items.length === 0) {
+        const empty = document.createElement("div");
+        empty.style.padding = "10px";
+        empty.textContent = "No received components yet.";
+        frag.appendChild(empty);
+      }
+
       for (const it of items) {
         const product = escapeHTML(it.productName || "Component");
         const qtyBase = baseQty(it);
-        const qtyReceived = receivedQty(it);
 
-        const qtyEffective = qtyReceived !== null && qtyReceived !== undefined ? qtyReceived : qtyBase;
+        // For Not Started, we only display a received override if it was edited.
+        const qtyReceivedDisplay = receivedQtyDisplay(it);
+        // For Received tab, we always use the raw received value.
+        const qtyReceivedRawVal = receivedQtyRaw(it);
+
+        const qtyEffective =
+          isReceivedTab
+            ? (qtyReceivedRawVal !== null && qtyReceivedRawVal !== undefined ? qtyReceivedRawVal : qtyBase)
+            : (qtyReceivedDisplay !== null && qtyReceivedDisplay !== undefined ? qtyReceivedDisplay : qtyBase);
         const unit = Number(it.unitPrice) || 0;
         const qtyRem = remainingQty(it);
+
         const total = (isRemainingTab ? qtyRem : qtyEffective) * unit;
 
-        const showReceived = qtyReceived !== null && qtyReceived !== undefined && qtyReceived !== qtyBase;
+        const showStrike =
+          !isRemainingTab &&
+          !isReceivedTab &&
+          qtyReceivedDisplay !== null &&
+          qtyReceivedDisplay !== undefined &&
+          qtyReceivedDisplay !== qtyBase;
+
         const qtyHTML = isRemainingTab
           ? `<strong data-role="qty-val">${escapeHTML(String(qtyRem))}</strong>`
-          : showReceived
-            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceived))}</strong></span>`
+          : showStrike
+            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceivedDisplay))}</strong></span>`
             : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
 
         const href = safeHttpUrl(it.productUrl);
@@ -777,21 +857,20 @@ document.addEventListener("DOMContentLoaded", () => {
       // Fallback to prompt
       const raw = window.prompt("Enter receipt number:");
       if (raw === null) return;
-      const num = Math.floor(Number(String(raw).trim()));
-      if (!Number.isFinite(num) || num < 0) {
+      const val = String(raw).trim();
+      if (!val) {
         alert("Please enter a valid receipt number.");
         return;
       }
-      markReceivedByOperations(activeGroup, num);
+      markReceivedByOperations(activeGroup, val);
       return;
     }
 
     // Reset
     setReceiptError("");
-    const preset = activeGroup && activeGroup.receiptNumber !== null && activeGroup.receiptNumber !== undefined
-      ? String(activeGroup.receiptNumber)
-      : "";
-    receiptInput.value = preset;
+    // Do NOT pre-fill the input. Receipt Number is stored as rich_text and may contain
+    // multiple values (one per delivery). We want the user to enter a new number each time.
+    receiptInput.value = "";
 
     receiptConfirmBtn.disabled = false;
     receiptCancelBtn.disabled = false;
@@ -1003,7 +1082,7 @@ async function postJson(url, body) {
 
     const it = allItems.find((x) => String(x.id) === String(id));
     const base = baseQty(it);
-    const recRaw = receivedQty(it);
+    const recRaw = receivedQtyDisplay(it);
     const rec = receivedQtyOrZero(it);
     const rem = remainingQty(it);
 
@@ -1101,11 +1180,13 @@ async function postJson(url, body) {
 async function markReceivedByOperations(g, receiptNumber) {
     if (!g || !g.orderIds?.length) return;
 
-    // Normalize receipt number (best-effort). If missing, we still allow the action.
-    const rnRaw = receiptNumber;
-    const rnNum = rnRaw === null || rnRaw === undefined || rnRaw === ""
-      ? null
-      : Math.floor(Number(rnRaw));
+    // Receipt number can be text now (Notion column is rich_text) so we keep it as string.
+    // If missing, we still allow the action.
+    const rnText =
+      receiptNumber === null || receiptNumber === undefined
+        ? ""
+        : String(receiptNumber).trim();
+    const rnVal = rnText ? rnText : null;
 
     if (shippedBtn) {
       shippedBtn.disabled = true;
@@ -1116,7 +1197,7 @@ async function markReceivedByOperations(g, receiptNumber) {
     try {
       const data = await postJson("/api/orders/requested/mark-shipped", {
         orderIds: g.orderIds,
-        receiptNumber: rnNum,
+        receiptNumber: rnVal,
       });
 
       // Update local state (set status = Shipped + operationsByName)
@@ -1128,7 +1209,9 @@ async function markReceivedByOperations(g, receiptNumber) {
         it.status = "Shipped";
         it.statusColor = data.statusColor || it.statusColor;
         if (username) it.operationsByName = username;
-        if (rnNum !== null && Number.isFinite(rnNum)) it.receiptNumber = rnNum;
+        if (data.receiptNumber !== null && data.receiptNumber !== undefined) {
+          it.receiptNumber = data.receiptNumber;
+        }
 
         // IMPORTANT: when clicking "Received by operations" we copy the base qty to
         // "Quantity Received by operations" for items that were NOT edited.
@@ -1363,8 +1446,9 @@ async function markReceivedByOperations(g, receiptNumber) {
       return;
     }
 
-    const num = Math.floor(Number(raw));
-    if (!Number.isFinite(num) || num < 0) {
+    // Keep it as text (Notion Receipt Number is rich_text now).
+    // We still validate it's numeric to match the expected workflow.
+    if (!/^\d+$/.test(raw)) {
       setReceiptError("Please enter a valid receipt number.");
       return;
     }
@@ -1377,7 +1461,7 @@ async function markReceivedByOperations(g, receiptNumber) {
     if (receiptCloseBtn) receiptCloseBtn.disabled = true;
 
     try {
-      await markReceivedByOperations(activeGroup, num);
+      await markReceivedByOperations(activeGroup, raw);
     } finally {
       // Buttons are re-enabled when the modal opens again; keep it simple.
       // (closeReceiptModal is called on success)

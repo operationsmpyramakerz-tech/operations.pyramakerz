@@ -5270,12 +5270,13 @@ if (svApproval !== "Approved") continue;
             }
           }
 
-          // Receipt Number (Number) — may be used in Operations "Received" tab header
+          // Receipt Number (Text/Number) — may be used in Operations header.
+          // It can be rich_text now (to allow multiple receipt numbers).
           const receiptNumber =
-            parseNumberProp(getPropInsensitive(props, "Receipt Number")) ??
-            parseNumberProp(getPropInsensitive(props, "ReceiptNumber")) ??
-            parseNumberProp(getPropInsensitive(props, "Receipt No")) ??
-            parseNumberProp(getPropInsensitive(props, "Receipt #")) ??
+            parseTextProp(getPropInsensitive(props, "Receipt Number")) ??
+            parseTextProp(getPropInsensitive(props, "ReceiptNumber")) ??
+            parseTextProp(getPropInsensitive(props, "Receipt No")) ??
+            parseTextProp(getPropInsensitive(props, "Receipt #")) ??
             null;
 
           all.push({
@@ -5540,17 +5541,26 @@ app.post(
         };
       }
 
-      // Receipt Number (Number column) — optional in API for backward compatibility.
-      // If provided, we write it to Notion so it can be shown in the "Received" tab header.
-      const rnRaw = receiptNumber;
-      const rnParsed = rnRaw === null || rnRaw === undefined || rnRaw === "" ? null : Number(rnRaw);
-      const rnNum = Number.isFinite(rnParsed) ? Math.floor(rnParsed) : null;
+      // Receipt Number — can be rich_text now (so we can append multiple receipt numbers).
+      // If provided, we write/update it in Notion so it can be shown in the Operations header.
+      let rnText =
+        receiptNumber === null || receiptNumber === undefined ? "" : String(receiptNumber);
+      rnText = rnText.replace(/\r\n/g, "\n").trim();
+      if (rnText.length > 120) rnText = rnText.slice(0, 120);
 
-      if (rnNum !== null) {
-        let receiptProp = null;
-        let receiptMeta = null;
-        const receiptCandidates = ["Receipt Number", "ReceiptNumber", "Receipt No", "Receipt #", "Receipt"];
+      const rnNum = /^\d+$/.test(rnText) ? Math.floor(Number(rnText)) : null;
 
+      let receiptProp = null;
+      let receiptMeta = null;
+      const receiptCandidates = [
+        "Receipt Number",
+        "ReceiptNumber",
+        "Receipt No",
+        "Receipt #",
+        "Receipt",
+      ];
+
+      if (rnText) {
         for (const cand of receiptCandidates) {
           for (const [key, meta] of Object.entries(dbProps || {})) {
             if (normKey(key) === normKey(cand)) {
@@ -5562,10 +5572,41 @@ app.post(
           if (receiptProp) break;
         }
 
-        if (receiptProp && receiptMeta?.type === "number") {
+        // For number columns we can only overwrite (no append).
+        if (receiptProp && receiptMeta?.type === "number" && rnNum !== null) {
           propsToUpdate[receiptProp] = { number: rnNum };
         }
       }
+
+      // Helper: read existing plain text from a Notion property
+      const propPlainText = (prop) => {
+        if (!prop) return "";
+        if (prop.type === "rich_text") {
+          return (prop.rich_text || []).map((t) => t.plain_text).join("");
+        }
+        if (prop.type === "title") {
+          return (prop.title || []).map((t) => t.plain_text).join("");
+        }
+        if (prop.type === "number") {
+          return prop.number === null || prop.number === undefined ? "" : String(prop.number);
+        }
+        return "";
+      };
+
+      const appendReceiptLine = (existing, next) => {
+        const e = String(existing || "").replace(/\r\n/g, "\n").trim();
+        const n = String(next || "").replace(/\r\n/g, "\n").trim();
+        if (!n) return e;
+        if (!e) return n;
+        const lines = e
+          .split(/\n+/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+        if (lines.includes(n)) return e;
+        return `${e}\n${n}`;
+      };
+
+      let receiptToReturn = null;
 
       await Promise.all(
         ids.map(async (id) => {
@@ -5581,6 +5622,25 @@ app.post(
           }
 
           const updateProps = { ...propsToUpdate };
+
+          // If Receipt Number is a text field, append the new receipt number on a new line.
+          if (rnText && receiptProp && receiptMeta?.type === "rich_text" && pageProps) {
+            const existing = propPlainText(pageProps[receiptProp]);
+            const merged = appendReceiptLine(existing, rnText);
+            updateProps[receiptProp] = {
+              rich_text: [{ text: { content: merged } }],
+            };
+            if (receiptToReturn === null) receiptToReturn = merged;
+          }
+
+          if (rnText && receiptProp && receiptMeta?.type === "title" && pageProps) {
+            const existing = propPlainText(pageProps[receiptProp]);
+            const merged = appendReceiptLine(existing, rnText);
+            updateProps[receiptProp] = {
+              title: [{ text: { content: merged } }],
+            };
+            if (receiptToReturn === null) receiptToReturn = merged;
+          }
 
           // Base quantity for this row (Quantity Progress fallback Requested)
           let baseQtyNum = 0;
@@ -5665,7 +5725,12 @@ app.post(
         status: shippedName,
         statusColor: shippedColor,
         operationsByName: req.session.username || "",
-        receiptNumber: rnNum,
+        receiptNumber:
+          receiptToReturn !== null && receiptToReturn !== undefined
+            ? receiptToReturn
+            : receiptProp && receiptMeta?.type === "number"
+              ? rnNum
+              : rnText || null,
       });
     } catch (e) {
       console.error("mark-shipped error:", e.body || e);
