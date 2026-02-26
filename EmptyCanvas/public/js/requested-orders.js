@@ -646,7 +646,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // - Received: show only items that have a value in "Quantity received by operations".
     // - Others: show all items.
     const items = isRemainingTab
-      ? all.filter((it) => remainingQty(it) > 0)
+      ? all.filter((it) => remainingQty(it) > 0 || it.justUpdated)
       : isReceivedTab
         ? all.filter((it) => hasReceivedNumber(it))
         : all;
@@ -753,14 +753,17 @@ document.addEventListener("DOMContentLoaded", () => {
         const pendingAdd = it.pendingReceivedAdd;
         const hasPending = pendingRem !== undefined && pendingRem !== null;
 
-        // In Remaining tab, if user edited the value (pendingAdd), we show the *received amount* (pendingAdd)
-        // next to the old remaining amount. If pendingAdd matches the remaining amount, no diff is shown (full receive).
-        const showDiffRemaining = hasPending && pendingAdd !== undefined && Number(pendingAdd) !== qtyRem;
+        // In Remaining tab, if user edited the value, we show the *new remaining amount* (pendingRem)
+        // next to the old remaining amount.
+        const showDiffRemaining = hasPending && Number(pendingRem) !== qtyRem;
+        const showDiffJustUpdated = !!(it.justUpdated && it.previousRemaining !== undefined);
 
         const qtyHTML = isRemainingTab
           ? (showDiffRemaining
-              ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyRem))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(pendingAdd))}</strong></span>`
-              : `<strong data-role="qty-val">${escapeHTML(String(hasPending ? pendingAdd : qtyRem))}</strong>`)
+              ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyRem))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(pendingRem))}</strong></span>`
+              : showDiffJustUpdated
+                ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(it.previousRemaining))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyRem))}</strong></span>`
+                : `<strong data-role="qty-val">${escapeHTML(String(hasPending ? pendingRem : qtyRem))}</strong>`)
           : showStrike
             ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceivedDisplay))}</strong></span>`
             : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
@@ -824,6 +827,14 @@ document.addEventListener("DOMContentLoaded", () => {
     orderModal.classList.remove("is-open");
     document.body.classList.remove("co-modal-open");
     orderModal.setAttribute("aria-hidden", "true");
+
+    if (activeGroup && activeGroup.items) {
+      activeGroup.items.forEach((it) => {
+        delete it.justUpdated;
+        delete it.previousRemaining;
+      });
+    }
+
     activeGroup = null;
 
     try {
@@ -1249,6 +1260,11 @@ async function markReceivedByOperations(g, receiptNumber) {
 
       allItems.forEach((it) => {
         if (!idSet.has(it.id)) return;
+
+        // Capture previous state for visual feedback in Remaining tab
+        it.previousRemaining = remainingQty(it);
+        it.justUpdated = true;
+
         it.status = "Shipped";
         it.statusColor = data.statusColor || it.statusColor;
         if (username) it.operationsByName = username;
