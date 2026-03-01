@@ -5469,6 +5469,13 @@ app.post(
       const remainingProp = await detectRemainingQtyPropName();
 
       // Helpers local to this route
+      // Support fractional quantities (e.g. 0.5) and avoid floating point artifacts.
+      const roundQty = (n) => {
+        const v = Number(n);
+        if (!Number.isFinite(v)) return 0;
+        return Math.round(v * 1e6) / 1e6;
+      };
+
       const getPropInsensitive = (props, name) => {
         const target = normKey(name);
         for (const k of Object.keys(props || {})) {
@@ -5578,11 +5585,6 @@ app.post(
           }
           if (receiptProp) break;
         }
-
-        // For number columns we can only overwrite (no append).
-        if (receiptProp && receiptMeta?.type === "number" && rnNum !== null) {
-          propsToUpdate[receiptProp] = { number: rnNum };
-        }
       }
 
       // Helper: read existing plain text from a Notion property
@@ -5630,23 +5632,37 @@ app.post(
 
           const updateProps = { ...propsToUpdate };
 
-          // If Receipt Number is a text field, append the new receipt number on a new line.
-          if (rnText && receiptProp && receiptMeta?.type === "rich_text" && pageProps) {
-            const existing = propPlainText(pageProps[receiptProp]);
-            const merged = appendReceiptLine(existing, rnText);
-            updateProps[receiptProp] = {
-              rich_text: [{ text: { content: merged } }],
-            };
-            if (receiptToReturn === null) receiptToReturn = merged;
-          }
+          // Receipt Number handling
+          // IMPORTANT:
+          // - The Notion column might be changed by the user (Number -> Text) while our DB schema cache is still warm.
+          // - To avoid "validation_error" on update, always prefer the *actual page property type* when available.
+          if (rnText && receiptProp && pageProps) {
+            const actualType = pageProps?.[receiptProp]?.type || receiptMeta?.type || null;
 
-          if (rnText && receiptProp && receiptMeta?.type === "title" && pageProps) {
-            const existing = propPlainText(pageProps[receiptProp]);
-            const merged = appendReceiptLine(existing, rnText);
-            updateProps[receiptProp] = {
-              title: [{ text: { content: merged } }],
-            };
-            if (receiptToReturn === null) receiptToReturn = merged;
+            // If Receipt Number is a text field, append the new receipt number on a new line.
+            if (actualType === "rich_text") {
+              const existing = propPlainText(pageProps[receiptProp]);
+              const merged = appendReceiptLine(existing, rnText);
+              updateProps[receiptProp] = {
+                rich_text: [{ text: { content: merged } }],
+              };
+              if (receiptToReturn === null) receiptToReturn = merged;
+            }
+
+            if (actualType === "title") {
+              const existing = propPlainText(pageProps[receiptProp]);
+              const merged = appendReceiptLine(existing, rnText);
+              updateProps[receiptProp] = {
+                title: [{ text: { content: merged } }],
+              };
+              if (receiptToReturn === null) receiptToReturn = merged;
+            }
+
+            // For number columns we can only overwrite (no append).
+            if (actualType === "number" && rnNum !== null) {
+              updateProps[receiptProp] = { number: rnNum };
+              if (receiptToReturn === null) receiptToReturn = rnNum;
+            }
           }
 
           // Base quantity for this row (Quantity Progress fallback Requested)
