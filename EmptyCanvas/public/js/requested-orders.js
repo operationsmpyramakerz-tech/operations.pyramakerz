@@ -65,6 +65,32 @@ document.addEventListener("DOMContentLoaded", () => {
   // ---------- Utils ----------
   const norm = (s) => String(s || "").trim().toLowerCase();
 
+
+  // ---------- Page cache (speed) ----------
+  // Cache the requested orders list in sessionStorage to avoid re-fetching / re-rendering
+  // on quick navigation. This speeds up Operations Orders noticeably on Vercel cold starts.
+  const REQ_CACHE_KEY = "cache:ops:requestedOrders:v1";
+  const REQ_CACHE_TTL_MS = 45 * 1000; // 45s (server cache is 60s)
+
+  function readRequestedCache() {
+    try {
+      const raw = sessionStorage.getItem(REQ_CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !Array.isArray(obj.data)) return null;
+      const age = Date.now() - (Number(obj.ts) || 0);
+      return { data: obj.data, stale: age > REQ_CACHE_TTL_MS };
+    } catch {
+      return null;
+    }
+  }
+
+  function writeRequestedCache(data) {
+    try {
+      sessionStorage.setItem(REQ_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: data || [] }));
+    } catch {}
+  }
+
   const escapeHTML = (str) =>
     String(str || "").replace(/[&<>"']/g, (c) => ({
       "&": "&amp;",
@@ -1217,6 +1243,7 @@ async function postJson(url, body) {
         }
 
         // rebuild + rerender (keep modal open)
+        writeRequestedCache(allItems);
         groups = buildGroups(allItems);
         const updated = activeGroup ? groups.find((x) => x.groupId === activeGroup.groupId) : null;
 
@@ -1377,6 +1404,8 @@ async function markReceivedByOperations(g, receiptNumber) {
         }
       });
 
+      writeRequestedCache(allItems);
+
       groups = buildGroups(allItems);
       render();
 
@@ -1422,6 +1451,8 @@ async function markReceivedByOperations(g, receiptNumber) {
         it.statusColor = data.statusColor || it.statusColor;
       });
 
+      writeRequestedCache(allItems);
+
       groups = buildGroups(allItems);
       render();
 
@@ -1445,8 +1476,20 @@ async function markReceivedByOperations(g, receiptNumber) {
   }
 
   // ---------- Load data ----------
-  async function loadRequested() {
-    if (listDiv) {
+    async function loadRequested() {
+    const cached = readRequestedCache();
+    const hasCache = !!(cached && Array.isArray(cached.data));
+
+    // Render cached data immediately (if available)
+    if (hasCache) {
+      allItems = cached.data;
+      groups = buildGroups(allItems);
+      render();
+
+      // If cache is still fresh, skip the network request.
+      if (!cached.stale) return;
+    } else if (listDiv) {
+      // No cache → show loading state
       listDiv.innerHTML = `
         <div class="modern-loading" role="status" aria-live="polite">
           <div class="modern-loading__spinner" aria-hidden="true"></div>
@@ -1459,29 +1502,42 @@ async function markReceivedByOperations(g, receiptNumber) {
       if (window.feather) window.feather.replace();
     }
 
-    const res = await fetch("/api/orders/requested", {
-      credentials: "same-origin",
-      cache: "no-store",
-    });
+    try {
+      const res = await fetch("/api/orders/requested", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
 
-    if (res.status === 401) {
-      window.location.href = "/login";
-      return;
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to fetch requested orders");
+      }
+
+      const data = await res.json().catch(() => []);
+      allItems = Array.isArray(data) ? data : [];
+      writeRequestedCache(allItems);
+
+      groups = buildGroups(allItems);
+      render();
+    } catch (e) {
+      // If we already rendered cached data, keep it (best-effort)
+      if (!hasCache) throw e;
+      console.warn("loadRequested() fetch failed; using cached data.", e);
     }
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || "Failed to fetch requested orders");
-    }
-
-    const data = await res.json().catch(() => []);
-    allItems = Array.isArray(data) ? data : [];
-    groups = buildGroups(allItems);
-    render();
   }
 
   // ---------- Events ----------
-  searchInput?.addEventListener("input", render);
+  // Debounced search to avoid re-rendering on every keystroke (helps performance)
+  let _reqSearchT = null;
+  searchInput?.addEventListener("input", () => {
+    clearTimeout(_reqSearchT);
+    _reqSearchT = setTimeout(() => render(), 150);
+  });
   searchInput?.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       searchInput.value = "";
@@ -1489,15 +1545,20 @@ async function markReceivedByOperations(g, receiptNumber) {
     }
   });
 
+  // Tabs: switch in-place (avoid full page reload)
   tabsWrap?.addEventListener("click", (e) => {
     const a = e.target?.closest?.("a.tab-portfolio");
     if (!a) return;
+
     const t = norm(a.getAttribute("data-tab"));
-    if (t) {
-      currentTab = t;
-      updateTabUI();
-      render();
-    }
+    if (!t || t === currentTab) return;
+
+    // Tabs are anchors in the HTML; prevent navigation so the page doesn't refresh.
+    e.preventDefault();
+
+    currentTab = t;
+    updateTabUI();
+    render();
   });
 
   modalClose?.addEventListener("click", closeOrderModal);

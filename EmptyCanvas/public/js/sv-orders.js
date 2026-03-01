@@ -33,6 +33,30 @@
   let TAB = (qs.get("tab") || "not-started").toLowerCase();
 
   const norm = (s) => String(s || "").toLowerCase().trim();
+
+
+  // ===== Page cache (speed) =====
+  // Cache S.V orders list in sessionStorage to reduce repeated loads when navigating.
+  const SV_CACHE_KEY = "cache:svOrders:v1";
+  const SV_CACHE_TTL_MS = 45 * 1000; // 45s
+
+  function readSvCache() {
+    try {
+      const raw = sessionStorage.getItem(SV_CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !Array.isArray(obj.data)) return null;
+      const age = Date.now() - (Number(obj.ts) || 0);
+      return { data: obj.data, stale: age > SV_CACHE_TTL_MS };
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSvCache(data) {
+    try { sessionStorage.setItem(SV_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: data || [] })); } catch {}
+  }
+
   const toDate = (d) => new Date(d || 0);
 
   const escapeHTML = (s) =>
@@ -756,21 +780,45 @@
     }
   }
 
-  async function loadList() {
-    loading = true;
-    renderList();
+    async function loadList() {
+    const cached = readSvCache();
+    const hasCache = !!(cached && Array.isArray(cached.data));
+
+    // Render cached data immediately (if available)
+    if (hasCache) {
+      allItems = cached.data;
+      loading = false;
+      renderAll();
+
+      // If cache is still fresh, skip network refresh.
+      if (!cached.stale) return;
+    } else {
+      // No cache → show loading spinner
+      loading = true;
+      renderList();
+    }
+
     try {
       const data = await http.get("/api/sv-orders?tab=all");
       if (!data) return;
+
       allItems = Array.isArray(data) ? data : [];
+      writeSvCache(allItems);
+
       loading = false;
-      renderAll();
+      renderAll({ preserveScroll: true, preserveModal: true });
     } catch (e) {
       console.error("loadList()", e);
-      loading = false;
-      allItems = [];
-      renderList();
-      toastERR("Failed to load S.V orders.");
+
+      if (!hasCache) {
+        loading = false;
+        allItems = [];
+        renderList();
+        toastERR("Failed to load S.V orders.");
+      } else {
+        // Keep cached view (best-effort)
+        toastERR("Failed to refresh S.V orders (showing cached).");
+      }
     }
   }
 
@@ -793,6 +841,7 @@
 
       const idx = allItems.findIndex((x) => String(x.id) === String(id));
       if (idx >= 0) allItems[idx].approval = normalized;
+      writeSvCache(allItems);
 
       toastOK(`Marked as ${normalized}.`);
       renderAll({ preserveScroll: true, preserveModal: true });
@@ -852,6 +901,9 @@
 
       await Promise.all(workers);
 
+      // Persist the updated approvals in the cache
+      writeSvCache(allItems);
+
       if (fail) toastERR(`Updated ${ok}/${toUpdate.length}. Some items failed.`);
       else toastOK(`All items marked as ${normalized}.`);
 
@@ -888,7 +940,13 @@ if (tabsWrap) {
 }
 
     if (searchInput) {
-      searchInput.addEventListener("input", () => renderAll({ preserveScroll: true, preserveModal: false }));
+      // Debounced search to avoid heavy re-rendering on every keystroke
+      let _svSearchT = null;
+      searchInput.addEventListener("input", () => {
+        clearTimeout(_svSearchT);
+        _svSearchT = setTimeout(() => renderAll({ preserveScroll: true, preserveModal: false }), 150);
+      });
+
       searchInput.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && searchInput.value) {
           searchInput.value = "";
