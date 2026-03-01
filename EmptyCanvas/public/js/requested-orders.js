@@ -1240,11 +1240,41 @@ async function markReceivedByOperations(g, receiptNumber) {
     }
 
     try {
-      // Collect any pending quantity updates for the items in this group
+      // Collect quantity updates for the items in this group.
+      //
+      // IMPORTANT (Remaining tab behavior):
+      // - Default: add the current "Quantity Remaining" to "Quantity Received by operations"
+      // - If the user edited the remaining qty (popover), we add the edited value instead.
+      //
+      // The backend expects *absolute* received totals per item (not the delta),
+      // so we send the final received number for each affected item.
       const quantities = {};
+      const isRemainingTab = currentTab === "remaining";
+
       (g.items || []).forEach((it) => {
+        const id = String(it?.id || "").trim();
+        if (!id) return;
+
+        const base = baseQty(it);
+        const clampToBase = (n) => (base > 0 ? Math.min(base, n) : n);
+
+        // If the user edited this item in Remaining tab, use the pending absolute received value.
         if (it.pendingReceived !== undefined && it.pendingReceived !== null) {
-          quantities[it.id] = it.pendingReceived;
+          const v = Math.max(0, Math.floor(Number(it.pendingReceived) || 0));
+          quantities[id] = clampToBase(v);
+          return;
+        }
+
+        // Remaining tab default: receive the full remaining quantity.
+        if (isRemainingTab) {
+          const recNow = receivedQtyOrZero(it);
+          const remNow = remainingQty(it);
+
+          // Only update items that still have remaining qty.
+          if (remNow > 0) {
+            const nextReceived = clampToBase(Math.max(0, recNow + remNow));
+            quantities[id] = nextReceived;
+          }
         }
       });
 
@@ -1272,14 +1302,36 @@ async function markReceivedByOperations(g, receiptNumber) {
           it.receiptNumber = data.receiptNumber;
         }
 
-        // IMPORTANT: when clicking "Received by operations" we copy the base qty to
-        // "Quantity Received by operations" for items that were NOT edited.
-        // If an item was edited before, we keep the edited value.
         const base = baseQty(it);
 
-        // If we had a pending update, apply it permanently now
+        // Remaining tab: apply the new absolute received totals we just confirmed.
+        // This ensures "Quantity Remaining" is subtracted correctly.
+        if (currentTab === "remaining") {
+          const hasQty = Object.prototype.hasOwnProperty.call(quantities || {}, it.id);
+          if (hasQty) {
+            const nextReceived = Math.max(0, Math.floor(Number(quantities[it.id]) || 0));
+            it.quantityReceived = base > 0 ? Math.min(base, nextReceived) : nextReceived;
+            it.quantityReceivedEdited = true;
+            it.quantityRemaining = Math.max(base - it.quantityReceived, 0);
+
+            // Clear any pending UI state for this item
+            delete it.pendingReceived;
+            delete it.pendingRemaining;
+            delete it.pendingReceivedAdd;
+          } else {
+            // No quantity update for this item; keep values but ensure remaining is consistent.
+            const rec = receivedQtyOrZero(it);
+            it.quantityRemaining = Math.max(base - rec, 0);
+          }
+          return;
+        }
+
+        // Non-Remaining tabs (existing behavior):
+        // - If item was never edited, fill full base qty.
+        // - If edited, keep the edited value.
+        // - If there was a pending update (rare outside Remaining), apply it.
         if (it.pendingReceived !== undefined && it.pendingReceived !== null) {
-          it.quantityReceived = it.pendingReceived;
+          it.quantityReceived = Math.max(0, Math.floor(Number(it.pendingReceived) || 0));
           it.quantityReceivedEdited = true;
           delete it.pendingReceived;
           delete it.pendingRemaining;
