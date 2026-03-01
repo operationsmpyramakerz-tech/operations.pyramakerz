@@ -120,6 +120,30 @@ document.addEventListener("DOMContentLoaded", () => {
     return `£${safe.toFixed(2)}`;
   }
 
+  // Quantity helpers
+  // - Must support fractions (e.g. 0.5)
+  // - Avoid floating point artifacts in UI (e.g. 0.30000000000004)
+  const QTY_DECIMALS = 6;
+  function roundQty(n, decimals = QTY_DECIMALS) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return 0;
+    const p = 10 ** decimals;
+    return Math.round(v * p) / p;
+  }
+
+  function fmtQty(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "0";
+    const r = roundQty(n);
+    // Keep integers clean
+    if (Number.isInteger(r)) return String(r);
+    // Show up to QTY_DECIMALS decimals, trimming trailing zeros
+    return r
+      .toFixed(QTY_DECIMALS)
+      .replace(/\.0+$/, "")
+      .replace(/(\.[0-9]*?)0+$/, "$1");
+  }
+
   function toDate(v) {
     if (!v) return null;
     try {
@@ -308,14 +332,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // Quantities helpers
   function baseQty(it) {
     const n = Number(it?.quantity);
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    return Number.isFinite(n) ? Math.max(0, roundQty(n)) : 0;
   }
 
   // Raw received quantity from Notion (independent of current tab).
   function receivedQtyRaw(it) {
     const n = Number(it?.quantityReceived);
     if (!Number.isFinite(n)) return null;
-    return Math.max(0, Math.floor(n));
+    return Math.max(0, roundQty(n));
   }
 
   // Quantity shown in the UI. In "Not Started" we treat Quantity Progress as the primary value,
@@ -335,8 +359,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Remaining quantity. Prefer the dedicated Notion column "Quantity Remaining" if present.
   function remainingQty(it) {
     const stored = Number(it?.quantityRemaining);
-    if (Number.isFinite(stored)) return Math.max(0, Math.floor(stored));
-    return Math.max(baseQty(it) - receivedQtyOrZero(it), 0);
+    if (Number.isFinite(stored)) return Math.max(0, roundQty(stored));
+    return Math.max(roundQty(baseQty(it) - receivedQtyOrZero(it)), 0);
   }
 
   function hasReceivedNumber(it) {
@@ -760,13 +784,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const qtyHTML = isRemainingTab
           ? (showDiffRemaining
-              ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyRem))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(pendingRem))}</strong></span>`
+              ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(fmtQty(qtyRem))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(fmtQty(pendingRem))}</strong></span>`
               : showDiffJustUpdated
-                ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(it.previousRemaining))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyRem))}</strong></span>`
-                : `<strong data-role="qty-val">${escapeHTML(String(hasPending ? pendingRem : qtyRem))}</strong>`)
+                ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(fmtQty(it.previousRemaining))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(fmtQty(qtyRem))}</strong></span>`
+                : `<strong data-role="qty-val">${escapeHTML(fmtQty(hasPending ? pendingRem : qtyRem))}</strong>`)
           : showStrike
-            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyReceivedDisplay))}</strong></span>`
-            : `<strong data-role="qty-val">${escapeHTML(String(qtyEffective))}</strong>`;
+            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(fmtQty(qtyBase))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(fmtQty(qtyReceivedDisplay))}</strong></span>`
+            : `<strong data-role="qty-val">${escapeHTML(fmtQty(qtyEffective))}</strong>`;
 
         const href = safeHttpUrl(it.productUrl);
         const linkHTML = href
@@ -1118,10 +1142,10 @@ async function postJson(url, body) {
     popEl.innerHTML = `
       <div class="sv-qty-popover__arrow"></div>
       <div class="sv-qty-popover__body">
-        ${isAddMode ? `<div class="sv-qty-hint">Receive quantity (remaining: ${escapeHTML(String(rem))})</div>` : ""}
+        ${isAddMode ? `<div class="sv-qty-hint">Receive quantity (remaining: ${escapeHTML(fmtQty(rem))})</div>` : ""}
         <div class="sv-qty-row">
           <button class="sv-qty-btn sv-qty-dec" type="button" aria-label="Decrease">−</button>
-          <input class="sv-qty-input" type="number" min="0" step="1" ${maxVal !== null ? `max="${escapeHTML(String(maxVal))}"` : ""} value="${escapeHTML(String(currentVal))}" />
+          <input class="sv-qty-input" type="number" min="0" step="any" ${maxVal !== null ? `max="${escapeHTML(String(maxVal))}"` : ""} value="${escapeHTML(fmtQty(currentVal))}" />
           <button class="sv-qty-btn sv-qty-inc" type="button" aria-label="Increase">+</button>
         </div>
         <div class="sv-qty-actions">
@@ -1142,19 +1166,21 @@ async function postJson(url, body) {
     input.focus(); input.select();
 
     const clamp = (n) => {
-      const v = Math.max(0, Math.floor(Number(n) || 0));
-      if (maxVal !== null) return Math.min(maxVal, v);
-      return v;
+      const raw = Number(n);
+      const v = Number.isFinite(raw) ? Math.max(0, raw) : 0;
+      const r = roundQty(v);
+      if (maxVal !== null) return Math.min(roundQty(maxVal), r);
+      return r;
     };
 
-    decBtn.addEventListener("click", () => { input.value = clamp((Number(input.value) || 0) - 1); });
-    incBtn.addEventListener("click", () => { input.value = clamp((Number(input.value) || 0) + 1); });
+    decBtn.addEventListener("click", () => { input.value = fmtQty(clamp((Number(input.value) || 0) - 1)); });
+    incBtn.addEventListener("click", () => { input.value = fmtQty(clamp((Number(input.value) || 0) + 1)); });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") saveBtn.click(); });
 
     saveBtn.addEventListener("click", async () => {
       const v = clamp(input.value);
       try {
-        const newReceived = isAddMode ? Math.min(base, rec + v) : v;
+        const newReceived = isAddMode ? roundQty(Math.min(base, rec + v)) : v;
 
         // For "Remaining" tab, we delay the API call until "Received by operations" is clicked.
         if (currentTab === "remaining") {
@@ -1162,7 +1188,7 @@ async function postJson(url, body) {
           if (idx >= 0) {
             allItems[idx].pendingReceived = newReceived;
             allItems[idx].pendingReceivedAdd = v; // used for display context if needed
-            allItems[idx].pendingRemaining = Math.max(0, base - newReceived);
+            allItems[idx].pendingRemaining = Math.max(0, roundQty(base - newReceived));
           }
 
           // Re-render to show pending state
@@ -1187,7 +1213,7 @@ async function postJson(url, body) {
           // Mark as an explicit ops edit (used to decide strike-through in "Not Started")
           allItems[idx].quantityReceivedEdited = true;
           // best-effort mirror for UI; backend is source of truth
-          allItems[idx].quantityRemaining = Math.max(base - newReceived, 0);
+          allItems[idx].quantityRemaining = Math.max(0, roundQty(base - newReceived));
         }
 
         // rebuild + rerender (keep modal open)
@@ -1260,7 +1286,8 @@ async function markReceivedByOperations(g, receiptNumber) {
 
         // If the user edited this item in Remaining tab, use the pending absolute received value.
         if (it.pendingReceived !== undefined && it.pendingReceived !== null) {
-          const v = Math.max(0, Math.floor(Number(it.pendingReceived) || 0));
+          const raw = Number(it.pendingReceived);
+          const v = Number.isFinite(raw) ? Math.max(0, roundQty(raw)) : 0;
           quantities[id] = clampToBase(v);
           return;
         }
@@ -1272,7 +1299,7 @@ async function markReceivedByOperations(g, receiptNumber) {
 
           // Only update items that still have remaining qty.
           if (remNow > 0) {
-            const nextReceived = clampToBase(Math.max(0, recNow + remNow));
+            const nextReceived = clampToBase(Math.max(0, roundQty(recNow + remNow)));
             quantities[id] = nextReceived;
           }
         }
@@ -1309,10 +1336,11 @@ async function markReceivedByOperations(g, receiptNumber) {
         if (currentTab === "remaining") {
           const hasQty = Object.prototype.hasOwnProperty.call(quantities || {}, it.id);
           if (hasQty) {
-            const nextReceived = Math.max(0, Math.floor(Number(quantities[it.id]) || 0));
+            const raw = Number(quantities[it.id]);
+            const nextReceived = Number.isFinite(raw) ? Math.max(0, roundQty(raw)) : 0;
             it.quantityReceived = base > 0 ? Math.min(base, nextReceived) : nextReceived;
             it.quantityReceivedEdited = true;
-            it.quantityRemaining = Math.max(base - it.quantityReceived, 0);
+            it.quantityRemaining = Math.max(0, roundQty(base - it.quantityReceived));
 
             // Clear any pending UI state for this item
             delete it.pendingReceived;
@@ -1321,7 +1349,7 @@ async function markReceivedByOperations(g, receiptNumber) {
           } else {
             // No quantity update for this item; keep values but ensure remaining is consistent.
             const rec = receivedQtyOrZero(it);
-            it.quantityRemaining = Math.max(base - rec, 0);
+            it.quantityRemaining = Math.max(0, roundQty(base - rec));
           }
           return;
         }
@@ -1331,7 +1359,8 @@ async function markReceivedByOperations(g, receiptNumber) {
         // - If edited, keep the edited value.
         // - If there was a pending update (rare outside Remaining), apply it.
         if (it.pendingReceived !== undefined && it.pendingReceived !== null) {
-          it.quantityReceived = Math.max(0, Math.floor(Number(it.pendingReceived) || 0));
+          const raw = Number(it.pendingReceived);
+          it.quantityReceived = Number.isFinite(raw) ? Math.max(0, roundQty(raw)) : 0;
           it.quantityReceivedEdited = true;
           delete it.pendingReceived;
           delete it.pendingRemaining;
@@ -1344,7 +1373,7 @@ async function markReceivedByOperations(g, receiptNumber) {
           it.quantityRemaining = 0;
         } else {
           const rec = receivedQtyOrZero(it);
-          it.quantityRemaining = Math.max(base - rec, 0);
+          it.quantityRemaining = Math.max(0, roundQty(base - rec));
         }
       });
 

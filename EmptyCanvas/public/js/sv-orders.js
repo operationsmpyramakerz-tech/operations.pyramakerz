@@ -77,6 +77,26 @@
     return `£${safe.toFixed(2)}`;
   }
 
+  // Quantity helpers (support fractions like 0.5)
+  const QTY_DECIMALS = 6;
+  function roundQty(n, decimals = QTY_DECIMALS) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return 0;
+    const p = 10 ** decimals;
+    return Math.round(v * p) / p;
+  }
+
+  function fmtQty(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "0";
+    const r = roundQty(n);
+    if (Number.isInteger(r)) return String(r);
+    return r
+      .toFixed(QTY_DECIMALS)
+      .replace(/\.0+$/, "")
+      .replace(/(\.[0-9]*?)0+$/, "$1");
+  }
+
   function fmtDateOnly(createdTime) {
     const d = toDate(createdTime);
     if (Number.isNaN(d.getTime())) return "";
@@ -496,8 +516,8 @@
 
           const showEdited = qtyEdited !== null && qtyEdited !== undefined && Number(qtyEdited) !== qtyReq;
           const qtyHTML = showEdited
-            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(String(qtyReq))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(String(qtyEdited))}</strong></span>`
-            : `<strong data-role="qty-val">${escapeHTML(String(qtyReq))}</strong>`;
+            ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(fmtQty(qtyReq))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(fmtQty(qtyEdited))}</strong></span>`
+            : `<strong data-role="qty-val">${escapeHTML(fmtQty(qtyReq))}</strong>`;
 
           const pillVars = notionColorVars(it.approvalColor);
           const statusLabel = normalizeApproval(it.approval);
@@ -599,7 +619,7 @@
       <div class="sv-qty-popover__body">
         <div class="sv-qty-row">
           <button class="sv-qty-btn sv-qty-dec" type="button" aria-label="Decrease">−</button>
-          <input class="sv-qty-input" type="number" min="0" step="1" value="${escapeHTML(String(currentVal))}" />
+          <input class="sv-qty-input" type="number" min="0" step="any" value="${escapeHTML(fmtQty(currentVal))}" />
           <button class="sv-qty-btn sv-qty-inc" type="button" aria-label="Increase">+</button>
         </div>
         <div class="sv-qty-actions">
@@ -619,12 +639,18 @@
 
     input.focus(); input.select();
 
-    decBtn.addEventListener("click", () => { input.value = Math.max(0, (Number(input.value) || 0) - 1); });
-    incBtn.addEventListener("click", () => { input.value = Math.max(0, (Number(input.value) || 0) + 1); });
+    const clamp = (n) => {
+      const raw = Number(n);
+      const v = Number.isFinite(raw) ? Math.max(0, raw) : 0;
+      return roundQty(v);
+    };
+
+    decBtn.addEventListener("click", () => { input.value = fmtQty(clamp((Number(input.value) || 0) - 1)); });
+    incBtn.addEventListener("click", () => { input.value = fmtQty(clamp((Number(input.value) || 0) + 1)); });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") saveBtn.click(); });
 
     saveBtn.addEventListener("click", async () => {
-      const v = Math.max(0, Math.floor(Number(input.value) || 0));
+      const v = clamp(input.value);
       try {
         await http.post(`/api/sv-orders/${encodeURIComponent(id)}/quantity`, { value: v });
 
@@ -632,7 +658,8 @@
         const idx = allItems.findIndex((x) => String(x.id) === String(id));
         if (idx >= 0) {
           const req = Number(allItems[idx].quantity) || 0;
-          allItems[idx].quantityEdited = (v === req) ? null : v;
+          // Compare using the same rounding to avoid floating point edge cases
+          allItems[idx].quantityEdited = (roundQty(v) === roundQty(req)) ? null : v;
         }
 
         toastOK("Quantity updated.");

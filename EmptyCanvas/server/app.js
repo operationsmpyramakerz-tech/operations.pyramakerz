@@ -4652,6 +4652,13 @@ app.get(
         return null;
       };
 
+      // Support fractional quantities (e.g. 0.5) and avoid floating point artifacts.
+      const roundQty = (n) => {
+        const v = Number(n);
+        if (!Number.isFinite(v)) return 0;
+        return Math.round(v * 1e6) / 1e6;
+      };
+
       const tryEtaProp = (prop) => {
         if (!prop) return null;
         try {
@@ -5176,7 +5183,7 @@ const qtyRemainingStored =
 // This also prevents showing an unwanted strike-through when the received column is prefilled with 0.
 const quantityReceivedEdited =
   qtyReceived !== null && qtyReceived !== undefined
-    ? (Math.floor(Number(qtyReceived) || 0) !== 0 || qtyRemainingStored !== null)
+    ? (Math.abs(Number(qtyReceived) || 0) > 1e-9 || qtyRemainingStored !== null)
     : false;
 
 const qtyRemainingComputed = Math.max(
@@ -5664,7 +5671,7 @@ app.post(
                   ? Number(qtyRequestedRaw)
                   : 0;
           }
-          const safeBaseQty = Math.max(0, Math.floor(baseQtyNum || 0));
+          const safeBaseQty = Math.max(0, roundQty(baseQtyNum || 0));
 
           // Received quantity
           let receivedFinal = null;
@@ -5673,7 +5680,8 @@ app.post(
           const explicitQty = quantities?.[id];
 
           if (typeof explicitQty === "number" && Number.isFinite(explicitQty) && receivedProp) {
-            receivedFinal = Math.max(0, Math.floor(explicitQty));
+            const v = Math.max(0, roundQty(explicitQty));
+            receivedFinal = safeBaseQty > 0 ? Math.min(safeBaseQty, v) : v;
             updateProps[receivedProp] = { number: receivedFinal };
           } else if (receivedProp && pageProps) {
             const recValRaw = parseNumberProp(pageProps[receivedProp]);
@@ -5696,14 +5704,15 @@ app.post(
                 Number.isFinite(Number(remRaw));
             }
 
-            const placeholderZero = recVal !== null && Math.floor(Number(recVal) || 0) === 0 && !remainingWasSet;
+            const placeholderZero = recVal !== null && Math.abs(Number(recVal) || 0) < 1e-9 && !remainingWasSet;
 
             // Fill only if it's missing (null) OR looks like an unedited placeholder 0
             if (recVal === null || (placeholderZero && safeBaseQty > 0)) {
               receivedFinal = safeBaseQty;
               updateProps[receivedProp] = { number: receivedFinal };
             } else {
-              receivedFinal = Math.max(0, Math.floor(Number(recVal) || 0));
+              const v = Math.max(0, roundQty(Number(recVal) || 0));
+              receivedFinal = safeBaseQty > 0 ? Math.min(safeBaseQty, v) : v;
             }
           }
 
@@ -5712,8 +5721,8 @@ app.post(
             const recForRemaining =
               receivedFinal === null || receivedFinal === undefined
                 ? 0
-                : Math.max(0, Math.floor(Number(receivedFinal) || 0));
-            const remainingVal = Math.max(0, safeBaseQty - recForRemaining);
+                : Math.max(0, roundQty(Number(receivedFinal) || 0));
+            const remainingVal = Math.max(0, roundQty(safeBaseQty - recForRemaining));
             updateProps[remainingProp] = { number: remainingVal };
           }
 
@@ -5845,7 +5854,14 @@ app.post(
         return res.status(400).json({ error: "value must be a non-negative number" });
       }
 
-      const vNum = Math.max(0, Math.floor(vNumRaw));
+      // Support fractional quantities (e.g. 0.5). Keep values stable by rounding.
+      const roundQty = (n) => {
+        const v = Number(n);
+        if (!Number.isFinite(v)) return 0;
+        return Math.round(v * 1e6) / 1e6;
+      };
+
+      const vNum = Math.max(0, roundQty(vNumRaw));
 
       // Detect received quantity property name (Number)
       const receivedProp = (await (async () => {
@@ -5926,8 +5942,8 @@ app.post(
               ? Number(qtyRequestedRaw)
               : 0;
       }
-      const safeBaseQty = Math.max(0, Math.floor(baseQtyNum || 0));
-      const remainingVal = Math.max(0, safeBaseQty - vNum);
+      const safeBaseQty = Math.max(0, roundQty(baseQtyNum || 0));
+      const remainingVal = Math.max(0, roundQty(safeBaseQty - vNum));
 
       const updateProps = {
         [receivedProp]: { number: vNum },
@@ -11803,9 +11819,16 @@ app.post("/api/sv-orders/:id/quantity", requireAuth, requirePage("Orders Review"
     // Keep the original "Quantity Requested" intact and store edits in
     // "Quantity Edited by supervisor".
     const pg = await notion.pages.retrieve({ page_id: pageId });
-    const requested = Number(pg?.properties?.[reqQtyProp]?.number ?? 0);
-    const newVal = Math.max(0, Math.floor(value));
-    const editedVal = (Number.isFinite(requested) && newVal === requested) ? null : newVal;
+    // Support fractional quantities (e.g. 0.5)
+    const roundQty = (n) => {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return 0;
+      return Math.round(v * 1e6) / 1e6;
+    };
+
+    const requested = roundQty(Number(pg?.properties?.[reqQtyProp]?.number ?? 0));
+    const newVal = Math.max(0, roundQty(value));
+    const editedVal = (Number.isFinite(requested) && roundQty(newVal) === roundQty(requested)) ? null : newVal;
 
     await notion.pages.update({
       page_id: pageId,
