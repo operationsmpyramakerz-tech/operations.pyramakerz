@@ -142,6 +142,25 @@
     gap: 10px;
     margin: 0 0 0.9rem;
   }
+  .cart-back-btn{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 34px;
+    padding: 0 0.95rem;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    color: #0f172a;
+    font-weight: 900;
+    cursor: pointer;
+    box-shadow: 0 14px 28px -24px rgba(15, 23, 42, 0.55);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .cart-back-btn:hover{
+    background: #f1f5f9;
+    transform: translateY(-1px);
+  }
   .cart-type-pill .label{
     color: #64748b;
     font-weight: 900;
@@ -824,6 +843,7 @@
       <!-- Step 2: Cart (only for Request Products for now) -->
       <section id="cartStep" style="display:none;" aria-label="Shopping cart step">
         <div class="cart-type-pill" id="cartTypePill" style="display:none;">
+          <button class="cart-back-btn" id="cartBackBtn" type="button">Back</button>
           <span class="label">Order Type</span>
           <span class="value" id="cartTypeValue">—</span>
         </div>

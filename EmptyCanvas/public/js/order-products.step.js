@@ -25,6 +25,7 @@
   const cartStepEl = document.getElementById('cartStep');
   const cartTypePillEl = document.getElementById('cartTypePill');
   const cartTypeValueEl = document.getElementById('cartTypeValue');
+  const cartBackBtn = document.getElementById('cartBackBtn');
 
   const passwordInput = document.getElementById('voucherInput');
   const reasonInput = document.getElementById('orderReasonSummary');
@@ -90,7 +91,7 @@
     try { sessionStorage.removeItem(ORDER_TYPE_STORAGE_KEY); } catch {}
   }
 
-  function setUrlOrderType(type) {
+  function setUrlOrderType(type, { replace = false } = {}) {
     try {
       const u = new URL(window.location.href);
       const v = String(type || '').trim();
@@ -100,7 +101,8 @@
       const next = u.toString();
       // Avoid pushing duplicate entries
       if (next === window.location.href) return;
-      history.pushState({}, '', next);
+      const fn = replace ? 'replaceState' : 'pushState';
+      history[fn]({}, '', next);
     } catch {}
   }
 
@@ -168,6 +170,9 @@
     }
     cartTypeValueEl.textContent = v;
     cartTypePillEl.style.display = 'inline-flex';
+
+    // In edit mode, we don't want a back button to the order type step.
+    if (cartBackBtn) cartBackBtn.style.display = isEditMode ? 'none' : '';
   }
 
   async function bootCart() {
@@ -247,14 +252,24 @@
     }
 
     // Back button (from placeholder)
-    backToTypesBtn?.addEventListener('click', () => {
+    const goBackToOrderTypes = () => {
       selectedOrderType = '';
       clearStoredOrderType();
-      setUrlOrderType('');
+
+      // Replace the URL instead of pushing a new history entry.
+      // This makes the browser Back behave naturally (go to the previous app page).
+      setUrlOrderType('', { replace: true });
       setCartTypePill('');
       showOnly('types');
       renderOrderTypeTabs(safeOptions, '');
-    });
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
+    };
+
+    // Back button (from placeholder)
+    backToTypesBtn?.addEventListener('click', goBackToOrderTypes);
+
+    // Back button (from cart)
+    cartBackBtn?.addEventListener('click', goBackToOrderTypes);
 
     // Handle browser back/forward
     window.addEventListener('popstate', () => {
