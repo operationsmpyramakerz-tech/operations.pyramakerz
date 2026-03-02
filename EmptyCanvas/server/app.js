@@ -791,6 +791,20 @@ async function detectStatusPropName() {
   );
 }
 
+// خاصية Order Type (select/status) — لاستخدام صفحة Create New Order
+async function detectOrderTypePropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "Order Type",
+      "Order type",
+      "OrderType",
+      "Type",
+      "Order_Type",
+    ]) || null
+  );
+}
+
 
 
 // ===== Order Group ID (Order - ID) helpers =====
@@ -8157,6 +8171,79 @@ app.get(
       
 // Components list — requires Create New Order
 app.get(
+  "/api/order-types",
+  requireAuth,
+  requirePage("Create New Order"),
+  async (req, res) => {
+    try {
+      const key = "cache:api:order-types:v1";
+
+      const payload = await cacheGetOrSet(key, 10 * 60, async () => {
+        const extractOptions = (propDef) => {
+          try {
+            if (!propDef) return [];
+            if (propDef.type === "select") {
+              return (propDef.select?.options || []).map((o) => o?.name).filter(Boolean);
+            }
+            if (propDef.type === "status") {
+              return (propDef.status?.options || []).map((o) => o?.name).filter(Boolean);
+            }
+            return [];
+          } catch {
+            return [];
+          }
+        };
+
+        const tryDb = async (dbId) => {
+          if (!dbId) return { options: [], source: null };
+
+          // DB schema doesn't change often; cache it.
+          const propsKey = `cache:notion:dbProps:${normalizeNotionId(dbId)}:v1`;
+          const props = await cacheGetOrSet(propsKey, 10 * 60, async () => {
+            const db = await notion.databases.retrieve({ database_id: dbId });
+            return db.properties || {};
+          });
+
+          const propName =
+            pickPropName(props, [
+              "Order Type",
+              "Order type",
+              "OrderType",
+              "Type",
+              "Order_Type",
+            ]) || null;
+
+          if (!propName) return { options: [], source: null };
+
+          const options = extractOptions(props?.[propName] || null);
+          return {
+            options: Array.isArray(options) ? options.filter(Boolean) : [],
+            source: { database: normalizeNotionId(dbId), property: propName, type: props?.[propName]?.type || null },
+          };
+        };
+
+        // Preference:
+        // 1) Products list DB (Products_Database)
+        // 2) Orders DB (Orders_Database)
+        const candidates = [componentsDatabaseId, ordersDatabaseId].filter(Boolean);
+
+        for (const dbId of candidates) {
+          const r = await tryDb(dbId);
+          if (Array.isArray(r.options) && r.options.length) return r;
+        }
+
+        return { options: [], source: null };
+      });
+
+      res.json(payload);
+    } catch (e) {
+      console.error("/api/order-types error:", e?.body || e?.message || e);
+      res.status(500).json({ options: [], error: "Failed to load order types" });
+    }
+  },
+);
+
+app.get(
   "/api/components",
   requireAuth,
   requirePage("Create New Order"),
@@ -8635,6 +8722,8 @@ app.post(
       }
 
 let { products } = req.body || {};
+// Optional: order type (select/status) — used by the Shopping Cart tabs
+const orderType = String(req.body?.orderType || "").trim();
 if (!Array.isArray(products) || products.length === 0) {
   const d = req.session.orderDraft;
   if (d && Array.isArray(d.products) && d.products.length > 0) {
@@ -8661,6 +8750,18 @@ if (cleanedProducts.some(p => !p.reason)) {
     
 
     try {
+      // Detect Order Type property (if provided) so we can store it on the order pages.
+      const orderTypePropName = orderType ? await detectOrderTypePropName() : null;
+      const _dbPropsForOrderType = orderTypePropName ? await getOrdersDBProps() : null;
+      const _orderTypePropType = orderTypePropName
+        ? String(_dbPropsForOrderType?.[orderTypePropName]?.type || "select")
+        : null;
+      const orderTypePropValue = orderTypePropName
+        ? (_orderTypePropType === "status"
+            ? { status: { name: orderType } }
+            : { select: { name: orderType } })
+        : null;
+
       const userQuery = await notion.databases.query({
         database_id: teamMembersDatabaseId,
         filter: { property: "Name", title: { equals: req.session.username } },
@@ -8803,6 +8904,9 @@ if (cleanedProducts.some(p => !p.reason)) {
             ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
               ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
               : {}),
+            ...(orderTypePropName && orderTypePropValue
+              ? { [orderTypePropName]: orderTypePropValue }
+              : {}),
           };
 
           if (t.repurpose) {
@@ -8840,6 +8944,9 @@ if (cleanedProducts.some(p => !p.reason)) {
               Product: { relation: [{ id: product.id }] },
               [createStatusProp]: statusPlaced,
               "Teams Members": { relation: [{ id: userId }] },
+              ...(orderTypePropName && orderTypePropValue
+                ? { [orderTypePropName]: orderTypePropValue }
+                : {}),
               ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
                 ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
                 : {}),
@@ -8883,6 +8990,9 @@ if (cleanedProducts.some(p => !p.reason)) {
               Product: { relation: [{ id: product.id }] },
               "Status": { select: { name: "Order Placed" } },
               "Teams Members": { relation: [{ id: userId }] },
+              ...(orderTypePropName && orderTypePropValue
+                ? { [orderTypePropName]: orderTypePropValue }
+                : {}),
               ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
                 ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
                 : {}),

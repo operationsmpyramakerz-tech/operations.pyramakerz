@@ -25,6 +25,94 @@
 
 <!-- Create New Order (Products) — Shopping Cart UI -->
 <style>
+  /* ---------------- Order Type Step ---------------- */
+  .order-type-step{
+    margin-bottom: 1.25rem;
+  }
+  .order-type-title{
+    font-size: 1.4rem;
+    font-weight: 900;
+    color: #0f172a;
+    margin: 0 0 0.9rem;
+  }
+  .order-type-tabs{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .order-type-btn{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 42px;
+    padding: 0 1.2rem;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    color: #0f172a;
+    font-weight: 900;
+    cursor: pointer;
+    box-shadow: 0 14px 28px -24px rgba(15, 23, 42, 0.55);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .order-type-btn:hover{
+    background: #f1f5f9;
+    transform: translateY(-1px);
+  }
+  .order-type-btn.is-active{
+    background: #0b1220;
+    color: #fff;
+    border-color: #0b1220;
+  }
+  .order-type-loading{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #64748b;
+    font-weight: 800;
+  }
+  .order-type-dot{
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #94a3b8;
+    animation: orderTypePulse 1s infinite ease-in-out;
+  }
+  @keyframes orderTypePulse{
+    0%{ opacity: 0.35; transform: scale(0.95); }
+    50%{ opacity: 1; transform: scale(1); }
+    100%{ opacity: 0.35; transform: scale(0.95); }
+  }
+
+  /* Step placeholder (for order types that will be implemented later) */
+  .order-type-placeholder{
+    padding: 1.25rem;
+  }
+  .order-type-placeholder h3{
+    margin: 0 0 0.35rem;
+    font-size: 1.25rem;
+    font-weight: 900;
+    color: #0f172a;
+  }
+  .order-type-placeholder p{
+    margin: 0.35rem 0 1.1rem;
+    color: #64748b;
+    font-weight: 700;
+  }
+  .order-type-back{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    padding: 0 1.1rem;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    color: #0f172a;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
   .create-order-cart-wrap{
     /* Full width inside main content (avoid the 2-column .container grid) */
     max-width: 100%;
@@ -45,6 +133,31 @@
     flex-direction: column;
     gap: 1.6rem;
     align-items: stretch;
+  }
+
+  /* Title line above the cart, showing the chosen order type */
+  .cart-type-pill{
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 0.9rem;
+  }
+  .cart-type-pill .label{
+    color: #64748b;
+    font-weight: 900;
+    font-size: 0.95rem;
+  }
+  .cart-type-pill .value{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 34px;
+    padding: 0 0.95rem;
+    border-radius: 999px;
+    background: #0b1220;
+    color: #fff;
+    font-weight: 900;
+    box-shadow: 0 16px 30px -24px rgba(15, 23, 42, 0.6);
   }
 
   /* Cart full width, Summary below aligned right */
@@ -688,7 +801,34 @@
     <!-- Shopping Cart UI (New Design) -->
     <!-- Use container-full-width so the cart is not forced into a 2-column grid -->
     <main class="container-full-width create-order-cart-wrap">
-            <div class="cart-grid">
+      <!-- Step 1: Choose Order Type -->
+      <section class="order-type-step" id="orderTypeStep" aria-label="Choose order type">
+        <div class="order-type-title">Choose Order Type</div>
+        <div class="order-type-tabs" id="orderTypeTabs">
+          <div class="order-type-loading" aria-live="polite">
+            <span class="order-type-dot" aria-hidden="true"></span>
+            <span>Loading order types…</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 2 (placeholder): for order types not implemented yet -->
+      <section id="orderTypePlaceholderStep" style="display:none;" aria-label="Order type details">
+        <div class="cart-card order-type-placeholder">
+          <h3 id="orderTypePlaceholderTitle">Order Type</h3>
+          <p>This order type will be configured next. Please choose <b>Request Products</b> for now.</p>
+          <button class="order-type-back" id="orderTypeBackBtn" type="button">Back</button>
+        </div>
+      </section>
+
+      <!-- Step 2: Cart (only for Request Products for now) -->
+      <section id="cartStep" style="display:none;" aria-label="Shopping cart step">
+        <div class="cart-type-pill" id="cartTypePill" style="display:none;">
+          <span class="label">Order Type</span>
+          <span class="value" id="cartTypeValue">—</span>
+        </div>
+
+        <div class="cart-grid">
         <!-- Cart (left) -->
         <section class="cart">
           <div class="cart-card" aria-label="Shopping cart items">
@@ -756,6 +896,7 @@
           </div>
         </aside>
       </div>
+      </section>
     </main>
 
     <!-- Update Cart Modal ("small page") -->

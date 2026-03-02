@@ -16,6 +16,16 @@
   const updateCartBtn = document.getElementById('updateCartBtn');
   const checkoutBtn = document.getElementById('checkoutBtn');
 
+  // Order Type flow (Step 1 -> Step 2)
+  const orderTypeStepEl = document.getElementById('orderTypeStep');
+  const orderTypeTabsEl = document.getElementById('orderTypeTabs');
+  const placeholderStepEl = document.getElementById('orderTypePlaceholderStep');
+  const placeholderTitleEl = document.getElementById('orderTypePlaceholderTitle');
+  const backToTypesBtn = document.getElementById('orderTypeBackBtn');
+  const cartStepEl = document.getElementById('cartStep');
+  const cartTypePillEl = document.getElementById('cartTypePill');
+  const cartTypeValueEl = document.getElementById('cartTypeValue');
+
   const passwordInput = document.getElementById('voucherInput');
   const reasonInput = document.getElementById('orderReasonSummary');
 
@@ -33,6 +43,232 @@
 
   // When opened from Current Orders -> Edit, we add ?edit=1
   const isEditMode = new URLSearchParams(window.location.search).get('edit') === '1';
+
+  // ---------------------------- Order Type (tabs) ----------------------------
+  const ORDER_TYPE_STORAGE_KEY = 'shopping_cart:last_order_type:v1';
+  const ORDER_TYPE_STORAGE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+  const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const REQUEST_PRODUCTS_KEY = normKey('Request Products');
+
+  let selectedOrderType = '';
+  let cartBooted = false;
+
+  function readOrderTypeFromUrl() {
+    try {
+      return String(new URLSearchParams(window.location.search).get('type') || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  function storeOrderType(type) {
+    try {
+      const v = String(type || '').trim();
+      if (!v) return;
+      const payload = { v, ts: Date.now() };
+      sessionStorage.setItem(ORDER_TYPE_STORAGE_KEY, JSON.stringify(payload));
+    } catch {}
+  }
+
+  function loadStoredOrderType() {
+    try {
+      const raw = sessionStorage.getItem(ORDER_TYPE_STORAGE_KEY);
+      if (!raw) return '';
+      const parsed = JSON.parse(raw);
+      const v = String(parsed?.v || '').trim();
+      const ts = Number(parsed?.ts || 0);
+      if (!v || !Number.isFinite(ts)) return '';
+      if (Date.now() - ts > ORDER_TYPE_STORAGE_TTL_MS) return '';
+      return v;
+    } catch {
+      return '';
+    }
+  }
+
+  function clearStoredOrderType() {
+    try { sessionStorage.removeItem(ORDER_TYPE_STORAGE_KEY); } catch {}
+  }
+
+  function setUrlOrderType(type) {
+    try {
+      const u = new URL(window.location.href);
+      const v = String(type || '').trim();
+      if (v) u.searchParams.set('type', v);
+      else u.searchParams.delete('type');
+      // Keep other params (like edit=1)
+      const next = u.toString();
+      // Avoid pushing duplicate entries
+      if (next === window.location.href) return;
+      history.pushState({}, '', next);
+    } catch {}
+  }
+
+  function showOnly(step) {
+    const show = (el, on) => {
+      if (!el) return;
+      el.style.display = on ? '' : 'none';
+    };
+    show(orderTypeStepEl, step === 'types');
+    show(placeholderStepEl, step === 'placeholder');
+    show(cartStepEl, step === 'cart');
+  }
+
+  function renderOrderTypeTabs(options, activeType) {
+    if (!orderTypeTabsEl) return;
+    const opts = Array.isArray(options) ? options.filter(Boolean) : [];
+
+    // Clear
+    orderTypeTabsEl.innerHTML = '';
+
+    if (opts.length === 0) {
+      orderTypeTabsEl.innerHTML = `
+        <div class="order-type-loading" aria-live="polite">
+          <span class="order-type-dot" aria-hidden="true"></span>
+          <span>No order types found.</span>
+        </div>
+      `;
+      return;
+    }
+
+    for (const name of opts) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'order-type-btn';
+      btn.textContent = String(name);
+      btn.dataset.type = String(name);
+      if (activeType && normKey(activeType) === normKey(name)) btn.classList.add('is-active');
+      btn.addEventListener('click', () => {
+        chooseOrderType(String(name));
+      });
+      orderTypeTabsEl.appendChild(btn);
+    }
+  }
+
+  async function fetchOrderTypes() {
+    try {
+      const res = await fetch('/api/order-types');
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const opts = Array.isArray(data) ? data : data?.options;
+      return Array.isArray(opts) ? opts.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    } catch (e) {
+      console.warn('Failed to load order types:', e);
+      return [];
+    }
+  }
+
+  function setCartTypePill(type) {
+    const v = String(type || '').trim();
+    if (!cartTypePillEl || !cartTypeValueEl) return;
+    if (!v) {
+      cartTypePillEl.style.display = 'none';
+      cartTypeValueEl.textContent = '—';
+      return;
+    }
+    cartTypeValueEl.textContent = v;
+    cartTypePillEl.style.display = 'inline-flex';
+  }
+
+  async function bootCart() {
+    if (cartBooted) return;
+    cartBooted = true;
+
+    // Run the existing cart init flow
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initCart, { once: true });
+    } else {
+      initCart();
+    }
+  }
+
+  function chooseOrderType(type) {
+    const v = String(type || '').trim();
+    if (!v) return;
+
+    selectedOrderType = v;
+    storeOrderType(v);
+    setUrlOrderType(v);
+
+    // Update active state
+    try {
+      const buttons = orderTypeTabsEl?.querySelectorAll?.('button.order-type-btn') || [];
+      buttons.forEach((b) => {
+        b.classList.toggle('is-active', normKey(b.dataset.type) === normKey(v));
+      });
+    } catch {}
+
+    // Request Products -> show the existing cart UI
+    if (normKey(v) === REQUEST_PRODUCTS_KEY || isEditMode) {
+      setCartTypePill(v);
+      showOnly('cart');
+      bootCart();
+      return;
+    }
+
+    // Other order types will be configured later
+    if (placeholderTitleEl) placeholderTitleEl.textContent = v;
+    showOnly('placeholder');
+  }
+
+  async function initOrderTypeFlow() {
+    // Edit mode should open the cart directly (no order type step)
+    if (isEditMode) {
+      selectedOrderType = readOrderTypeFromUrl() || loadStoredOrderType() || '';
+      if (selectedOrderType) setCartTypePill(selectedOrderType);
+      showOnly('cart');
+      await bootCart();
+      return;
+    }
+
+    // Normal flow: show tabs first
+    showOnly('types');
+
+    // Load options
+    const options = await fetchOrderTypes();
+
+    // Fallback if Notion schema is not available yet
+    const safeOptions = options.length
+      ? options
+      : ['Request Products', 'Withdraw Products', 'Request Maintenance'];
+
+    // Determine selected type from URL (highest priority) then storage
+    const fromUrl = readOrderTypeFromUrl();
+    const fromStorage = loadStoredOrderType();
+    const initial = fromUrl || fromStorage || '';
+
+    renderOrderTypeTabs(safeOptions, initial);
+
+    // If URL already has a type, open its second page immediately
+    if (initial) {
+      // Only auto-open if it exists in the options list
+      const exists = safeOptions.some((x) => normKey(x) === normKey(initial));
+      if (exists) chooseOrderType(initial);
+    }
+
+    // Back button (from placeholder)
+    backToTypesBtn?.addEventListener('click', () => {
+      selectedOrderType = '';
+      clearStoredOrderType();
+      setUrlOrderType('');
+      setCartTypePill('');
+      showOnly('types');
+      renderOrderTypeTabs(safeOptions, '');
+    });
+
+    // Handle browser back/forward
+    window.addEventListener('popstate', () => {
+      const t = readOrderTypeFromUrl();
+      if (!t) {
+        selectedOrderType = '';
+        setCartTypePill('');
+        showOnly('types');
+        renderOrderTypeTabs(safeOptions, '');
+        return;
+      }
+      chooseOrderType(t);
+    });
+  }
 
   // ---------------------------- UI helpers ----------------------------
   function toast(type, title, message) {
@@ -851,7 +1087,7 @@
       const res = await fetch('/api/submit-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: cart, password }),
+        body: JSON.stringify({ products: cart, password, orderType: selectedOrderType || null }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -952,7 +1188,7 @@
   }
 
   // ---------------------------- Init ----------------------------
-  async function init() {
+  async function initCart() {
     // Disable browser autofill on Reason + Password (user should type)
     hardDisableAutofill(reasonInput, { clearNow: true });
     hardDisableAutofill(passwordInput, { clearNow: true });
@@ -1017,11 +1253,11 @@
     if (readyToUse && cart.length) await persistDraft({ silent: true });
   }
 
-  // Ensure init runs even if this script is loaded after DOMContentLoaded.
+  // Boot the Order Type flow (it will lazy-start the cart when needed)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', initOrderTypeFlow, { once: true });
   } else {
-    init();
+    initOrderTypeFlow();
   }
 
   // ---------------------------- Quantity helpers ----------------------------
