@@ -51,9 +51,45 @@
 
   const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const REQUEST_PRODUCTS_KEY = normKey('Request Products');
+  const WITHDRAW_PRODUCTS_KEY = normKey('Withdraw Products');
 
   let selectedOrderType = '';
   let cartBooted = false;
+
+  function isWithdrawType(type = selectedOrderType) {
+    return normKey(type) === WITHDRAW_PRODUCTS_KEY;
+  }
+
+  function qtySign(type = selectedOrderType) {
+    return isWithdrawType(type) ? -1 : 1;
+  }
+
+  function applyOrderTypeUi(type = selectedOrderType) {
+    const withdraw = isWithdrawType(type);
+
+    // Page title
+    try {
+      const pageTitleEl = document.querySelector('.page-title');
+      if (pageTitleEl) pageTitleEl.textContent = withdraw ? 'Withdraw Products' : 'Shopping Cart';
+      document.title = withdraw ? 'Withdraw Products' : 'Shopping Cart';
+    } catch {}
+
+    // Modal title
+    try {
+      const modalTitle = document.getElementById('updateCartTitle');
+      if (modalTitle) modalTitle.textContent = withdraw ? 'Update Withdraw Cart' : 'Update Cart';
+    } catch {}
+
+    // Buttons
+    if (updateCartBtn) updateCartBtn.textContent = withdraw ? 'Update Withdraw Cart' : 'Update Cart';
+    if (checkoutBtn) checkoutBtn.textContent = withdraw ? 'Withdraw Now' : 'Checkout Now';
+
+    // Summary title
+    try {
+      const summaryTitleEl = document.querySelector('.summary-title');
+      if (summaryTitleEl) summaryTitleEl.textContent = withdraw ? 'Withdrawal Summary' : 'Order Summary';
+    } catch {}
+  }
 
   function readOrderTypeFromUrl() {
     try {
@@ -166,10 +202,15 @@
     if (!v) {
       cartTypePillEl.style.display = 'none';
       cartTypeValueEl.textContent = '—';
+      // Reset UI to default state
+      applyOrderTypeUi('');
       return;
     }
     cartTypeValueEl.textContent = v;
     cartTypePillEl.style.display = 'inline-flex';
+
+    // Apply UI copy for this order type
+    applyOrderTypeUi(v);
 
     // In edit mode, we don't want a back button to the order type step.
     if (cartBackBtn) cartBackBtn.style.display = isEditMode ? 'none' : '';
@@ -203,8 +244,8 @@
       });
     } catch {}
 
-    // Request Products -> show the existing cart UI
-    if (normKey(v) === REQUEST_PRODUCTS_KEY || isEditMode) {
+    // Request Products / Withdraw Products -> show the cart UI
+    if (normKey(v) === REQUEST_PRODUCTS_KEY || normKey(v) === WITHDRAW_PRODUCTS_KEY || isEditMode) {
       setCartTypePill(v);
       showOnly('cart');
       bootCart();
@@ -587,7 +628,8 @@
   }
 
   function itemTotal(p) {
-    return unitPriceOf(p.id) * (Number(p.quantity) || 0);
+    // Withdraw mode uses negative totals (because Qty is displayed/recorded as negative).
+    return unitPriceOf(p.id) * (Number(p.quantity) || 0) * qtySign();
   }
 
   function updateSummary() {
@@ -599,10 +641,12 @@
   }
 
   function renderEmptyState() {
+    const withdraw = isWithdrawType();
+    const btnLabel = withdraw ? 'Update Withdraw Cart' : 'Update Cart';
     cartItemsEl.innerHTML = `
       <div class="cart-empty">
-        <strong>Your cart is empty</strong>
-        <div>Click <b>Update Cart</b> to add a component.</div>
+        <strong>${withdraw ? 'Your withdrawal cart is empty' : 'Your cart is empty'}</strong>
+        <div>Click <b>${escapeHtml(btnLabel)}</b> to add a component.</div>
       </div>
     `;
   }
@@ -701,7 +745,8 @@
 
       const qtyVal = document.createElement('div');
       qtyVal.className = 'qty-value';
-      qtyVal.textContent = formatQty(qty);
+      // Withdraw mode: show the qty as a negative number in the UI
+      qtyVal.textContent = isWithdrawType() ? `-${formatQty(qty)}` : formatQty(qty);
 
       const incBtn = document.createElement('button');
       incBtn.className = 'qty-btn';
@@ -1066,22 +1111,31 @@
 
   // ---------------------------- Checkout ----------------------------
   async function checkout() {
+    const withdraw = isWithdrawType();
     if (!Array.isArray(cart) || cart.length === 0) {
-      toast('error', 'Empty cart', 'Please add at least one component.');
+      toast(
+        'error',
+        withdraw ? 'Empty withdrawal' : 'Empty cart',
+        withdraw ? 'Please add at least one component to withdraw.' : 'Please add at least one component.',
+      );
       return;
     }
 
     syncReasonFromInput();
 
     if (!String(globalReason || '').trim()) {
-      toast('error', 'Reason required', 'Please enter the order reason.');
+      toast('error', 'Reason required', withdraw ? 'Please enter the withdrawal reason.' : 'Please enter the order reason.');
       try { reasonInput?.focus?.(); } catch {}
       return;
     }
 
     const password = getPasswordValue();
     if (!password) {
-      toast('error', 'Password required', 'Please enter your password before checkout.');
+      toast(
+        'error',
+        'Password required',
+        withdraw ? 'Please enter your password before confirming the withdrawal.' : 'Please enter your password before checkout.',
+      );
       try { passwordInput?.focus?.(); } catch {}
       return;
     }
@@ -1094,7 +1148,13 @@
       checkoutBtn.setAttribute('aria-busy', 'true');
     }
 
-    showSaving(isEditMode ? 'Saving changes...' : 'Submitting order...');
+    showSaving(
+      isEditMode
+        ? 'Saving changes...'
+        : withdraw
+          ? 'Submitting withdrawal...'
+          : 'Submitting order...'
+    );
 
     try {
       await persistDraft({ silent: true });
@@ -1117,8 +1177,12 @@
 
       toast(
         'success',
-        isEditMode ? 'Order Updated!' : 'Order Submitted!',
-        isEditMode ? 'Your order has been updated successfully.' : 'Your order has been created successfully.',
+        isEditMode
+          ? (withdraw ? 'Withdrawal Updated!' : 'Order Updated!')
+          : (withdraw ? 'Withdrawal Submitted!' : 'Order Submitted!'),
+        isEditMode
+          ? (withdraw ? 'Your withdrawal has been updated successfully.' : 'Your order has been updated successfully.')
+          : (withdraw ? 'Your withdrawal has been created successfully.' : 'Your order has been created successfully.'),
       );
 
       cart = [];

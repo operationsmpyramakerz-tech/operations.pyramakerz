@@ -8724,6 +8724,12 @@ app.post(
 let { products } = req.body || {};
 // Optional: order type (select/status) — used by the Shopping Cart tabs
 const orderType = String(req.body?.orderType || "").trim();
+
+// Withdraw Products: store quantities as negative numbers in Notion.
+// We still validate/accept positive quantities from the UI and apply the sign here.
+const _normKeyOrderType = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const _isWithdrawProducts = _normKeyOrderType(orderType) === _normKeyOrderType("Withdraw Products");
+const _qtySign = _isWithdrawProducts ? -1 : 1;
 if (!Array.isArray(products) || products.length === 0) {
   const d = req.session.orderDraft;
   if (d && Array.isArray(d.products) && d.products.length > 0) {
@@ -8900,7 +8906,7 @@ if (cleanedProducts.some(p => !p.reason)) {
 
           const props = {
             Reason: { title: [{ text: { content: String(t.prod.reason || "").trim() } }] },
-            "Quantity Requested": { number: Number(t.prod.quantity) },
+            "Quantity Requested": { number: Number(t.prod.quantity) * _qtySign },
             ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
               ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
               : {}),
@@ -8940,7 +8946,7 @@ if (cleanedProducts.some(p => !p.reason)) {
             parent: { database_id: ordersDatabaseId },
             properties: {
               Reason: { title: [{ text: { content: product.reason } }] },
-              "Quantity Requested": { number: Number(product.quantity) },
+              "Quantity Requested": { number: Number(product.quantity) * _qtySign },
               Product: { relation: [{ id: product.id }] },
               [createStatusProp]: statusPlaced,
               "Teams Members": { relation: [{ id: userId }] },
@@ -8986,7 +8992,7 @@ if (cleanedProducts.some(p => !p.reason)) {
             parent: { database_id: ordersDatabaseId },
             properties: {
               Reason: { title: [{ text: { content: product.reason } }] },
-              "Quantity Requested": { number: Number(product.quantity) },
+              "Quantity Requested": { number: Number(product.quantity) * _qtySign },
               Product: { relation: [{ id: product.id }] },
               "Status": { select: { name: "Order Placed" } },
               "Teams Members": { relation: [{ id: userId }] },
