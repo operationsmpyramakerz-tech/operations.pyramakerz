@@ -8594,6 +8594,24 @@ app.get(
               getPropInsensitive(page.properties, 'Thumbnail') ||
               getPropInsensitive(page.properties, 'Icon');
             const imageUrl = extractFirstFileUrl(imageProp);
+
+            // Optional tags (used by Shopping Cart order-type filtering)
+            // Supports both multi_select ("Tags") and select ("Tag") styles.
+            const tagsProp =
+              getPropInsensitive(page.properties, 'Tags') ||
+              getPropInsensitive(page.properties, 'Tag');
+            const tags = [];
+            try {
+              if (tagsProp?.type === 'multi_select') {
+                for (const t of tagsProp.multi_select || []) {
+                  const name = String(t?.name || '').trim();
+                  if (name) tags.push(name);
+                }
+              } else if (tagsProp?.type === 'select') {
+                const name = String(tagsProp.select?.name || '').trim();
+                if (name) tags.push(name);
+              }
+            } catch {}
             // Notion titles are arrays of rich-text fragments. Using only [0]
             // can truncate names (e.g. showing just "A4" instead of the full title).
             const fullName = (titleProperty?.title || [])
@@ -8609,6 +8627,7 @@ app.get(
                 unitPrice: typeof unitPrice === 'number' && Number.isFinite(unitPrice) ? unitPrice : null,
                 displayId: displayId || null,
                 imageUrl: imageUrl || null,
+                tags,
               };
             }
             return null;

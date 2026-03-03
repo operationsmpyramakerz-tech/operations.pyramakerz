@@ -52,12 +52,20 @@
   const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const REQUEST_PRODUCTS_KEY = normKey('Request Products');
   const WITHDRAW_PRODUCTS_KEY = normKey('Withdraw Products');
+  const REQUEST_MAINTENANCE_KEY = normKey('Request Maintenance');
+
+  // Notion Products DB tag value to show in Request Maintenance
+  const MAINTENANCE_TAG_KEY = normKey('4/ Machines');
 
   let selectedOrderType = '';
   let cartBooted = false;
 
   function isWithdrawType(type = selectedOrderType) {
     return normKey(type) === WITHDRAW_PRODUCTS_KEY;
+  }
+
+  function isMaintenanceType(type = selectedOrderType) {
+    return normKey(type) === REQUEST_MAINTENANCE_KEY;
   }
 
   function qtySign(type = selectedOrderType) {
@@ -244,11 +252,22 @@
       });
     } catch {}
 
-    // Request Products / Withdraw Products -> show the cart UI
-    if (normKey(v) === REQUEST_PRODUCTS_KEY || normKey(v) === WITHDRAW_PRODUCTS_KEY || isEditMode) {
+    // Request Products / Withdraw Products / Request Maintenance -> show the cart UI
+    if (
+      normKey(v) === REQUEST_PRODUCTS_KEY ||
+      normKey(v) === WITHDRAW_PRODUCTS_KEY ||
+      normKey(v) === REQUEST_MAINTENANCE_KEY ||
+      isEditMode
+    ) {
       setCartTypePill(v);
       showOnly('cart');
       bootCart();
+
+      // If the cart is already booted & components are loaded, re-render the dropdown
+      // options to match the newly selected order type (e.g. Maintenance filter).
+      try {
+        if (cartBooted && componentsLoaded) initComponentChoices();
+      } catch {}
       return;
     }
 
@@ -444,6 +463,22 @@
     } catch {
       return null;
     }
+  }
+
+  function hasTag(comp, wantTagKey) {
+    const tags = Array.isArray(comp?.tags) ? comp.tags : [];
+    if (!tags.length) return false;
+    const want = String(wantTagKey || '').trim();
+    if (!want) return false;
+    return tags.some((t) => normKey(t) === want);
+  }
+
+  function getComponentsForSelect(type = selectedOrderType) {
+    // Request Maintenance should only show products tagged "4/ Machines".
+    if (isMaintenanceType(type)) {
+      return (Array.isArray(components) ? components : []).filter((c) => hasTag(c, MAINTENANCE_TAG_KEY));
+    }
+    return Array.isArray(components) ? components : [];
   }
 
   // NOTE:
@@ -992,14 +1027,16 @@
 
     componentSelectEl.innerHTML = '';
 
+    const selectComponents = getComponentsForSelect();
+
     const ph = document.createElement('option');
     ph.value = '';
     ph.disabled = true;
     ph.selected = true;
-    ph.textContent = components.length ? 'Select component...' : 'No components available';
+    ph.textContent = selectComponents.length ? 'Select component...' : 'No components available';
     componentSelectEl.appendChild(ph);
 
-    for (const c of components) {
+    for (const c of selectComponents) {
       const opt = document.createElement('option');
       opt.value = String(c.id);
       opt.textContent = String(c.name || '');
