@@ -334,6 +334,16 @@
     color: #0f172a;
   }
 
+  /* Request Maintenance: Issue Description cell */
+  .issue-cell{
+    font-weight: 750;
+    color: #0f172a;
+    line-height: 1.25;
+    white-space: normal;
+    overflow: visible;
+    word-break: break-word;
+  }
+
   .trash-btn{
     width: 38px;
     height: 38px;
@@ -491,7 +501,8 @@
   }
   .req-star{ color:#ef4444; font-weight: 900; }
   .mfield input,
-  .mfield select{
+  .mfield select,
+  .mfield textarea{
     width: 100%;
     height: 44px;
     border-radius: 12px;
@@ -499,8 +510,16 @@
     padding: 0 0.9rem;
     outline: none;
   }
+  .mfield textarea{
+    height: auto;
+    min-height: 96px;
+    padding: 0.75rem 0.9rem;
+    resize: vertical;
+    line-height: 1.25;
+  }
   .mfield input:focus,
-  .mfield select:focus{
+  .mfield select:focus,
+  .mfield textarea:focus{
     border-color: #94a3b8;
     box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.25);
   }
@@ -749,6 +768,28 @@
     animation: spin 0.9s linear infinite;
     flex: 0 0 auto;
   }
+
+  /* ===== Request Maintenance UI ===== */
+  body.is-maintenance .cart-head,
+  body.is-maintenance .cart-row{
+    grid-template-columns: 2.2fr 2fr 0.6fr;
+  }
+
+  /* Hide Total + Reason in summary for Maintenance */
+  body.is-maintenance .summary-line.summary-total,
+  body.is-maintenance .summary-field{
+    display: none !important;
+  }
+
+  /* Modal: Maintenance uses a single-column layout */
+  body.is-maintenance .modal-grid{
+    grid-template-columns: 1fr;
+  }
+
+  /* Toggle fields (Qty vs Issue Description) */
+  #cartIssueDescField{ display: none; }
+  body.is-maintenance #cartIssueDescField{ display: block; }
+  body.is-maintenance #cartQtyField{ display: none; }
 </style>
 </head>
 
@@ -930,9 +971,15 @@
             <select id="cartComponentSelect"></select>
           </div>
 
-          <div class="mfield">
+          <div class="mfield" id="cartQtyField">
             <label for="cartQtyInput">Qty <span class="req-star">*</span></label>
             <input id="cartQtyInput" min="0.01" step="0.01" type="number" value="1"/>
+          </div>
+
+          <!-- Request Maintenance: replaces Qty with Issue Description -->
+          <div class="mfield full" id="cartIssueDescField">
+            <label for="cartIssueDescInput">Issue Description <span class="req-star">*</span></label>
+            <textarea id="cartIssueDescInput" placeholder="Describe the issue..."></textarea>
           </div>
         </div>
 

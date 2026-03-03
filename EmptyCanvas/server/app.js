@@ -805,6 +805,20 @@ async function detectOrderTypePropName() {
   );
 }
 
+// Issue Description (rich_text) — used by Request Maintenance orders
+async function detectIssueDescriptionPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "Issue Description",
+      "Issue description",
+      "Issue Desc",
+      "Issue",
+      "Issue_Description",
+    ]) || null
+  );
+}
+
 
 
 // ===== Order Group ID (Order - ID) helpers =====
@@ -4248,6 +4262,7 @@ app.post(
         id: String(p.id),
         quantity: Number(p.quantity) || 0,
         reason: String(p.reason || "").trim(),
+        issueDescription: String(p.issueDescription || "").trim(),
       }))
       .filter((p) => p.id && p.quantity > 0);
 
@@ -8748,6 +8763,7 @@ const orderType = String(req.body?.orderType || "").trim();
 // We still validate/accept positive quantities from the UI and apply the sign here.
 const _normKeyOrderType = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const _isWithdrawProducts = _normKeyOrderType(orderType) === _normKeyOrderType("Withdraw Products");
+const _isRequestMaintenance = _normKeyOrderType(orderType) === _normKeyOrderType("Request Maintenance");
 const _qtySign = _isWithdrawProducts ? -1 : 1;
 if (!Array.isArray(products) || products.length === 0) {
   const d = req.session.orderDraft;
@@ -8765,12 +8781,35 @@ const cleanedProducts = products
   .map(p => ({
     id: String(p.id),
     quantity: Number(p.quantity),
-    reason: String(p.reason || "").trim()
+    reason: String(p.reason || "").trim(),
+    issueDescription: String(p.issueDescription || "").trim(),
   }))
-  .filter(p => p.id && p.quantity > 0);
+  .filter(p => p.id && (_isRequestMaintenance ? true : p.quantity > 0));
 
-if (cleanedProducts.some(p => !p.reason)) {
-  return res.status(400).json({ success: false, message: "Each product must include a reason." });
+if (cleanedProducts.length === 0) {
+  return res.status(400).json({ success: false, message: "Missing products." });
+}
+
+// Request Maintenance: Qty is not used; require Issue Description instead.
+if (_isRequestMaintenance) {
+  if (cleanedProducts.some(p => !p.issueDescription)) {
+    return res.status(400).json({ success: false, message: "Each product must include an Issue Description." });
+  }
+
+  // Normalize for Notion:
+  // - always store Qty as 1
+  // - auto-fill Reason (page title) if missing
+  for (const p of cleanedProducts) {
+    p.quantity = 1;
+    if (!p.reason) {
+      const title = String(p.issueDescription || "").trim();
+      p.reason = title ? title.slice(0, 80) : "Request Maintenance";
+    }
+  }
+} else {
+  if (cleanedProducts.some(p => !p.reason)) {
+    return res.status(400).json({ success: false, message: "Each product must include a reason." });
+  }
 }
     
 
@@ -8786,6 +8825,30 @@ if (cleanedProducts.some(p => !p.reason)) {
             ? { status: { name: orderType } }
             : { select: { name: orderType } })
         : null;
+
+      // Request Maintenance: store Issue Description per item if the column exists
+      const issueDescPropName = _isRequestMaintenance ? await detectIssueDescriptionPropName() : null;
+      const _dbPropsForIssueDesc = issueDescPropName ? await getOrdersDBProps() : null;
+      const _issueDescPropType = issueDescPropName
+        ? String(_dbPropsForIssueDesc?.[issueDescPropName]?.type || "rich_text")
+        : null;
+
+      const _issueDescPropValueFor = (desc) => {
+        if (!issueDescPropName) return null;
+        const d = String(desc || "").trim();
+        if (!d) return null;
+
+        // Most likely: rich_text
+        if (_issueDescPropType === "title") {
+          return { [issueDescPropName]: { title: [{ text: { content: d } }] } };
+        }
+        if (_issueDescPropType === "rich_text") {
+          return { [issueDescPropName]: { rich_text: [{ text: { content: d } }] } };
+        }
+
+        // Unsupported / non-editable types (formula, rollup, etc.)
+        return null;
+      };
 
       const userQuery = await notion.databases.query({
         database_id: teamMembersDatabaseId,
@@ -8926,6 +8989,7 @@ if (cleanedProducts.some(p => !p.reason)) {
           const props = {
             Reason: { title: [{ text: { content: String(t.prod.reason || "").trim() } }] },
             "Quantity Requested": { number: Number(t.prod.quantity) * _qtySign },
+            ...(_issueDescPropValueFor(t.prod.issueDescription) || {}),
             ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
               ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
               : {}),
@@ -8966,6 +9030,7 @@ if (cleanedProducts.some(p => !p.reason)) {
             properties: {
               Reason: { title: [{ text: { content: product.reason } }] },
               "Quantity Requested": { number: Number(product.quantity) * _qtySign },
+              ...(_issueDescPropValueFor(product.issueDescription) || {}),
               Product: { relation: [{ id: product.id }] },
               [createStatusProp]: statusPlaced,
               "Teams Members": { relation: [{ id: userId }] },
@@ -9012,6 +9077,7 @@ if (cleanedProducts.some(p => !p.reason)) {
             properties: {
               Reason: { title: [{ text: { content: product.reason } }] },
               "Quantity Requested": { number: Number(product.quantity) * _qtySign },
+              ...(_issueDescPropValueFor(product.issueDescription) || {}),
               Product: { relation: [{ id: product.id }] },
               "Status": { select: { name: "Order Placed" } },
               "Teams Members": { relation: [{ id: userId }] },
@@ -9185,6 +9251,7 @@ app.post(
 
       // Try to capture the Order - ID number from these pages (used to keep the same order number on edits)
       const orderGroupIdProp = await detectOrderGroupIdPropName();
+      const issueDescPropName = await detectIssueDescriptionPropName();
       let orderGroupIdNumber = null;
       if (orderGroupIdProp) {
         for (const p of pages) {
@@ -9208,10 +9275,21 @@ app.post(
         const reason = props?.Reason?.title?.[0]?.plain_text || "";
         const qty = Number(props?.["Quantity Requested"]?.number || 0);
 
+        let issueDescription = "";
+        if (issueDescPropName && props?.[issueDescPropName]) {
+          const ip = props[issueDescPropName];
+          if (ip?.type === "rich_text") {
+            issueDescription = (ip.rich_text || []).map((r) => r?.plain_text || "").join("").trim();
+          } else if (ip?.type === "title") {
+            issueDescription = (ip.title || []).map((r) => r?.plain_text || "").join("").trim();
+          }
+        }
+
         draft.push({
           id: String(productId),
           quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
           reason: String(reason || "").trim(),
+          issueDescription: String(issueDescription || "").trim(),
         });
 
         editItems.push({

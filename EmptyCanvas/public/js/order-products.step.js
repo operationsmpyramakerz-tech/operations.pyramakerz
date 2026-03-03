@@ -3,16 +3,18 @@
 (() => {
   /**
    * Draft model (stored in session on server):
-   *   [{ id: string, quantity: number, reason: string }]
+   *   [{ id: string, quantity: number, reason: string, issueDescription?: string }]
    *
    * Feb 2026 update:
    * - Reason is collected ONCE per order (in the Order Summary card)
    * - The backend still expects `reason` on each item, so we copy the global reason
    *   into every cart item before saving/submitting.
+   * - Request Maintenance replaces Qty with Issue Description (saved per item).
    */
 
   // ---------------------------- DOM ----------------------------
   const cartItemsEl = document.getElementById('cartItems');
+  const cartHeadEl = document.querySelector('#cartStep .cart-head') || document.querySelector('.cart-head');
   const updateCartBtn = document.getElementById('updateCartBtn');
   const checkoutBtn = document.getElementById('checkoutBtn');
 
@@ -38,6 +40,12 @@
   const addToCartBtn = document.getElementById('addToCartBtn');
   const componentSelectEl = document.getElementById('cartComponentSelect');
   const qtyInputEl = document.getElementById('cartQtyInput');
+
+  // Request Maintenance: Issue Description field (replaces Qty)
+  const issueDescInputEl = document.getElementById('cartIssueDescInput');
+  const qtyFieldEl = document.getElementById('cartQtyField');
+  const issueFieldEl = document.getElementById('cartIssueDescField');
+  const modalGridEl = modalEl?.querySelector?.('.modal-grid') || document.querySelector('#updateCartModal .modal-grid');
 
   const savingOverlayEl = document.getElementById('cartSavingOverlay');
   const savingTextEl = document.getElementById('cartSavingText');
@@ -74,6 +82,28 @@
 
   function applyOrderTypeUi(type = selectedOrderType) {
     const withdraw = isWithdrawType(type);
+    const maintenance = isMaintenanceType(type);
+
+    // Maintenance gets a special layout (no URL/Qty/Total/Reason; Qty becomes Issue Description)
+    try {
+      document.body.classList.toggle('is-maintenance', maintenance);
+    } catch {}
+
+    // Update cart header columns
+    try {
+      if (cartHeadEl) {
+        cartHeadEl.innerHTML = maintenance
+          ? '<div>Product</div><div>Issue Description</div><div>Action</div>'
+          : '<div>Product</div><div>URL</div><div>Quantity</div><div>Total</div><div>Action</div>';
+      }
+    } catch {}
+
+    // Toggle modal fields
+    try {
+      if (modalGridEl) modalGridEl.classList.toggle('is-maintenance', maintenance);
+      if (qtyFieldEl) qtyFieldEl.style.display = maintenance ? 'none' : '';
+      if (issueFieldEl) issueFieldEl.style.display = maintenance ? '' : 'none';
+    } catch {}
 
     // Page title
     try {
@@ -490,7 +520,7 @@
 
   let components = []; // [{id,name,url,unitPrice,imageUrl,displayId}]
   let byId = new Map();
-  let cart = []; // [{id, quantity, reason}]
+  let cart = []; // [{id, quantity, reason, issueDescription?}]
 
   let globalReason = '';
 
@@ -539,6 +569,7 @@
           id: String(p.id || ''),
           quantity: normalizeQty(Number(p.quantity), 1),
           reason: String(p.reason || '').trim(),
+          issueDescription: String(p.issueDescription || '').trim(),
         }))
         .filter((p) => p.id);
       return true;
@@ -585,7 +616,8 @@
 
   function updateReady() {
     const hasReason = Boolean(String(globalReason || '').trim());
-    setReady(hasReason && componentsLoaded);
+    const needsReason = !isMaintenanceType();
+    setReady((needsReason ? hasReason : true) && componentsLoaded);
   }
 
   function syncReasonFromInput() {
@@ -595,10 +627,18 @@
   }
 
   function applyGlobalReason() {
+    // Request Maintenance does not use a global reason.
+    if (isMaintenanceType()) return;
     const r = String(globalReason || '').trim();
     if (!r) return;
     if (!Array.isArray(cart)) return;
     for (const item of cart) item.reason = r;
+  }
+
+  function deriveMaintenanceReason(issueDescription) {
+    const s = String(issueDescription || '').trim();
+    if (s) return s.slice(0, 80);
+    return 'Request Maintenance';
   }
 
   // ---------------------------- Draft persistence ----------------------------
@@ -629,8 +669,11 @@
       const clean = cart
         .map((p) => ({
           id: String(p.id),
-          quantity: normalizeQty(Number(p.quantity), 1),
-          reason: String(p.reason || '').trim(),
+          quantity: isMaintenanceType() ? 1 : normalizeQty(Number(p.quantity), 1),
+          reason: isMaintenanceType()
+            ? deriveMaintenanceReason(p.issueDescription)
+            : String(p.reason || '').trim(),
+          issueDescription: String(p.issueDescription || '').trim(),
         }))
         .filter((p) => p.id);
 
@@ -663,6 +706,8 @@
   }
 
   function itemTotal(p) {
+    // Request Maintenance does not use pricing totals.
+    if (isMaintenanceType()) return 0;
     // Withdraw mode uses negative totals (because Qty is displayed/recorded as negative).
     return unitPriceOf(p.id) * (Number(p.quantity) || 0) * qtySign();
   }
@@ -747,6 +792,37 @@
 
       productCell.appendChild(thumb);
       productCell.appendChild(meta);
+
+      // Request Maintenance: show Issue Description instead of URL/Qty/Total
+      if (isMaintenanceType()) {
+        const issueCell = document.createElement('div');
+        issueCell.className = 'issue-cell';
+        const issue = String(p.issueDescription || '').trim();
+        issueCell.textContent = issue || '—';
+
+        // Action cell
+        const actionCell = document.createElement('div');
+        const trashBtn = document.createElement('button');
+        trashBtn.className = 'trash-btn';
+        trashBtn.type = 'button';
+        trashBtn.setAttribute('aria-label', 'Remove item');
+        trashBtn.innerHTML = '<i data-feather="trash-2"></i>';
+        actionCell.appendChild(trashBtn);
+
+        // bind events
+        trashBtn.addEventListener('click', () => removeItem(p.id));
+
+        // click product to edit
+        productCell.style.cursor = 'pointer';
+        productCell.addEventListener('click', () => openModalForEdit(p.id));
+
+        row.appendChild(productCell);
+        row.appendChild(issueCell);
+        row.appendChild(actionCell);
+
+        cartItemsEl.appendChild(row);
+        return;
+      }
 
       // URL cell
       const urlCell = document.createElement('div');
@@ -854,28 +930,42 @@
     scheduleSaveDraft();
   }
 
-  function upsertItem({ id, quantity }) {
+  function upsertItem({ id, quantity, issueDescription }) {
     const cleanId = String(id || '');
-    const cleanQty = normalizeQty(Number(quantity), NaN);
+    const maintenance = isMaintenanceType();
+    const cleanQty = maintenance ? 1 : normalizeQty(Number(quantity), NaN);
+    const issue = String(issueDescription || '').trim();
 
-    const r = String(globalReason || '').trim();
+    const r = maintenance ? deriveMaintenanceReason(issue) : String(globalReason || '').trim();
 
     if (!cleanId) {
       toast('error', 'Missing field', 'Please choose a component.');
       return false;
     }
-    if (!Number.isFinite(cleanQty) || cleanQty <= 0) {
-      toast('error', 'Missing field', 'Please enter a valid quantity.');
-      return false;
+
+    if (!maintenance) {
+      if (!Number.isFinite(cleanQty) || cleanQty <= 0) {
+        toast('error', 'Missing field', 'Please enter a valid quantity.');
+        return false;
+      }
+    } else {
+      if (!issue) {
+        toast('error', 'Missing field', 'Please describe the issue.');
+        try { issueDescInputEl?.focus?.(); } catch {}
+        return false;
+      }
     }
+
     const idx = cart.findIndex((p) => String(p.id) === cleanId);
     if (idx >= 0) {
       cart[idx].quantity = cleanQty;
       // Only overwrite the stored reason if the user already entered one.
       if (r) cart[idx].reason = r;
+      if (maintenance) cart[idx].issueDescription = issue;
     } else {
-      cart.push({ id: cleanId, quantity: cleanQty, reason: r });
+      cart.push({ id: cleanId, quantity: cleanQty, reason: r, issueDescription: maintenance ? issue : '' });
     }
+
     return true;
   }
 
@@ -896,6 +986,7 @@
     const isOn = !!loading;
     try {
       if (qtyInputEl) qtyInputEl.disabled = isOn;
+      if (issueDescInputEl) issueDescInputEl.disabled = isOn;
       if (addToCartBtn) addToCartBtn.disabled = isOn;
 
       if (choicesInst && typeof choicesInst.disable === 'function') {
@@ -926,6 +1017,7 @@
     if (addToCartBtn) addToCartBtn.textContent = 'Add';
 
     if (qtyInputEl) qtyInputEl.value = '1';
+    if (issueDescInputEl) issueDescInputEl.value = '';
 
     // Open the modal immediately so "Update Cart" always shows the small window.
     setModalOpen(true);
@@ -988,6 +1080,7 @@
     editingId = String(item.id);
     if (addToCartBtn) addToCartBtn.textContent = 'Update';
     if (qtyInputEl) qtyInputEl.value = String(normalizeQty(Number(item.quantity), 1));
+    if (issueDescInputEl) issueDescInputEl.value = String(item.issueDescription || '').trim();
 
     // Open first, then ensure components list is ready.
     setModalOpen(true);
@@ -1149,6 +1242,7 @@
   // ---------------------------- Checkout ----------------------------
   async function checkout() {
     const withdraw = isWithdrawType();
+    const maintenance = isMaintenanceType();
     if (!Array.isArray(cart) || cart.length === 0) {
       toast(
         'error',
@@ -1158,12 +1252,22 @@
       return;
     }
 
-    syncReasonFromInput();
+    if (!maintenance) {
+      syncReasonFromInput();
 
-    if (!String(globalReason || '').trim()) {
-      toast('error', 'Reason required', withdraw ? 'Please enter the withdrawal reason.' : 'Please enter the order reason.');
-      try { reasonInput?.focus?.(); } catch {}
-      return;
+      if (!String(globalReason || '').trim()) {
+        toast('error', 'Reason required', withdraw ? 'Please enter the withdrawal reason.' : 'Please enter the order reason.');
+        try { reasonInput?.focus?.(); } catch {}
+        return;
+      }
+    } else {
+      // Maintenance requires Issue Description per item
+      const missing = cart.find((p) => !String(p.issueDescription || '').trim());
+      if (missing) {
+        toast('error', 'Issue Description required', 'Please add an Issue Description for every machine in the cart.');
+        try { openModalForEdit(missing.id); } catch {}
+        return;
+      }
     }
 
     const password = getPasswordValue();
@@ -1274,7 +1378,11 @@
       syncReasonFromInput();
 
       const id = componentSelectEl?.value;
-      const qty = Number(qtyInputEl?.value);
+      const maintenance = isMaintenanceType();
+      const qty = maintenance ? 1 : Number(qtyInputEl?.value);
+      const issueDescription = maintenance
+        ? String(issueDescInputEl?.value || '').trim()
+        : '';
 
       // If we opened the modal from an existing item and the user changed the component,
       // remove the old item first to avoid duplicates.
@@ -1282,7 +1390,7 @@
         cart = cart.filter((p) => String(p.id) !== String(editingId));
       }
 
-      const ok = upsertItem({ id, quantity: qty });
+      const ok = upsertItem({ id, quantity: qty, issueDescription });
       if (!ok) return;
 
       closeModal();
