@@ -749,8 +749,12 @@ document.addEventListener("DOMContentLoaded", () => {
           ? "inline-flex"
           : "none";
     }
-    // Only allow "Delivered" when the order is fully received (no remaining items)
-    if (arrivedBtn) arrivedBtn.style.display = stage.idx === 4 && !g.hasRemaining ? "inline-flex" : "none";
+    // "Mark as Delivered" button (Requested change):
+    // Show it in the "Received" tab when the order is in Shipped stage.
+    // (We intentionally do NOT block it when there are remaining items — user requested it in Received tab.)
+    if (arrivedBtn) {
+      arrivedBtn.style.display = currentTab === "received" && stage.idx === 4 ? "inline-flex" : "none";
+    }
 
     // Items list
     if (modalItems) {
@@ -1051,7 +1055,9 @@ document.addEventListener("DOMContentLoaded", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ orderIds: g.orderIds }),
+        // Pass current tab so the server can adapt the PDF layout
+        // (e.g., hide cost columns for Received / Delivered tabs)
+        body: JSON.stringify({ orderIds: g.orderIds, tab: currentTab }),
       });
 
       if (res.status === 401) {
@@ -1470,7 +1476,7 @@ async function markReceivedByOperations(g, receiptNumber) {
         arrivedBtn.disabled = false;
         const prev = arrivedBtn.dataset.prevHtml;
         if (prev) arrivedBtn.innerHTML = prev;
-        else arrivedBtn.textContent = "Received";
+        else arrivedBtn.textContent = "Mark as Delivered";
       }
     }
   }
