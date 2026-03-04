@@ -114,6 +114,9 @@ function pipeDeliveryReceiptPDF(
     metaLayout = "default", // "default" | "teamReasonFirst"
     groupByReason: groupByReasonOpt = true,
     showReasonTagBar: showReasonTagBarOpt = true,
+    // Requested change:
+    // Allow hiding price columns (Unit / Total) for some exports (e.g. Received/Delivered tabs).
+    showCosts = true,
     // Used for header colors when grouping is disabled
     headerColorKey = null,
   },
@@ -321,19 +324,29 @@ function pipeDeliveryReceiptPDF(
   const tagBarH = 28;
 
   // columns (sum == tableW)
-  const colWIdCode = Math.round(tableW * 0.18);
-  const colWComponent = Math.round(tableW * 0.46);
-  const colWQty = Math.round(tableW * 0.08);
-  const colWUnit = Math.round(tableW * 0.14);
-  const colWTotal = tableW - colWIdCode - colWComponent - colWQty - colWUnit;
+  // Default: ID | Component | Qty | Unit | Total
+  // When showCosts=false: ID | Component | Qty
+  const colWIdCode = Math.round(tableW * (showCosts ? 0.18 : 0.22));
+  const colWQty = Math.round(tableW * (showCosts ? 0.08 : 0.10));
+  const colWUnit = showCosts ? Math.round(tableW * 0.14) : 0;
+  const colWTotal = showCosts ? Math.round(tableW * 0.14) : 0;
+  const colWComponent = showCosts
+    ? (tableW - colWIdCode - colWQty - colWUnit - colWTotal)
+    : (tableW - colWIdCode - colWQty);
 
-  const columns = [
-    { key: "idCode", label: "ID Code", width: colWIdCode, align: "left" },
-    { key: "component", label: "Component", width: colWComponent, align: "left" },
-    { key: "qty", label: "Qty", width: colWQty, align: "right" },
-    { key: "unit", label: "Unit", width: colWUnit, align: "right" },
-    { key: "total", label: "Total", width: colWTotal, align: "right" },
-  ];
+  const columns = showCosts
+    ? [
+        { key: "idCode", label: "ID Code", width: colWIdCode, align: "left" },
+        { key: "component", label: "Component", width: colWComponent, align: "left" },
+        { key: "qty", label: "Qty", width: colWQty, align: "right" },
+        { key: "unit", label: "Unit", width: colWUnit, align: "right" },
+        { key: "total", label: "Total", width: colWTotal, align: "right" },
+      ]
+    : [
+        { key: "idCode", label: "ID Code", width: colWIdCode, align: "left" },
+        { key: "component", label: "Component", width: colWComponent, align: "left" },
+        { key: "qty", label: "Qty", width: colWQty, align: "right" },
+      ];
 
   let accX = tableX;
   columns.forEach((c) => {
@@ -438,8 +451,12 @@ function pipeDeliveryReceiptPDF(
         idCode: String(r.idCode || ""),
         component: String(r.component || ""),
         qty: String(Number(r.qty) || 0),
-        unit: moneyGBP(r.unit),
-        total: moneyGBP(r.total),
+        ...(showCosts
+          ? {
+              unit: moneyGBP(r.unit),
+              total: moneyGBP(r.total),
+            }
+          : {}),
       };
 
       const hId = doc.heightOfString(rowData.idCode, {
@@ -502,7 +519,7 @@ function pipeDeliveryReceiptPDF(
 
   const { mL: sumML, contentW: sumContentW } = metrics();
   const sumW = 220;
-  const sumH = 54;
+  const sumH = showCosts ? 54 : 34;
   const sumX = sumML + sumContentW - sumW;
   const sumY = doc.y;
 
@@ -510,11 +527,15 @@ function pipeDeliveryReceiptPDF(
 
   doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9);
   doc.text("Total quantity", sumX + 12, sumY + 10, { width: sumW - 24, align: "left" });
-  doc.text("Grand total", sumX + 12, sumY + 30, { width: sumW - 24, align: "left" });
+  if (showCosts) {
+    doc.text("Grand total", sumX + 12, sumY + 30, { width: sumW - 24, align: "left" });
+  }
 
   doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(11);
   doc.text(String(Number(grandQty) || 0), sumX + 12, sumY + 8, { width: sumW - 24, align: "right" });
-  doc.text(moneyGBP(grandTotal), sumX + 12, sumY + 28, { width: sumW - 24, align: "right" });
+  if (showCosts) {
+    doc.text(moneyGBP(grandTotal), sumX + 12, sumY + 28, { width: sumW - 24, align: "right" });
+  }
 
   doc.end();
 }

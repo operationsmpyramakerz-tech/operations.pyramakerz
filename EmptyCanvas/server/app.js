@@ -6032,10 +6032,16 @@ app.post(
   requirePage("Requested Orders"),
   async (req, res) => {
     try {
-      const { orderIds } = req.body || {};
+      const { orderIds, tab } = req.body || {};
       if (!Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "orderIds required" });
       }
+
+      // Requested change:
+      // When exporting from the "Received" or "Delivered" tabs, hide cost columns (Unit / Total)
+      // in the generated PDF.
+      const tabKey = String(tab || "").trim().toLowerCase();
+      const hideCosts = tabKey === "received" || tabKey === "delivered";
 
       const ids = orderIds
         .map((x) => String(x || "").trim())
@@ -6318,6 +6324,8 @@ app.post(
           // Current Orders are already grouped by reason, keep a single table
           groupByReason: false,
           headerColorKey: groupReason,
+          // Hide unit/total columns for Received/Delivered exports
+          showCosts: !hideCosts,
         },
         res,
       );
