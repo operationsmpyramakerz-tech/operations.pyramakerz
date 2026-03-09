@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     { key: 'phone',        label: 'Phone',         icon: 'phone',      inputType: 'text',     required: false, placeholder: 'e.g. 0123456789' },
     { key: 'email',        label: 'Email',         icon: 'mail',       inputType: 'email',    required: false, placeholder: 'e.g. name@company.com' },
     { key: 'employeeCode', label: 'Employee Code', icon: 'hash',       inputType: 'number',   required: false },
-    // Password is stored as text in Notion (Rich text), but we don't display it.
+    // Password can be text (Notion: Rich text) - we don't display its real value.
     { key: 'password',     label: 'Password',      icon: 'lock',       inputType: 'password', required: true,  placeholder: 'New password', autocomplete: 'new-password' },
   ];
 
@@ -99,8 +99,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const titleEl = document.getElementById('accountEditTitle');
   const valueLabelEl = document.getElementById('accountEditValueLabel');
   const passLabelEl = document.getElementById('accountEditPasswordLabel');
+
+  const valueWrapEl = document.getElementById('accountEditValueWrap');
+  const passWrapEl = document.getElementById('accountEditPasswordWrap');
   const valueInput = document.getElementById('accountEditValue');
   const passInput = document.getElementById('accountEditPassword');
+
+  const toggleValueBtn = document.getElementById('toggleAccountEditValue');
+  const togglePassBtn = document.getElementById('toggleAccountEditPassword');
   const confirmBtn = document.getElementById('accountEditSubmit');
   const cancelBtn = document.getElementById('accountEditClose');
 
@@ -138,6 +144,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     return !!modalEl && modalEl.style.display === 'flex';
   }
 
+  // ===== Password toggles (same behavior as Login page) =====
+  function syncToggleVisual(btn, inputEl) {
+    if (!btn || !inputEl) return;
+    const isText = String(inputEl.getAttribute('type') || '').toLowerCase() === 'text';
+    btn.setAttribute('aria-pressed', String(isText));
+    const eye = btn.querySelector('.icon-eye');
+    const eyeOff = btn.querySelector('.icon-eye-off');
+    if (eye && eyeOff) {
+      eye.style.display = isText ? 'none' : '';
+      eyeOff.style.display = isText ? '' : 'none';
+    }
+  }
+
+  function bindToggle(btn) {
+    if (!btn) return;
+    const targetId = btn.getAttribute('data-target');
+    if (!targetId) return;
+    const inputEl = document.getElementById(targetId);
+    if (!inputEl) return;
+
+    syncToggleVisual(btn, inputEl);
+
+    btn.addEventListener('click', () => {
+      const t = String(inputEl.getAttribute('type') || '').toLowerCase();
+      const show = t === 'password';
+      inputEl.setAttribute('type', show ? 'text' : 'password');
+      syncToggleVisual(btn, inputEl);
+    });
+  }
+
+  // Bind once
+  bindToggle(toggleValueBtn);
+  bindToggle(togglePassBtn);
+
   function openModalForField(fieldKey) {
     const meta = FIELD_META.find((m) => m.key === fieldKey);
     if (!meta || !modalEl) return;
@@ -167,7 +207,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         : ((state && state[fieldKey] != null) ? String(state[fieldKey]) : '');
     }
 
-    if (passInput) passInput.value = '';
+    // Ensure the "Current password" input is always hidden by default
+    if (passInput) {
+      passInput.setAttribute('type', 'password');
+      passInput.value = '';
+    }
+
+    // Only show toggle for the value input when editing password
+    if (valueWrapEl) {
+      valueWrapEl.classList.toggle('has-toggle', fieldKey === 'password');
+    }
+
+    // Reset toggle icons/state on every open
+    if (toggleValueBtn && valueInput) syncToggleVisual(toggleValueBtn, valueInput);
+    if (togglePassBtn && passInput) syncToggleVisual(togglePassBtn, passInput);
+
     setModalError('');
 
     modalEl.style.display = 'flex';
@@ -188,7 +242,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     modalEl.setAttribute('aria-hidden', 'true');
     activeField = null;
     // Clear sensitive fields
-    if (passInput) passInput.value = '';
+    if (passInput) {
+      passInput.setAttribute('type', 'password');
+      passInput.value = '';
+    }
+    if (valueInput) {
+      // When closing, always revert the value input back to password if it was shown
+      // (will be re-configured correctly on next open anyway)
+      if (String(valueInput.getAttribute('type') || '').toLowerCase() === 'text') {
+        valueInput.setAttribute('type', 'password');
+      }
+    }
+
+    if (valueWrapEl) valueWrapEl.classList.remove('has-toggle');
+    if (toggleValueBtn && valueInput) syncToggleVisual(toggleValueBtn, valueInput);
+    if (togglePassBtn && passInput) syncToggleVisual(togglePassBtn, passInput);
     setModalError('');
   }
 
