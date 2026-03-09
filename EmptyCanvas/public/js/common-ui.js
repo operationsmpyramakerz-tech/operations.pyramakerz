@@ -928,7 +928,7 @@ if (document.querySelector('.sidebar')) {
         nav.appendChild(li);
       }
 
-      if (window.feather) feather.replace();
+      hydratePendingFeatherIcons();
     }
 
 
@@ -1047,12 +1047,23 @@ if (document.querySelector('.sidebar')) {
     setAria();
   }
 
+  function hydratePendingFeatherIcons(root = document){
+    try {
+      if (!window.feather || !root || typeof root.querySelector !== 'function') return;
+      if (!root.querySelector('[data-feather]')) return;
+      feather.replace();
+    } catch {}
+  }
+
   function scrollPageToTop(){
     // User request: when the dashboard opens, jump to the start of the page content.
+    const prefersInstant = document.body && document.body.dataset && document.body.dataset.sidebarOpenScroll === 'instant';
+    const scrollBehavior = prefersInstant ? 'auto' : 'smooth';
+
     try {
       // Prefer window scroll (the page itself scrolls)
       if (typeof window.scrollTo === 'function') {
-        window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, left: 0, behavior: scrollBehavior });
       } else {
         window.scrollTo(0, 0);
       }
@@ -1064,7 +1075,7 @@ if (document.querySelector('.sidebar')) {
     try {
       const main = document.querySelector('.main-content');
       if (main && typeof main.scrollTo === 'function') {
-        main.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        main.scrollTo({ top: 0, left: 0, behavior: scrollBehavior });
       }
     } catch {}
   }
@@ -1085,7 +1096,7 @@ if (document.querySelector('.sidebar')) {
     try { localStorage.removeItem(KEY_MINI); } catch {}
 
     setAria();
-    if (window.feather) feather.replace();
+    hydratePendingFeatherIcons();
 
     // When opening: move user to top
     if (wasCollapsed && !isCollapsed) {
