@@ -1667,10 +1667,10 @@ function initFloatingSearchWidget() {
     }
   }
 
-  // Enforce style + icon (fix: icon sometimes not visible due to missing feather replace)
   btn.className = "search-icon-btn";
   btn.setAttribute("aria-label", "Search");
-  // Also set a tooltip to match the UX of the bell/user actions.
+  btn.setAttribute("aria-haspopup", "dialog");
+  btn.setAttribute("aria-expanded", "false");
   btn.setAttribute("title", "Search");
 
   // Some pages/themes might set button/icon colors globally.
@@ -1681,7 +1681,6 @@ function initFloatingSearchWidget() {
     btn.style.color = "#0F172A";
   }
 
-  // Use the SAME icon used inside the floating searchbar (SVG) so it always renders.
   btn.innerHTML = `
     <svg class="search-icon-svg" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" role="img">
       <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.5" fill="none" />
@@ -1690,7 +1689,6 @@ function initFloatingSearchWidget() {
   `;
   document.body.classList.add("has-floating-search");
 
-  // Panel (portal)
   let panel = document.getElementById("floatingSearchPanel");
   if (!panel) {
     panel = document.createElement("div");
@@ -1703,7 +1701,7 @@ function initFloatingSearchWidget() {
           <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.5" fill="none" />
           <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
         </svg>
-        <input id="floatingSearchInput" type="search" placeholder="Search" aria-label="Search" />
+        <input id="floatingSearchInput" type="search" placeholder="Search" aria-label="Search" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
       </div>
     `;
     document.body.appendChild(panel);
@@ -1711,32 +1709,148 @@ function initFloatingSearchWidget() {
 
   const input = panel.querySelector("#floatingSearchInput");
 
+  function normalizeSearchText(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function uniqueElements(list) {
+    return Array.from(new Set((Array.isArray(list) ? list : []).filter(Boolean)));
+  }
+
+  function getLinkedSearchInputs() {
+    const selector = [
+      ".main-header .searchbar input[type='search']",
+      ".main-header .searchbar input:not([type])",
+      ".tasks-v2-toolbar input[type='search']",
+      ".tasks-v2-topbar input[type='search']",
+      "#homeSearch",
+      "#orderSearch",
+      "#requestedSearch",
+      "#svSearch",
+      "#b2bSearch",
+      "#stockSearch",
+      "#schoolStockSearch",
+      "#notifSearch"
+    ].join(",");
+
+    return uniqueElements(Array.from(document.querySelectorAll(selector)).filter((el) => {
+      return el && el !== input && !panel.contains(el);
+    }));
+  }
+
+  function getGenericSearchItems() {
+    const selector = [
+      ".co-card",
+      ".order-card",
+      ".tv2-card",
+      ".task-card",
+      ".stock-card",
+      ".stock-item",
+      ".school-folder-card",
+      ".folder-card",
+      ".notif-row"
+    ].join(",");
+
+    return uniqueElements(Array.from(document.querySelectorAll(selector)));
+  }
+
+  function applyGenericSearchFallback(query) {
+    const items = getGenericSearchItems();
+    if (!items.length) return;
+
+    const q = normalizeSearchText(query);
+    items.forEach((el) => {
+      const hay = normalizeSearchText(el.getAttribute("data-search") || el.textContent || "");
+      const shouldShow = !q || hay.includes(q);
+      el.style.display = shouldShow ? "" : "none";
+    });
+  }
+
+  function syncFloatingInputFromPage() {
+    const linked = getLinkedSearchInputs();
+    const primary = linked[0] || null;
+    if (!primary || !input) return;
+
+    try {
+      input.value = primary.value || "";
+    } catch {}
+
+    const placeholder = String(primary.getAttribute("placeholder") || "").trim();
+    if (placeholder) {
+      input.setAttribute("placeholder", placeholder);
+      input.setAttribute("aria-label", placeholder);
+    } else {
+      input.setAttribute("placeholder", "Search");
+      input.setAttribute("aria-label", "Search");
+    }
+  }
+
+  function pushFloatingQueryToPage(nextValue) {
+    const linked = getLinkedSearchInputs();
+    if (!linked.length) {
+      applyGenericSearchFallback(nextValue);
+      return;
+    }
+
+    linked.forEach((el) => {
+      if (!el) return;
+      try {
+        el.dataset.opsFloatingSearchSync = "1";
+      } catch {}
+      try {
+        el.value = nextValue;
+      } catch {}
+      try {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch {}
+      try {
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch {}
+      setTimeout(() => {
+        try { delete el.dataset.opsFloatingSearchSync; } catch {}
+      }, 0);
+    });
+  }
+
   function positionPanel() {
     const r = btn.getBoundingClientRect();
-    // Place below the header, aligned with the button
     const top = Math.max(12, r.bottom + 10);
     const right = Math.max(12, window.innerWidth - r.right);
     panel.style.position = "fixed";
     panel.style.top = `${top}px`;
     panel.style.right = `${right}px`;
+    panel.style.left = "auto";
     panel.style.zIndex = "999999";
+
+    const maxWidth = Math.min(520, Math.max(280, window.innerWidth - 28));
+    panel.style.width = `${maxWidth}px`;
+
+    const rect = panel.getBoundingClientRect();
+    if (rect.left < 14) {
+      panel.style.left = "14px";
+      panel.style.right = "14px";
+      panel.style.width = "auto";
+    }
   }
 
   function openPanel() {
+    syncFloatingInputFromPage();
     positionPanel();
 
-    // Ensure the panel starts from the "closed" state so the CSS transition plays.
     panel.classList.remove("is-open");
     panel.hidden = false;
     btn.setAttribute("aria-expanded", "true");
 
-    // Trigger the transition in the next frame.
     requestAnimationFrame(() => {
+      positionPanel();
       panel.classList.add("is-open");
     });
 
     setTimeout(() => {
-      try { input && input.focus(); } catch {}
+      try {
+        input && input.focus();
+        input && input.select();
+      } catch {}
     }, 0);
   }
 
@@ -1750,9 +1864,30 @@ function initFloatingSearchWidget() {
       panel.removeEventListener("transitionend", finish);
     };
 
-    // Wait for the CSS transition before hiding (fallback timer in case transitionend doesn't fire)
     panel.addEventListener("transitionend", finish);
     setTimeout(finish, 220);
+  }
+
+  if (input && input.dataset.floatingSearchInputBound !== "1") {
+    input.dataset.floatingSearchInputBound = "1";
+
+    input.addEventListener("input", () => {
+      pushFloatingQueryToPage(input.value || "");
+    });
+
+    input.addEventListener("search", () => {
+      pushFloatingQueryToPage(input.value || "");
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (input.value) {
+          input.value = "";
+          pushFloatingQueryToPage("");
+        }
+        closePanel();
+      }
+    });
   }
 
   // Bind only once per page lifecycle
@@ -1763,7 +1898,6 @@ function initFloatingSearchWidget() {
       e.preventDefault();
       e.stopPropagation();
 
-      // Close the user menu/notifications if they are open.
       try { window.__opsCloseUserMenu && window.__opsCloseUserMenu(); } catch {}
       try {
         const notif = document.getElementById("notifPanel");
@@ -1774,7 +1908,6 @@ function initFloatingSearchWidget() {
       else closePanel();
     });
 
-    // Close on outside click / ESC
     document.addEventListener("click", (e) => {
       if (panel.hidden) return;
       if (panel.contains(e.target) || btn.contains(e.target)) return;
@@ -1788,6 +1921,10 @@ function initFloatingSearchWidget() {
     window.addEventListener("resize", () => {
       if (!panel.hidden) positionPanel();
     });
+
+    window.addEventListener("scroll", () => {
+      if (!panel.hidden) positionPanel();
+    }, true);
   }
 }
 

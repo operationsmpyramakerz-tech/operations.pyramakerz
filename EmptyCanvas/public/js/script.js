@@ -1086,7 +1086,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // the search box on first interaction even when the input isn't focused.
     // That would unexpectedly filter the list to empty. We ignore those events.
     searchInput.addEventListener('input', (e) => {
-      if (document.activeElement !== searchInput) {
+      const isFloatingSearchSync = searchInput.dataset.opsFloatingSearchSync === '1';
+      if (!isFloatingSearchSync && document.activeElement !== searchInput) {
         // Clear any silent autofill value and keep the current list.
         try { searchInput.value = ''; } catch {}
         return;
