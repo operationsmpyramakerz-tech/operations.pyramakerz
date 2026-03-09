@@ -866,6 +866,52 @@ async function detectOrderTypePropName() {
   );
 }
 
+const ORDER_TYPE_PROP_CANDIDATES = [
+  "Order Type",
+  "Order type",
+  "OrderType",
+  "Type",
+  "Order_Type",
+];
+
+function _normKeyOrderType(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function _canonicalOrderTypeLabel(value) {
+  const raw = String(value || "").trim();
+  const key = _normKeyOrderType(raw);
+  if (key === _normKeyOrderType("Request Products")) return "Request Products";
+  if (key === _normKeyOrderType("Withdraw Products")) return "Withdraw Products";
+  if (key === _normKeyOrderType("Request Maintenance")) return "Request Maintenance";
+  return raw || null;
+}
+
+function _defaultOrderTypeNotionColor(value) {
+  const key = _normKeyOrderType(value);
+  if (key === _normKeyOrderType("Request Products")) return "green";
+  if (key === _normKeyOrderType("Withdraw Products")) return "red";
+  if (key === _normKeyOrderType("Request Maintenance")) return "yellow";
+  return null;
+}
+
+function _extractOrderTypeInfo(props = {}) {
+  try {
+    const propName = pickPropName(props, ORDER_TYPE_PROP_CANDIDATES);
+    const prop = propName ? props[propName] : null;
+    const orderType = _canonicalOrderTypeLabel(_extractPropText(prop));
+    return {
+      orderType: orderType || null,
+      orderTypeColor:
+        prop?.select?.color ||
+        prop?.status?.color ||
+        _defaultOrderTypeNotionColor(orderType),
+    };
+  } catch {
+    return { orderType: null, orderTypeColor: null };
+  }
+}
+
 // Issue Description (rich_text) — used by Request Maintenance orders
 async function detectIssueDescriptionPropName() {
   const props = await getOrdersDBProps();
@@ -4380,7 +4426,7 @@ app.get(
       if (!userId) return res.status(404).json({ error: "User not found." });
 
       // Cache the Notion-derived list briefly to make reloads fast and reduce Notion load.
-      const listCacheKey = `cache:api:orders:list:${userId}:v6`;
+      const listCacheKey = `cache:api:orders:list:${userId}:v7`;
       const allOrders = await cacheGetOrSet(listCacheKey, 60, async () => {
         const rows = [];
         let hasMore = true;
@@ -4518,6 +4564,7 @@ app.get(
             const statusProp = props?.["Status"];
             const statusName = statusProp?.select?.name || statusProp?.status?.name || "Pending";
             const statusColor = statusProp?.select?.color || statusProp?.status?.color || "default";
+            const { orderType, orderTypeColor } = _extractOrderTypeInfo(props);
 
             const qtyRequested = props?.["Quantity Requested"]?.number || 0;
 
@@ -4591,6 +4638,8 @@ app.get(
               statusColor,
               svApproval,
               svApprovalColor,
+              orderType,
+              orderTypeColor,
               createdById,
               createdTime: page.created_time,
             });
@@ -4640,6 +4689,8 @@ app.get(
             statusColor: r.statusColor,
             svApproval: r.svApproval || null,
             svApprovalColor: r.svApprovalColor || null,
+            orderType: r.orderType || null,
+            orderTypeColor: r.orderTypeColor || null,
             createdById: r.createdById,
             createdByName: r.createdById ? (memberMap.get(r.createdById) || "") : "",
             createdTime: r.createdTime,
@@ -4935,7 +4986,7 @@ app.get(
     res.set("Cache-Control", "no-store");
     try {
       // Cache version is bumped when response logic/shape changes.
-      const cacheKey = "cache:api:orders:requested:v4";
+      const cacheKey = "cache:api:orders:requested:v5";
       const data = await cacheGetOrSet(cacheKey, 60, async () => {
       const all = [];
       let hasMore = true,
@@ -5297,6 +5348,7 @@ const statusColor =
   statusPropObj?.select?.color ||
   statusPropObj?.status?.color ||
   null;
+const { orderType, orderTypeColor } = _extractOrderTypeInfo(props);
 
 const createdTime = page.created_time;
           // 🔥 Extract S.V Approval (select/status)
@@ -5398,6 +5450,8 @@ if (svApproval !== "Approved") continue;
     quantityReceivedEdited,
     status,
     statusColor,
+    orderType,
+    orderTypeColor,
     operationsByIds,
     operationsByNames,
     operationsById,
@@ -5472,7 +5526,7 @@ app.post(
       );
 
       // Invalidate caches so lists reflect the assignment immediately.
-      await cacheDel("cache:api:orders:requested:v4");
+      await cacheDel("cache:api:orders:requested:v5");
       const memberIdsNorm = (memberIds || [])
         .map((x) => String(x || "").trim())
         .filter(Boolean)
@@ -5844,7 +5898,7 @@ app.post(
       );
 
       // Invalidate cached lists (Operations view).
-      await cacheDel("cache:api:orders:requested:v4");
+      await cacheDel("cache:api:orders:requested:v5");
 
       res.json({
         success: true,
@@ -5937,7 +5991,7 @@ app.post(
         ),
       );
 
-      await cacheDel("cache:api:orders:requested:v4");
+      await cacheDel("cache:api:orders:requested:v5");
 
       res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
     } catch (e) {
@@ -6068,7 +6122,7 @@ app.post(
       });
 
       // Invalidate caches so quantities update immediately.
-      await cacheDel("cache:api:orders:requested:v4");
+      await cacheDel("cache:api:orders:requested:v5");
       try {
         const page = await notion.pages.retrieve({ page_id: id });
         const rel = page?.properties?.["Teams Members"]?.relation || [];
@@ -6076,7 +6130,7 @@ app.post(
           .map((r) => r?.id)
           .filter(Boolean);
         await Promise.all(
-          memberIds.map((mid) => cacheDel(`cache:api:orders:list:${mid}:v6`)),
+          memberIds.map((mid) => cacheDel(`cache:api:orders:list:${mid}:v7`)),
         );
       } catch {}
 
@@ -9134,7 +9188,7 @@ if (_isRequestMaintenance) {
         // Invalidate cached Current Orders list for this user
         const currentUserId = await getSessionUserNotionId(req);
         if (currentUserId) {
-          await cacheDel(`cache:api:orders:list:${currentUserId}:v6`);
+          await cacheDel(`cache:api:orders:list:${currentUserId}:v7`);
         }
 
         return res.json({
@@ -9188,6 +9242,7 @@ if (_isRequestMaintenance) {
       const recentOrders = creations.map((c) => {
         const n = Number(orderGroupIdNumber);
         const hasN = Number.isFinite(n);
+        const recentOrderType = _canonicalOrderTypeLabel(orderType);
         return {
           id: c.orderPageId,
           reason: c.reason,
@@ -9198,6 +9253,8 @@ if (_isRequestMaintenance) {
           orderId: hasN ? `ORD-${n}` : null,
           orderIdPrefix: hasN ? "ORD" : null,
           orderIdNumber: hasN ? n : null,
+          orderType: recentOrderType || null,
+          orderTypeColor: _defaultOrderTypeNotionColor(recentOrderType),
         };
       });
       req.session.recentOrders = (req.session.recentOrders || []).concat(
@@ -9212,7 +9269,7 @@ if (_isRequestMaintenance) {
       // Invalidate cached Current Orders list for this user.
       const currentUserId = await getSessionUserNotionId(req);
       if (currentUserId) {
-        await cacheDel(`cache:api:orders:list:${currentUserId}:v6`);
+        await cacheDel(`cache:api:orders:list:${currentUserId}:v7`);
       }
 
       res.json({
@@ -9253,7 +9310,7 @@ app.post(
       // Invalidate cached Current Orders list for this user (so UI updates instantly).
       const userId = await getSessionUserNotionId(req);
       if (userId) {
-        await cacheDel(`cache:api:orders:list:${userId}:v6`);
+        await cacheDel(`cache:api:orders:list:${userId}:v7`);
       }
       res.json({ success: true });
     } catch (error) {
@@ -12448,6 +12505,7 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
         const approvalObj = props[approvalProp]?.select || props[approvalProp]?.status || null;
         const approvalName = approvalObj?.name || "";
         const approvalColor = approvalObj?.color || null;
+        const { orderType, orderTypeColor } = _extractOrderTypeInfo(props);
 
         const createdByName = await getSVTeamMemberName(teamMemberId);
 
@@ -12472,6 +12530,8 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
           status: props[statusProp]?.select?.name || props[statusProp]?.status?.name || "",
           approval: approvalName,
           approvalColor,
+          orderType,
+          orderTypeColor,
           createdTime: page.created_time,
         });
       }
