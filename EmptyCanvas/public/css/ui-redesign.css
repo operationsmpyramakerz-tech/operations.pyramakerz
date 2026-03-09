@@ -603,6 +603,7 @@ body.sidebar-collapsed .main-content{
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: nowrap !important;
 }
 
 .main-header .header-row1 .left{
@@ -619,6 +620,10 @@ body.sidebar-collapsed .main-content{
   letter-spacing: -0.01em;
   color: #0F172A;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
 }
 
 .main-header .header-row1 .right,
@@ -628,6 +633,10 @@ body.sidebar-collapsed .main-content{
   justify-content: flex-end !important;
   gap: 14px !important;
   flex: 0 0 auto !important;
+  flex-wrap: nowrap !important;
+  width: auto !important;
+  order: 0 !important;
+  margin-left: auto !important;
 }
 
 .main-header.dash-hide-row2 .header-row2{
@@ -679,10 +688,18 @@ body.has-floating-search .main-header .searchbar{
 .notif-bell-btn{
   width: 44px;
   height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 !important;
   border-radius: 999px;
   border: 1px solid rgba(15,23,42,0.06) !important;
   background: rgba(243,244,246,0.95) !important;
   box-shadow: 0 16px 36px rgba(15,23,42,0.10) !important;
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 44px;
 }
 
 .notif-bell-btn:hover{
@@ -939,30 +956,34 @@ body.has-floating-search .main-header .searchbar{
    Search icon button + floating search bar
    -------------------------------------------- */
 .search-icon-btn{
-  /* Match the header icon buttons (bell) so alignment is consistent on all pages */
-  width: 36px;
-  height: 36px;
-  border-radius: 9999px;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 !important;
+  border-radius: 999px;
+  border: 1px solid rgba(15,23,42,0.06) !important;
+  background: rgba(243,244,246,0.95) !important;
+  box-shadow: 0 16px 36px rgba(15,23,42,0.10) !important;
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   cursor: pointer;
-  color: #0F172A;
+  color: #0F172A !important;
+  flex: 0 0 44px;
   transition: transform 150ms ease, background 150ms ease;
 }
 
 .search-icon-btn:hover{
-  background: rgba(15,23,42,0.05);
+  background: rgba(226,232,240,0.95) !important;
 }
 
 /* Feather icon inserted via JS (data-feather="search") */
 .search-icon-btn svg{
   display: block;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
 }
 
 .search-icon-btn svg *{
@@ -971,8 +992,8 @@ body.has-floating-search .main-header .searchbar{
 
 .search-icon-btn .search-icon-svg{
   display: block;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   color: inherit;
   stroke: currentColor;
   fill: none;
@@ -1026,6 +1047,41 @@ body.has-floating-search .main-header .searchbar{
   width: 100%;
   font-size: 14px;
   background: transparent;
+}
+
+.main-header .header-row1 .right > *,
+.main-header .topbar-right > *{
+  flex: 0 0 auto;
+}
+
+.search-icon-btn .search-icon-svg circle,
+.search-icon-btn .search-icon-svg line{
+  stroke: currentColor;
+}
+
+@media (max-width: 768px){
+  .main-header .header-row1{
+    gap: 10px !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .main-header .header-row1 .left{
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+  }
+
+  .main-header .header-row1 .right,
+  .main-header .topbar-right{
+    width: auto !important;
+    order: 0 !important;
+    margin-left: auto !important;
+    gap: 10px !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .main-header .dash-title{
+    font-size: clamp(17px, 4.8vw, 20px);
+  }
 }
 
 /* --------------------------------------------
