@@ -4,22 +4,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let allSchools = [];
 
-  const norm = (s) => String(s || '').toLowerCase().trim();
+  const norm = (value) => String(value || '').toLowerCase().trim();
 
-  // Notion select colors mapping (same spirit as stocktaking)
-  const colorVars = (color = 'default') => {
-    switch (color) {
-      case 'gray':   return { bg:'#F3F4F6', text:'#374151', border:'#E5E7EB' };
-      case 'brown':  return { bg:'#EFEBE9', text:'#4E342E', border:'#D7CCC8' };
-      case 'orange': return { bg:'#FFF7ED', text:'#9A3412', border:'#FED7AA' };
-      case 'yellow': return { bg:'#FEFCE8', text:'#854D0E', border:'#FDE68A' };
-      case 'green':  return { bg:'#ECFDF5', text:'#065F46', border:'#A7F3D0' };
-      case 'blue':   return { bg:'#EFF6FF', text:'#1E40AF', border:'#BFDBFE' };
-      case 'purple': return { bg:'#F5F3FF', text:'#5B21B6', border:'#DDD6FE' };
-      case 'pink':   return { bg:'#FDF2F8', text:'#9D174D', border:'#FBCFE8' };
-      case 'red':    return { bg:'#FEF2F2', text:'#991B1B', border:'#FECACA' };
-      default:       return { bg:'#F3F4F6', text:'#111827', border:'#E5E7EB' };
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      case "'": return '&#39;';
+      default: return char;
     }
+  });
+
+  const abbreviation = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+      return words
+        .slice(0, 2)
+        .map((word) => Array.from(word)[0] || '')
+        .join('')
+        .slice(0, 2)
+        .toUpperCase();
+    }
+
+    const cleaned = text.replace(/[^0-9A-Za-z\u0600-\u06FF]+/g, '');
+    const chars = Array.from(cleaned || text).slice(0, 2).join('');
+    return chars.toUpperCase();
+  };
+
+  const buildCaption = (school) => {
+    const governorate = school.governorate?.name || '';
+    const program = school.programType || '';
+    const educationSystems = Array.isArray(school.educationSystem)
+      ? school.educationSystem.filter(Boolean)
+      : [];
+
+    const parts = [governorate];
+    if (program) {
+      parts.push(program);
+    } else if (educationSystems.length) {
+      parts.push(educationSystems.slice(0, 2).join(' · '));
+    }
+
+    return parts.filter(Boolean).join(' • ') || 'Open school folder';
+  };
+
+  const buildChips = (school) => {
+    const governorate = school.governorate?.name || '';
+    const program = school.programType || '';
+    const educationSystems = Array.isArray(school.educationSystem)
+      ? school.educationSystem.filter(Boolean)
+      : [];
+
+    const rawTokens = [governorate, program, ...educationSystems]
+      .map(abbreviation)
+      .filter(Boolean);
+
+    const uniqueTokens = [...new Set(rawTokens)].slice(0, 3);
+    return uniqueTokens.length ? uniqueTokens : ['B2'];
   };
 
   const render = (rows) => {
@@ -27,59 +73,65 @@ document.addEventListener('DOMContentLoaded', () => {
     grid.innerHTML = '';
 
     if (!Array.isArray(rows) || rows.length === 0) {
-      grid.innerHTML = `<div class="empty-block">No schools found.</div>`;
+      grid.innerHTML = '<div class="empty-block">No schools found.</div>';
       return;
     }
 
-    const frag = document.createDocumentFragment();
+    const fragment = document.createDocumentFragment();
+
     rows
       .slice()
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
-      .forEach((s) => {
-        const a = document.createElement('a');
-        a.className = 'school-file';
-        a.href = `/b2b/school/${encodeURIComponent(s.id)}`;
-        a.setAttribute('aria-label', `Open ${s.name || 'school'}`);
+      .forEach((school) => {
+        const folder = document.createElement('a');
+        const schoolName = school.name || 'Untitled';
+        const caption = buildCaption(school);
+        const chips = buildChips(school);
 
-        const govName = s.governorate?.name || '';
-        const govColor = s.governorate?.color || 'default';
-        const cv = colorVars(govColor);
-        a.style.setProperty('--school-accent-bg', cv.bg);
-        a.style.setProperty('--school-accent-text', cv.text);
-        a.style.setProperty('--school-accent-border', cv.border);
+        folder.className = 'school-folder';
+        folder.href = `/b2b/school/${encodeURIComponent(school.id)}`;
+        folder.setAttribute('aria-label', `Open ${schoolName}`);
 
-        const edu = Array.isArray(s.educationSystem) ? s.educationSystem.filter(Boolean) : [];
-        const program = s.programType || '';
-
-        const line1 = govName || '';
-        const line2 = program || (edu.length ? edu.join(' · ') : '');
-
-        a.innerHTML = `
-          <div class="school-file__name" title="${String(s.name || '').replace(/"/g, '&quot;')}">${s.name || 'Untitled'}</div>
-          <div class="school-file__meta">
-            ${line1 ? `<div class="line"><span class="dot" aria-hidden="true"></span><span>${line1}</span></div>` : ''}
-            ${line2 ? `<div class="line"><span class="dot" aria-hidden="true"></span><span>${line2}</span></div>` : ''}
+        folder.innerHTML = `
+          <div class="school-folder__figure" aria-hidden="true">
+            <span class="school-folder__paper school-folder__paper--left"></span>
+            <span class="school-folder__paper school-folder__paper--right"></span>
+            <span class="school-folder__back"></span>
+            <span class="school-folder__front">
+              <span class="school-folder__chips">
+                ${chips.map((chip, index) => `<span class="school-folder__chip school-folder__chip--${Math.min(index + 1, 3)}">${escapeHtml(chip)}</span>`).join('')}
+              </span>
+            </span>
           </div>
+          <div class="school-folder__name" title="${escapeHtml(schoolName)}">${escapeHtml(schoolName)}</div>
+          <div class="school-folder__caption">${escapeHtml(caption)}</div>
         `;
 
-        frag.appendChild(a);
+        fragment.appendChild(folder);
       });
 
-    grid.appendChild(frag);
-    if (window.feather) feather.replace();
+    grid.appendChild(fragment);
+
+    if (window.feather) {
+      feather.replace();
+    }
   };
 
   const applyFilter = () => {
-    const q = norm(searchInput ? searchInput.value : '');
-    if (!q) return render(allSchools);
+    const query = norm(searchInput ? searchInput.value : '');
+    if (!query) {
+      render(allSchools);
+      return;
+    }
 
-    const filtered = allSchools.filter((s) => {
-      const name = norm(s.name);
-      const gov = norm(s.governorate?.name);
-      const edu = norm((Array.isArray(s.educationSystem) ? s.educationSystem.join(' ') : ''));
-      const program = norm(s.programType);
-      return name.includes(q) || gov.includes(q) || edu.includes(q) || program.includes(q);
+    const filtered = allSchools.filter((school) => {
+      const name = norm(school.name);
+      const governorate = norm(school.governorate?.name);
+      const educationSystem = norm(Array.isArray(school.educationSystem) ? school.educationSystem.join(' ') : '');
+      const program = norm(school.programType);
+      return name.includes(query) || governorate.includes(query) || educationSystem.includes(query) || program.includes(query);
     });
+
     render(filtered);
   };
 
@@ -97,21 +149,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     try {
-      const res = await fetch('/api/b2b/schools', { credentials: 'include' });
-      if (res.status === 401 || res.redirected) {
+      const response = await fetch('/api/b2b/schools', { credentials: 'include' });
+      if (response.status === 401 || response.redirected) {
         window.location.href = '/login';
         return;
       }
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to load schools');
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        throw new Error(errorPayload.error || 'Failed to load schools');
       }
-      const data = await res.json();
+
+      const data = await response.json();
       allSchools = Array.isArray(data) ? data : [];
       render(allSchools);
-    } catch (e) {
-      console.error(e);
-      if (grid) grid.innerHTML = `<div class="error-block">Error: ${e.message}</div>`;
+    } catch (error) {
+      console.error(error);
+      if (grid) {
+        grid.innerHTML = `<div class="error-block">Error: ${escapeHtml(error.message)}</div>`;
+      }
     }
   };
 
@@ -119,8 +175,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (searchInput) {
     searchInput.addEventListener('input', applyFilter);
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && searchInput.value) {
+    searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && searchInput.value) {
         searchInput.value = '';
         applyFilter();
       }
