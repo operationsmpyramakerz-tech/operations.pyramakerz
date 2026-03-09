@@ -11,10 +11,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Prevent accidental double-execution (e.g. if the script is injected/loaded twice).
   // Double execution can cause racing fetches and UI flicker (orders appear then disappear)
   // and can also break card click behavior.
-  if (window.__CURRENT_ORDERS_UI_V6_LOADED__) return;
-  window.__CURRENT_ORDERS_UI_V6_LOADED__ = true;
+  if (window.__CURRENT_ORDERS_UI_V7_LOADED__) return;
+  window.__CURRENT_ORDERS_UI_V7_LOADED__ = true;
 
-  const CACHE_KEY = 'ordersDataV6';
+  const CACHE_KEY = 'ordersDataV7';
   const CACHE_TTL_MS = 30 * 1000;
 
   let allOrders = [];
@@ -161,6 +161,33 @@ document.addEventListener('DOMContentLoaded', () => {
       red: { bg: '#FEE2E2', fg: '#B91C1C', bd: '#FECACA' },
     };
     return map[key] || map.default;
+  }
+
+  function orderTypeMeta(type, notionColor) {
+    const key = String(type || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (key === 'requestproducts') {
+      return { label: 'Request Products', icon: 'shopping-cart', bg: '#DCFCE7', fg: '#166534', bd: '#86EFAC' };
+    }
+    if (key === 'withdrawproducts') {
+      return { label: 'Withdraw Products', icon: 'log-out', bg: '#FEE2E2', fg: '#B91C1C', bd: '#FECACA' };
+    }
+    if (key === 'requestmaintenance') {
+      return { label: 'Request Maintenance', icon: 'tool', bg: '#FEF3C7', fg: '#92400E', bd: '#FDE68A' };
+    }
+    const fallback = notionColorVars(notionColor);
+    return {
+      label: String(type || '').trim() || 'Order',
+      icon: 'package',
+      bg: fallback.bg,
+      fg: fallback.fg,
+      bd: fallback.bd,
+    };
+  }
+
+  function orderTypeThumbMarkup(type, notionColor) {
+    const meta = orderTypeMeta(type, notionColor);
+    const style = `--co-thumb-bg:${meta.bg};--co-thumb-fg:${meta.fg};--co-thumb-border:${meta.bd};`;
+    return `<div class="co-thumb co-thumb--order-type" style="${style}" title="${escapeHTML(meta.label)}" aria-label="${escapeHTML(meta.label)}"><i data-feather="${meta.icon}"></i></div>`;
   }
 
   const moneyFmt = (() => {
@@ -808,6 +835,8 @@ document.addEventListener('DOMContentLoaded', () => {
           reasons: [],
           orderIdRange: null,
           createdByName: o.createdByName || '',
+          orderType: o.orderType || '',
+          orderTypeColor: o.orderTypeColor || null,
         };
         map.set(key, g);
       }
@@ -817,6 +846,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!g.createdByName && o.createdByName) {
         g.createdByName = o.createdByName;
+      }
+      if (!g.orderType && o.orderType) {
+        g.orderType = o.orderType;
+      }
+      if (!g.orderTypeColor && o.orderTypeColor) {
+        g.orderTypeColor = o.orderTypeColor;
       }
 
       if (!g.latestCreated || toDate(o.createdTime) > toDate(g.latestCreated)) {
@@ -894,10 +929,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const componentsPrice = fmtMoney(estimateTotal);
     const createdBy = String(group.reason || '').trim();
 
-    const thumbLabel = String(group.orderIdRange || group.reason || '?').trim();
-    const thumbHTML = first.productImage
-      ? `<img src="${escapeHTML(first.productImage)}" alt="${escapeHTML(first.productName || thumbLabel)}" loading="lazy" />`
-      : `<div class="co-thumb__ph">${escapeHTML(thumbLabel.slice(0, 2).toUpperCase())}</div>`;
+    const thumbHTML = orderTypeThumbMarkup(
+      group.orderType || first.orderType,
+      group.orderTypeColor || first.orderTypeColor,
+    );
 
     const card = document.createElement('article');
     card.className = 'co-card';
@@ -907,7 +942,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     card.innerHTML = `
       <div class="co-top">
-        <div class="co-thumb">${thumbHTML}</div>
+        ${thumbHTML}
 
         <div class="co-main">
           <div class="co-title">${title}</div>

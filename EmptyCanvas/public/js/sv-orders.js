@@ -37,7 +37,7 @@
 
   // ===== Page cache (speed) =====
   // Cache S.V orders list in sessionStorage to reduce repeated loads when navigating.
-  const SV_CACHE_KEY = "cache:svOrders:v1";
+  const SV_CACHE_KEY = "cache:svOrders:v2";
   const SV_CACHE_TTL_MS = 45 * 1000; // 45s
 
   function readSvCache() {
@@ -92,6 +92,33 @@
       red: { bg: '#FEE2E2', fg: '#B91C1C', bd: '#FECACA' },
     };
     return map[key] || map.default;
+  }
+
+  function orderTypeMeta(type, notionColor) {
+    const key = String(type || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (key === 'requestproducts') {
+      return { label: 'Request Products', icon: 'shopping-cart', bg: '#DCFCE7', fg: '#166534', bd: '#86EFAC' };
+    }
+    if (key === 'withdrawproducts') {
+      return { label: 'Withdraw Products', icon: 'log-out', bg: '#FEE2E2', fg: '#B91C1C', bd: '#FECACA' };
+    }
+    if (key === 'requestmaintenance') {
+      return { label: 'Request Maintenance', icon: 'tool', bg: '#FEF3C7', fg: '#92400E', bd: '#FDE68A' };
+    }
+    const fallback = notionColorVars(notionColor);
+    return {
+      label: String(type || '').trim() || 'Order',
+      icon: 'package',
+      bg: fallback.bg,
+      fg: fallback.fg,
+      bd: fallback.bd,
+    };
+  }
+
+  function orderTypeThumbMarkup(type, notionColor) {
+    const meta = orderTypeMeta(type, notionColor);
+    const style = `--co-thumb-bg:${meta.bg};--co-thumb-fg:${meta.fg};--co-thumb-border:${meta.bd};`;
+    return `<div class="co-thumb co-thumb--order-type" style="${style}" title="${escapeHTML(meta.label)}" aria-label="${escapeHTML(meta.label)}"><i data-feather="${meta.icon}"></i></div>`;
   }
 
   function fmtMoney(value) {
@@ -350,6 +377,8 @@
           reasons: [],
           orderIdRange: null,
           approval: "Not Started",
+          orderType: o.orderType || '',
+          orderTypeColor: o.orderTypeColor || null,
           totals: {
             totalQty: 0,
             estimateTotal: 0,
@@ -362,6 +391,8 @@
 
       // Creator name (displayed under date on the card)
       if (!g.createdByName) g.createdByName = o.createdByName || null;
+      if (!g.orderType && o.orderType) g.orderType = o.orderType;
+      if (!g.orderTypeColor && o.orderTypeColor) g.orderTypeColor = o.orderTypeColor;
 
       if (!g.latestCreated || toDate(o.createdTime) > toDate(g.latestCreated)) {
         g.latestCreated = o.createdTime;
@@ -422,10 +453,10 @@
 
     const statusVars = notionColorVars(group.approvalColor);
 
-    const thumbLabel = String(group.orderIdRange || group.reason || "?").trim();
-    const thumbHTML = first.productImage
-      ? `<img src="${escapeHTML(first.productImage)}" alt="${escapeHTML(first.productName || thumbLabel)}" loading="lazy" />`
-      : `<div class="co-thumb__ph">${escapeHTML(thumbLabel.slice(0, 2).toUpperCase())}</div>`;
+    const thumbHTML = orderTypeThumbMarkup(
+      group.orderType || first.orderType,
+      group.orderTypeColor || first.orderTypeColor,
+    );
 
     const card = document.createElement("article");
     card.className = "co-card";
@@ -435,7 +466,7 @@
 
     card.innerHTML = `
       <div class="co-top">
-        <div class="co-thumb">${thumbHTML}</div>
+        ${thumbHTML}
 
         <div class="co-main">
           <div class="co-title">${title}</div>

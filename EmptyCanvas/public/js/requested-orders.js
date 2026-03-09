@@ -69,7 +69,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // ---------- Page cache (speed) ----------
   // Cache the requested orders list in sessionStorage to avoid re-fetching / re-rendering
   // on quick navigation. This speeds up Operations Orders noticeably on Vercel cold starts.
-  const REQ_CACHE_KEY = "cache:ops:requestedOrders:v1";
+  const REQ_CACHE_KEY = "cache:ops:requestedOrders:v2";
   const REQ_CACHE_TTL_MS = 45 * 1000; // 45s (server cache is 60s)
 
   function readRequestedCache() {
@@ -129,6 +129,33 @@ document.addEventListener("DOMContentLoaded", () => {
       red: { bg: "#FEE2E2", fg: "#B91C1C", bd: "#FECACA" },
     };
     return map[key] || map.default;
+  }
+
+  function orderTypeMeta(type, notionColor) {
+    const key = String(type || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (key === "requestproducts") {
+      return { label: "Request Products", icon: "shopping-cart", bg: "#DCFCE7", fg: "#166534", bd: "#86EFAC" };
+    }
+    if (key === "withdrawproducts") {
+      return { label: "Withdraw Products", icon: "log-out", bg: "#FEE2E2", fg: "#B91C1C", bd: "#FECACA" };
+    }
+    if (key === "requestmaintenance") {
+      return { label: "Request Maintenance", icon: "tool", bg: "#FEF3C7", fg: "#92400E", bd: "#FDE68A" };
+    }
+    const fallback = notionColorVars(notionColor);
+    return {
+      label: String(type || "").trim() || "Order",
+      icon: "package",
+      bg: fallback.bg,
+      fg: fallback.fg,
+      bd: fallback.bd,
+    };
+  }
+
+  function orderTypeThumbMarkup(type, notionColor) {
+    const meta = orderTypeMeta(type, notionColor);
+    const style = `--co-thumb-bg:${meta.bg};--co-thumb-fg:${meta.fg};--co-thumb-border:${meta.bd};`;
+    return `<div class="co-thumb co-thumb--order-type" style="${style}" title="${escapeHTML(meta.label)}" aria-label="${escapeHTML(meta.label)}"><i data-feather="${meta.icon}"></i></div>`;
   }
 
   const moneyFmt = (() => {
@@ -435,6 +462,8 @@ document.addEventListener("DOMContentLoaded", () => {
           orderIdNumber: Number.isFinite(oid) ? oid : null,
           createdById: it.createdById || "",
           createdByName: it.createdByName || "",
+          orderType: it.orderType || "",
+          orderTypeColor: it.orderTypeColor || null,
           // We keep a group-level summary reason for search only.
           // The modal always shows per-item reasons.
           reason: "",
@@ -442,7 +471,10 @@ document.addEventListener("DOMContentLoaded", () => {
           items: [],
         });
       }
-      map.get(gKey).items.push(it);
+      const group = map.get(gKey);
+      group.items.push(it);
+      if (!group.orderType && it.orderType) group.orderType = it.orderType;
+      if (!group.orderTypeColor && it.orderTypeColor) group.orderTypeColor = it.orderTypeColor;
     }
 
     // Same summarization idea as Current Orders (helps search UX)
@@ -577,10 +609,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const sub = escapeHTML(fmtDateOnly(g.latestCreated) || "—");
     const createdBy = escapeHTML(String(g.createdByName || first.createdByName || "").trim() || "—");
 
-    const thumbLabel = String(g.orderIdRange || g.reason || "?").trim();
-    const thumbHTML = first.productImage
-      ? `<img src="${escapeHTML(first.productImage)}" alt="${escapeHTML(first.productName || thumbLabel)}" loading="lazy" />`
-      : `<div class="co-thumb__ph">${escapeHTML(thumbLabel.slice(0, 2).toUpperCase())}</div>`;
+    const thumbHTML = orderTypeThumbMarkup(
+      g.orderType || first.orderType,
+      g.orderTypeColor || first.orderTypeColor,
+    );
 
     const stage = g.stage || computeStage(g.items || []);
     const statusVars = notionColorVars(stage.color);
@@ -615,7 +647,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     card.innerHTML = `
       <div class="co-top">
-        <div class="co-thumb">${thumbHTML}</div>
+        ${thumbHTML}
 
         <div class="co-main">
           <div class="co-title">${title}</div>

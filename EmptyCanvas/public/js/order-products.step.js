@@ -76,20 +76,29 @@
       description: 'Add new products or supplies and send them as a stock request.',
       headingTitle: 'Shopping Cart',
       headingIcon: 'shopping-cart',
+      themeClass: 'theme-request-products',
     },
     [WITHDRAW_PRODUCTS_KEY]: {
       icon: 'log-out',
       description: 'Withdraw available items from stock with a dedicated outgoing flow.',
       headingTitle: 'Withdraw Products',
       headingIcon: 'log-out',
+      themeClass: 'theme-withdraw-products',
     },
     [REQUEST_MAINTENANCE_KEY]: {
       icon: 'tool',
       description: 'Report issues for machines and create a maintenance request quickly.',
       headingTitle: 'Request Maintenance',
       headingIcon: 'tool',
+      themeClass: 'theme-request-maintenance',
     },
   };
+
+  const ORDER_TYPE_THEME_CLASSES = [
+    'theme-request-products',
+    'theme-withdraw-products',
+    'theme-request-maintenance',
+  ];
 
   let selectedOrderType = '';
   let cartBooted = false;
@@ -105,7 +114,16 @@
       description: 'Open this workflow and continue to the next step.',
       headingTitle: String(type || '').trim() || 'Shopping Cart',
       headingIcon: 'grid',
+      themeClass: '',
     };
+  }
+
+  function applyThemeClass(el, themeClass) {
+    if (!el) return;
+    try {
+      ORDER_TYPE_THEME_CLASSES.forEach((cls) => el.classList.remove(cls));
+      if (themeClass) el.classList.add(themeClass);
+    } catch {}
   }
 
   function updatePageHeading(type = selectedOrderType) {
@@ -120,7 +138,10 @@
         const pageTitleEl = document.querySelector('.page-title');
         if (pageTitleEl) pageTitleEl.textContent = headingTitle;
       }
-      if (pageTitleIconEl) pageTitleIconEl.innerHTML = featherIconMarkup(headingIcon);
+      if (pageTitleIconEl) {
+        pageTitleIconEl.innerHTML = featherIconMarkup(headingIcon);
+        applyThemeClass(pageTitleIconEl, v ? meta.themeClass : '');
+      }
       if (window.feather) feather.replace();
     } catch {}
   }
@@ -271,6 +292,7 @@
 
       btn.type = 'button';
       btn.className = 'order-type-btn';
+      if (meta.themeClass) btn.classList.add(meta.themeClass);
       btn.dataset.type = String(name);
       btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
       btn.innerHTML = `
@@ -313,6 +335,7 @@
       if (cartTypeValueTextEl) cartTypeValueTextEl.textContent = '—';
       else cartTypeValueEl.textContent = '—';
       if (cartTypeValueIconEl) cartTypeValueIconEl.innerHTML = featherIconMarkup('shopping-cart');
+      applyThemeClass(cartTypeValueEl, '');
       // Reset UI to default state
       applyOrderTypeUi('');
       if (window.feather) feather.replace();
@@ -323,6 +346,7 @@
     if (cartTypeValueTextEl) cartTypeValueTextEl.textContent = v;
     else cartTypeValueEl.textContent = v;
     if (cartTypeValueIconEl) cartTypeValueIconEl.innerHTML = featherIconMarkup(meta.icon);
+    applyThemeClass(cartTypeValueEl, meta.themeClass || '');
     cartTypePillEl.style.display = 'flex';
 
     // Apply UI copy for this order type
