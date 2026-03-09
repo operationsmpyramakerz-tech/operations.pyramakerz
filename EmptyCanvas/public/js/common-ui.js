@@ -22,6 +22,279 @@ document.addEventListener('DOMContentLoaded', () => {
   const CACHE_ALLOWED  = 'allowedPages';     // sessionStorage key
   const isMobile = () => window.innerWidth <= 768;
 
+
+  // =====================================================
+  // API data cache (sessionStorage) + background prefetch
+  // - keeps navigation between pages fast in this multi-page app
+  // - first load still comes from the server, then later pages reuse cached JSON
+  // - any successful mutation clears the cache so the UI stays fresh
+  // =====================================================
+  const APP_API_CACHE_NS = 'ops.api.cache.v2';
+  const APP_API_CACHE_PREFIX = `${APP_API_CACHE_NS}:entry:`;
+  const APP_API_PRIME_PREFIX = `${APP_API_CACHE_NS}:prime:`;
+  const APP_API_MAX_ENTRY_CHARS = 1_500_000;
+  const _nativeFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : null;
+  const _apiCacheInflight = new Map();
+
+  function cachePart(value) {
+    return encodeURIComponent(String(value ?? '').trim() || '-');
+  }
+
+  function getApiCacheStorageKey(name, urlObj) {
+    return `${APP_API_CACHE_PREFIX}${name}:${cachePart(urlObj.pathname + urlObj.search)}`;
+  }
+
+  function clearAppApiCache() {
+    try {
+      const toDelete = [];
+      for (let i = 0; i < sessionStorage.length; i += 1) {
+        const key = sessionStorage.key(i);
+        if (!key) continue;
+        if (key.startsWith(APP_API_CACHE_PREFIX) || key.startsWith(APP_API_PRIME_PREFIX)) {
+          toDelete.push(key);
+        }
+      }
+      toDelete.forEach((key) => {
+        try { sessionStorage.removeItem(key); } catch {}
+      });
+    } catch {}
+  }
+
+  function readAppApiCache(storageKey) {
+    try {
+      const raw = sessionStorage.getItem(storageKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const expiresAt = Number(parsed?.expiresAt || 0);
+      if (!expiresAt || Date.now() > expiresAt) {
+        try { sessionStorage.removeItem(storageKey); } catch {}
+        return null;
+      }
+      if (typeof parsed?.bodyText !== 'string' || !parsed.bodyText) return null;
+      return parsed;
+    } catch {
+      try { sessionStorage.removeItem(storageKey); } catch {}
+      return null;
+    }
+  }
+
+  function writeAppApiCache(storageKey, bodyText, ttlMs, status = 200) {
+    try {
+      if (typeof bodyText !== 'string' || !bodyText) return;
+      if (bodyText.length > APP_API_MAX_ENTRY_CHARS) return;
+      const payload = {
+        status: Number(status || 200),
+        bodyText,
+        expiresAt: Date.now() + Math.max(1000, Number(ttlMs) || 1000),
+      };
+      sessionStorage.setItem(storageKey, JSON.stringify(payload));
+    } catch (e) {
+      const name = String(e?.name || '');
+      if (/quota/i.test(name)) {
+        clearAppApiCache();
+      }
+    }
+  }
+
+  function buildCachedJsonResponse(entry) {
+    return new Response(entry.bodyText, {
+      status: Number(entry?.status || 200),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Ops-Client-Cache': 'HIT',
+      },
+    });
+  }
+
+  const APP_API_CACHE_RULES = [
+    { name: 'account', test: (url) => url.pathname === '/api/account', ttlMs: 5 * 60 * 1000 },
+    { name: 'notifications', test: (url) => url.pathname === '/api/notifications', ttlMs: 20 * 1000 },
+    { name: 'b2b-schools', test: (url) => url.pathname === '/api/b2b/schools', ttlMs: 10 * 60 * 1000 },
+    { name: 'b2b-school', test: (url) => /^\/api\/b2b\/schools\/[^/]+$/.test(url.pathname), ttlMs: 5 * 60 * 1000 },
+    { name: 'b2b-school-stock', test: (url) => /^\/api\/b2b\/schools\/[^/]+\/stock$/.test(url.pathname), ttlMs: 2 * 60 * 1000 },
+    { name: 'order-types', test: (url) => url.pathname === '/api/order-types', ttlMs: 20 * 60 * 1000 },
+    { name: 'components', test: (url) => url.pathname === '/api/components', ttlMs: 20 * 60 * 1000 },
+    { name: 'orders-current', test: (url) => url.pathname === '/api/orders', ttlMs: 2 * 60 * 1000 },
+    { name: 'orders-requested', test: (url) => url.pathname === '/api/orders/requested', ttlMs: 2 * 60 * 1000 },
+    { name: 'orders-assigned', test: (url) => url.pathname === '/api/orders/assigned', ttlMs: 2 * 60 * 1000 },
+    { name: 'tasks-users', test: (url) => url.pathname === '/api/tasks/users', ttlMs: 10 * 60 * 1000 },
+    { name: 'tasks-list', test: (url) => url.pathname === '/api/tasks', ttlMs: 90 * 1000 },
+    { name: 'task-detail', test: (url) => /^\/api\/tasks\/[^/]+$/.test(url.pathname), ttlMs: 90 * 1000 },
+    { name: 'stock', test: (url) => url.pathname === '/api/stock', ttlMs: 2 * 60 * 1000 },
+    { name: 'expenses-main', test: (url) => url.pathname === '/api/expenses', ttlMs: 2 * 60 * 1000 },
+    { name: 'expenses-types', test: (url) => url.pathname === '/api/expenses/types', ttlMs: 20 * 60 * 1000 },
+    { name: 'expenses-cash-in-from', test: (url) => url.pathname === '/api/expenses/cash-in-from/options', ttlMs: 20 * 60 * 1000 },
+    { name: 'expenses-users', test: (url) => url.pathname === '/api/expenses/users', ttlMs: 2 * 60 * 1000 },
+    { name: 'expenses-user', test: (url) => /^\/api\/expenses\/user\/[^/]+$/.test(url.pathname), ttlMs: 2 * 60 * 1000 },
+  ];
+
+  function getApiCacheRule(urlObj, method) {
+    const verb = String(method || 'GET').toUpperCase();
+    if (verb !== 'GET') return null;
+    if (urlObj.origin !== window.location.origin) return null;
+    return APP_API_CACHE_RULES.find((rule) => {
+      try { return !!rule.test(urlObj); } catch { return false; }
+    }) || null;
+  }
+
+  function normalizeAllowedToken(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9/]+/g, '');
+  }
+
+  function hasAllowedPage(allowedPages, aliases) {
+    const set = new Set((allowedPages || []).map((item) => normalizeAllowedToken(item)));
+    return (aliases || []).some((alias) => set.has(normalizeAllowedToken(alias)));
+  }
+
+  function buildPrefetchUrls(allowedPages) {
+    const urls = ['/api/account', '/api/notifications?limit=60'];
+
+    if (hasAllowedPage(allowedPages, ['B2B', '/b2b'])) {
+      urls.push('/api/b2b/schools');
+    }
+    if (hasAllowedPage(allowedPages, ['Create New Order', '/orders/new'])) {
+      urls.push('/api/order-types', '/api/components');
+    }
+    if (hasAllowedPage(allowedPages, ['Current Orders', '/orders'])) {
+      urls.push('/api/orders');
+    }
+    if (hasAllowedPage(allowedPages, ['Requested Orders', 'Schools Requested Orders', '/orders/requested'])) {
+      urls.push('/api/orders/requested');
+    }
+    if (hasAllowedPage(allowedPages, ['Assigned Schools Requested Orders', 'Assigned Orders', 'Storage', '/orders/assigned'])) {
+      urls.push('/api/orders/assigned');
+    }
+    if (hasAllowedPage(allowedPages, ['Tasks', '/tasks'])) {
+      urls.push('/api/tasks?scope=mine', '/api/tasks/users');
+    }
+    if (hasAllowedPage(allowedPages, ['Stocktaking', '/stocktaking'])) {
+      urls.push('/api/stock');
+    }
+    if (hasAllowedPage(allowedPages, ['Expenses', '/expenses'])) {
+      urls.push('/api/expenses', '/api/expenses/types', '/api/expenses/cash-in-from/options');
+    }
+    if (hasAllowedPage(allowedPages, ['Expenses Users', '/expenses/users'])) {
+      urls.push('/api/expenses/users');
+    }
+
+    return Array.from(new Set(urls));
+  }
+
+  async function prefetchApiUrls(urls, concurrency = 2) {
+    const queue = Array.from(urls || []).filter(Boolean);
+    if (!queue.length) return;
+
+    let index = 0;
+    const workers = new Array(Math.min(Math.max(1, concurrency), queue.length)).fill(0).map(async () => {
+      while (index < queue.length) {
+        const current = queue[index++];
+        try {
+          await window.fetch(current, {
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json', 'X-Ops-Prefetch': '1' },
+          });
+        } catch {}
+      }
+    });
+
+    await Promise.all(workers);
+  }
+
+  function schedulePrefetchForAllowedPages(allowedPages) {
+    try {
+      const userKey = cachePart(localStorage.getItem('username') || 'user');
+      const permsKey = cachePart((allowedPages || []).join('|') || 'none');
+      const marker = `${APP_API_PRIME_PREFIX}${userKey}:${permsKey}`;
+      if (sessionStorage.getItem(marker) === '1') return;
+      sessionStorage.setItem(marker, '1');
+
+      const urls = buildPrefetchUrls(allowedPages);
+      if (!urls.length) return;
+
+      const run = () => {
+        prefetchApiUrls(urls, 2).catch(() => {
+          try { sessionStorage.removeItem(marker); } catch {}
+        });
+      };
+
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 1500 });
+      } else {
+        window.setTimeout(run, 350);
+      }
+    } catch {}
+  }
+
+  function patchApiFetchCaching() {
+    if (!_nativeFetch || window.__opsApiCachePatched) return;
+    window.__opsApiCachePatched = true;
+
+    window.fetch = async function patchedFetch(input, init) {
+      const req = input instanceof Request ? input : null;
+      const urlObj = new URL(typeof input === 'string' ? input : (req ? req.url : String(input || '')), window.location.origin);
+      const method = String(init?.method || req?.method || 'GET').toUpperCase();
+      const isApi = urlObj.origin === window.location.origin && urlObj.pathname.startsWith('/api/');
+
+      if (isApi && method !== 'GET' && method !== 'HEAD') {
+        const response = await _nativeFetch(input, init);
+        if (response && response.ok) {
+          clearAppApiCache();
+        }
+        return response;
+      }
+
+      const rule = getApiCacheRule(urlObj, method);
+      const bypass = String(urlObj.searchParams.get('_fresh') || '') === '1';
+      if (!rule || bypass) {
+        return _nativeFetch(input, init);
+      }
+
+      const storageKey = getApiCacheStorageKey(rule.name, urlObj);
+      const cached = readAppApiCache(storageKey);
+      if (cached) {
+        return buildCachedJsonResponse(cached);
+      }
+
+      if (_apiCacheInflight.has(storageKey)) {
+        try { await _apiCacheInflight.get(storageKey); } catch {}
+        const warm = readAppApiCache(storageKey);
+        if (warm) return buildCachedJsonResponse(warm);
+      }
+
+      const pending = (async () => {
+        const response = await _nativeFetch(input, init);
+        if (response && response.ok) {
+          const ctype = String(response.headers.get('content-type') || '').toLowerCase();
+          if (ctype.includes('json')) {
+            try {
+              const bodyText = await response.clone().text();
+              if (bodyText) {
+                JSON.parse(bodyText);
+                writeAppApiCache(storageKey, bodyText, rule.ttlMs, response.status);
+              }
+            } catch {}
+          }
+        }
+        return response;
+      })();
+
+      _apiCacheInflight.set(storageKey, pending.then(() => undefined).catch(() => undefined));
+      try {
+        return await pending;
+      } finally {
+        _apiCacheInflight.delete(storageKey);
+      }
+    };
+
+    window.OpsAppCache = {
+      clear: clearAppApiCache,
+      prefetch: prefetchApiUrls,
+      schedule: schedulePrefetchForAllowedPages,
+    };
+  }
+
+  patchApiFetchCaching();
+
   // =====================================================
   // UI Redesign helpers
   // - Sidebar tooltips when labels are hidden
@@ -735,6 +1008,10 @@ if (document.querySelector('.sidebar')) {
         // 🔒 اخفي الكل ثم أظهر المسموح
         applyAllowedPages([]);
         applyAllowedPages(data.allowedPages);
+
+        // Prime the app data in the background once per session/tab so page transitions
+        // feel instant after the first load.
+        schedulePrefetchForAllowedPages(data.allowedPages);
 
         // ✅ بعد ما طبقنا الصلاحيات، نكشف اللي مسموح بس (بدون فلاش)
         document.body.classList.remove('permissions-loading');
