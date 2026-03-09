@@ -548,6 +548,19 @@ body.sidebar-collapsed .sidebar-toggle svg{ transform:rotate(180deg); }
   color: #374151;
 }
 
+.co-thumb--order-type{
+  background: var(--co-thumb-bg, #F3F4F6);
+  color: var(--co-thumb-fg, #374151);
+  border: 1px solid var(--co-thumb-border, #E5E7EB);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55);
+}
+
+.co-thumb--order-type svg{
+  width: 30px;
+  height: 30px;
+  stroke-width: 2.2;
+}
+
 .co-main{ flex: 1; min-width: 0; }
 
 .co-title{
