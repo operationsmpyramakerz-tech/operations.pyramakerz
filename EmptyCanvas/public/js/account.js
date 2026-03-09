@@ -13,8 +13,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     { key: 'phone',        label: 'Phone',         icon: 'phone',      inputType: 'text',     required: false, placeholder: 'e.g. 0123456789' },
     { key: 'email',        label: 'Email',         icon: 'mail',       inputType: 'email',    required: false, placeholder: 'e.g. name@company.com' },
     { key: 'employeeCode', label: 'Employee Code', icon: 'hash',       inputType: 'number',   required: false },
-    // Password is stored as a Notion Number in this project, but we don't display it.
-    { key: 'password',     label: 'Password',      icon: 'lock',       inputType: 'password', required: true,  placeholder: 'New password', inputMode: 'numeric', autocomplete: 'new-password' },
+    // Password is stored as text in Notion (Rich text), but we don't display it.
+    { key: 'password',     label: 'Password',      icon: 'lock',       inputType: 'password', required: true,  placeholder: 'New password', autocomplete: 'new-password' },
   ];
 
   // ===== Helpers =====

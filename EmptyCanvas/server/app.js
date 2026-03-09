@@ -298,7 +298,7 @@ async function verifyAdminPassword(inputPassword) {
   try {
     const adminPage = await getAdminUserPageFromNotion();
     if (!adminPage) return false;
-    const stored = adminPage?.properties?.Password?.number;
+    const stored = _extractPropText(adminPage?.properties?.Password);
     if (stored === null || stored === undefined) return false;
     return String(stored) === pwd;
   } catch {
@@ -1077,9 +1077,11 @@ app.post("/api/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid username or password" });
     }
     const user = response.results[0];
-    const storedPassword = user.properties.Password?.number;
+    const storedPassword = _extractPropText(user.properties?.Password);
 
-    if (storedPassword && storedPassword.toString() === password) {
+    const providedPassword = String(password || "").trim();
+
+    if (storedPassword !== null && typeof storedPassword !== "undefined" && String(storedPassword) === providedPassword) {
       const allowedNormalized = extractAllowedPages(user.properties);
       req.session.authenticated = true;
       req.session.username = username;
@@ -1102,7 +1104,7 @@ app.post("/api/login", async (req, res) => {
           phone: p?.Phone?.phone_number || "",
           email: p?.Email?.email || "",
           employeeCode: p?.["Employee Code"]?.number ?? null,
-          passwordSet: (p?.Password?.number ?? null) !== null,
+          passwordSet: (_extractPropText(p?.Password) ?? null) !== null,
           allowedPages: allowedUI,
         };
         req.session.accountCacheTs = Date.now();
@@ -1209,7 +1211,7 @@ app.get("/api/account", requireAuth, async (req, res) => {
       phone: p?.Phone?.phone_number || "",
       email: p?.Email?.email || "",
       employeeCode: p?.["Employee Code"]?.number ?? null,
-      passwordSet: (p?.Password?.number ?? null) !== null,
+      passwordSet: (_extractPropText(p?.Password) ?? null) !== null,
       allowedPages: allowedUI,
     };
 
@@ -3199,7 +3201,7 @@ app.post(
       const admin = response?.results?.[0] || null;
       if (!admin) return res.status(404).json({ error: "Admin user not found." });
 
-      const storedPassword = admin?.properties?.Password?.number;
+      const storedPassword = _extractPropText(admin?.properties?.Password);
       if (storedPassword === null || typeof storedPassword === "undefined") {
         return res.status(500).json({ error: "Admin password is not set." });
       }
@@ -8869,8 +8871,8 @@ if (_isRequestMaintenance) {
       const userPage = userQuery.results[0];
       const userId = userPage.id;
 
-      const storedPassword = userPage?.properties?.Password?.number;
-      if (!storedPassword || String(storedPassword) !== password) {
+      const storedPassword = _extractPropText(userPage?.properties?.Password);
+      if (storedPassword === null || typeof storedPassword === "undefined" || String(storedPassword) !== password) {
         return res
           .status(401)
           .json({ success: false, message: "Invalid password. Please try again." });
@@ -10726,7 +10728,7 @@ app.post("/api/account/verify-password", requireAuth, async (req, res) => {
     }
 
     const user = response.results[0];
-    const storedPassword = user.properties?.Password?.number;
+    const storedPassword = _extractPropText(user.properties?.Password);
 
     if (storedPassword === null || typeof storedPassword === "undefined") {
       return res.status(400).json({ error: "No password set for this account." });
@@ -10775,7 +10777,7 @@ app.patch("/api/account", requireAuth, async (req, res) => {
     }
 
     const user = response.results[0];
-    const storedPassword = user.properties?.Password?.number;
+    const storedPassword = _extractPropText(user.properties?.Password);
 
     const provided = String(currentPassword ?? "").trim();
 
@@ -10824,14 +10826,26 @@ app.patch("/api/account", requireAuth, async (req, res) => {
     }
 
     if (typeof password !== "undefined") {
-      if (password === null || String(password).trim() === "") {
+      const newPwd = String(password ?? "").trim();
+      if (!newPwd) {
         return res.status(400).json({ error: "Password cannot be empty." });
       }
-      const n = Number(password);
-      if (Number.isNaN(n)) {
-        return res.status(400).json({ error: "Password must be a number." });
+
+      // Team Members DB: Password may be a Number (legacy) or Rich text (new).
+      const passType = user.properties?.Password?.type || "rich_text";
+
+      if (passType === "number") {
+        const n = Number(newPwd);
+        if (Number.isNaN(n)) {
+          return res.status(400).json({ error: "Password must be a number." });
+        }
+        updateProps["Password"] = { number: n };
+      } else if (passType === "title") {
+        updateProps["Password"] = { title: [{ text: { content: newPwd } }] };
+      } else {
+        // default: rich_text
+        updateProps["Password"] = { rich_text: [{ text: { content: newPwd } }] };
       }
-      updateProps["Password"] = { number: n };
     }
 
     if (typeof name !== "undefined") {
@@ -12916,9 +12930,9 @@ app.post("/api/logistics/verify-user", requireAuth, async (req, res) => {
       props.Username?.title?.[0]?.plain_text ||
       "User";
 
-    const storedPassword = props.Password?.number;
+    const storedPassword = _extractPropText(props.Password);
 
-    if (!storedPassword) {
+    if (storedPassword === null || typeof storedPassword === "undefined") {
       return res.status(400).json({ ok: false, error: "Password not set for this user" });
     }
 
