@@ -114,10 +114,36 @@
   /* ============================
      Show/Hide password (match Login page)
      ============================ */
-  .password-wrapper{ position: relative; }
+  /*
+    NOTE:
+    - On this page the input has margin-bottom, which makes absolute centering look off.
+      So we move the spacing to the wrapper, and remove margin from the input inside.
+    - Also hide browser built-in password/credential buttons so our eye icon is always visible.
+  */
+  .password-wrapper{
+    position: relative;
+    margin-bottom: 1rem;
+  }
+  .password-wrapper .ex-input{
+    margin-bottom: 0;
+  }
+
   /* Add right padding only when toggle exists */
   .password-wrapper.has-toggle .ex-input{ padding-right: 2.5rem; }
+
+  /* Hide toggle when wrapper doesn't opt-in */
   .password-wrapper:not(.has-toggle) .toggle-password{ display:none; }
+
+  /* Hide built-in reveal/autofill buttons (Edge/IE + Chromium) */
+  input[type="password"]::-ms-reveal,
+  input[type="password"]::-ms-clear{ display:none; }
+  input::-webkit-credentials-auto-fill-button,
+  input::-webkit-contacts-auto-fill-button{
+    visibility: hidden;
+    display: none !important;
+    pointer-events: none;
+  }
+
   .toggle-password{
     position: absolute;
     top: 50%;
@@ -125,6 +151,7 @@
     transform: translateY(-50%);
     width: 2rem;
     height: 2rem;
+    padding: 0;
     border: 0;
     background: transparent;
     color: #6B7280;
@@ -133,7 +160,12 @@
     justify-content: center;
     cursor: pointer;
     border-radius: 50%;
+    z-index: 3;
+    -webkit-appearance: none;
+    appearance: none;
+    line-height: 0;
   }
+  .toggle-password svg{ display:block; }
   .toggle-password:hover{ color: #374151; background: rgba(0,0,0,.04); }
   .toggle-password:active{ transform: translateY(-50%) scale(.98); }
 
