@@ -207,6 +207,67 @@ async function cacheDel(key) {
   }
 }
 
+function cacheKeySafe(value) {
+  return encodeURIComponent(String(value ?? "").trim() || "-");
+}
+
+function cachedJsonRoute(ttlSeconds, keyFactory) {
+  return async function cachedJsonRouteMiddleware(req, res, next) {
+    try {
+      if (String(req.method || "GET").toUpperCase() !== "GET") return next();
+
+      const rawKey = typeof keyFactory === "function" ? await keyFactory(req) : keyFactory;
+      const key = String(rawKey || "").trim();
+      if (!key) return next();
+
+      const mem = _memGet(key);
+      if (mem !== null && mem !== undefined) {
+        return res.json(mem);
+      }
+
+      const fromRedis = await _redisGet(key);
+      if (fromRedis !== null && fromRedis !== undefined) {
+        _memSet(key, fromRedis, ttlSeconds);
+        return res.json(fromRedis);
+      }
+
+      const originalJson = res.json.bind(res);
+      res.json = (payload) => {
+        try {
+          const code = Number(res.statusCode || 200);
+          if (code >= 200 && code < 300 && payload !== undefined) {
+            _memSet(key, payload, ttlSeconds);
+            Promise.resolve(_redisSet(key, payload, ttlSeconds)).catch(() => {});
+          }
+        } catch {}
+        return originalJson(payload);
+      };
+
+      return next();
+    } catch (e) {
+      console.warn("[route-cache] bypassed:", e?.message || e);
+      return next();
+    }
+  };
+}
+
+async function clearExpensesRouteCaches(req, teamMemberPageId = "") {
+  try {
+    const usernameKey = cacheKeySafe(req?.session?.username || "");
+    const tasks = [
+      cacheDel(`cache:api:expenses:${usernameKey}:v1`),
+      cacheDel("cache:api:expenses:users:v1"),
+    ];
+
+    const memberKey = normalizeNotionId(teamMemberPageId || "");
+    if (memberKey) tasks.push(cacheDel(`cache:api:expenses:user:${memberKey}:v1`));
+
+    await Promise.all(tasks);
+  } catch (e) {
+    console.warn("clearExpensesRouteCaches failed:", e?.message || e);
+  }
+}
+
 async function mapWithConcurrency(items, limit, mapper) {
   const arr = Array.from(items || []);
   const out = new Map();
@@ -1195,33 +1256,35 @@ app.get("/api/account", requireAuth, async (req, res) => {
     const userId = await getSessionUserNotionId(req);
     if (!userId) return res.status(404).json({ error: "User not found." });
 
-    const userPage = await notion.pages.retrieve({ page_id: userId });
-    const p = userPage.properties || {};
+    const accountCacheKey = `cache:api:account:${normalizeNotionId(userId)}:v2`;
+    const data = await cacheGetOrSet(accountCacheKey, 5 * 60, async () => {
+      const userPage = await notion.pages.retrieve({ page_id: userId });
+      const p = userPage.properties || {};
 
-    const freshAllowed = extractAllowedPages(p);
-    req.session.allowedPages = freshAllowed;
-    const allowedUI = expandAllowedForUI(freshAllowed);
+      const freshAllowed = extractAllowedPages(p);
+      const allowedUI = expandAllowedForUI(freshAllowed);
 
-    const data = {
-      name: p?.Name?.title?.[0]?.plain_text || "",
-      username: req.session.username || "",
-      department: p?.Department?.select?.name || "",
-      position: p?.Position?.select?.name || "",
-      photoUrl: extractProfilePhotoUrlFromProps(p) || "",
-      phone: p?.Phone?.phone_number || "",
-      email: p?.Email?.email || "",
-      employeeCode: p?.["Employee Code"]?.number ?? null,
-      passwordSet: (_extractPropText(p?.Password) ?? null) !== null,
-      allowedPages: allowedUI,
-    };
+      return {
+        name: p?.Name?.title?.[0]?.plain_text || "",
+        username: req.session.username || "",
+        department: p?.Department?.select?.name || "",
+        position: p?.Position?.select?.name || "",
+        photoUrl: extractProfilePhotoUrlFromProps(p) || "",
+        phone: p?.Phone?.phone_number || "",
+        email: p?.Email?.email || "",
+        employeeCode: p?.["Employee Code"]?.number ?? null,
+        passwordSet: (_extractPropText(p?.Password) ?? null) !== null,
+        allowedPages: allowedUI,
+      };
+    });
 
-    // Update session cache
     try {
+      req.session.allowedPages = Array.isArray(data?.allowedPages) ? data.allowedPages : [];
       req.session.accountCache = data;
       req.session.accountCacheTs = Date.now();
     } catch {}
 
-    res.json(data);
+    return res.json(data);
   } catch (error) {
     console.error("Error fetching account from Notion:", error.body || error);
     res.status(500).json({ error: "Failed to fetch account info." });
@@ -8272,6 +8335,7 @@ app.get(
   "/api/components",
   requireAuth,
   requirePage("Create New Order"),
+  cachedJsonRoute(20 * 60, () => "cache:api:components:v1"),
   async (req, res) => {
     if (!componentsDatabaseId) {
       return res
@@ -9628,6 +9692,7 @@ app.get(
   "/api/stock",
   requireAuth,
   requirePage("Stocktaking"),
+  cachedJsonRoute(2 * 60, (req) => `cache:api:stock:${cacheKeySafe(req.session?.username || "")}:v1`),
   async (req, res) => {
     if (!teamMembersDatabaseId || !stocktakingDatabaseId) {
       return res
@@ -10865,6 +10930,13 @@ app.patch("/api/account", requireAuth, async (req, res) => {
       properties: updateProps,
     });
 
+    await cacheDel(`cache:api:account:${normalizeNotionId(userPageId)}:v2`);
+
+    try {
+      delete req.session.accountCache;
+      delete req.session.accountCacheTs;
+    } catch {}
+
     // Keep session username in sync if Name changed
     if (updateProps["Name"]) {
       req.session.username = String(name || "").trim();
@@ -10955,7 +11027,7 @@ app.get("/api/logistics", requireAuth, requirePage("Logistics"), async (req, res
 // ================== EXPENSES API ==================
 
 // Get Funds Type Options
-app.get("/api/expenses/types", async (req, res) => {
+app.get("/api/expenses/types", cachedJsonRoute(20 * 60, () => "cache:api:expenses:types:v1"), async (req, res) => {
   try {
     const response = await notion.databases.retrieve({
       database_id: process.env.Expenses_Database,
@@ -10982,6 +11054,7 @@ app.get(
   "/api/expenses/cash-in-from/options",
   requireAuth,
   requirePage("Expenses"),
+  cachedJsonRoute(20 * 60, () => "cache:api:expenses:cash-in-from:v1"),
   async (req, res) => {
     try {
       const expProps = await getExpensesDBProps();
@@ -11136,6 +11209,8 @@ app.post("/api/expenses/cash-out", async (req, res) => {
       properties: props
     });
 
+    await clearExpensesRouteCaches(req, teamMemberPageId);
+
     res.json({ success: true, message: "Cash out saved successfully" });
 
   } catch (err) {
@@ -11248,6 +11323,8 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       properties: propsToCreate,
     });
 
+    await clearExpensesRouteCaches(req, teamMemberPageId);
+
     res.json({ success: true, message: "Cash in recorded" });
 } catch (err) {
   console.error("❌ Cash in error (RAW):", err);
@@ -11359,6 +11436,8 @@ app.post(
         properties: props,
       });
 
+      await clearExpensesRouteCaches(req, teamMemberPageId);
+
       return res.json({
         success: true,
         totalCashIn,
@@ -11378,7 +11457,7 @@ app.post(
 );
 
 // Fetch All Expenses — FILTER BY CURRENT USER ONLY
-app.get("/api/expenses", async (req, res) => {
+app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${cacheKeySafe(req.session?.username || "")}:v1`), async (req, res) => {
   try {
     // Get current user's Team Member relation PAGE ID
     const teamMemberPageId = await getCurrentUserRelationPage(req);
@@ -11532,6 +11611,7 @@ app.get(
   "/api/expenses/users",
   requireAuth,
   requirePage("Expenses Users"),
+  cachedJsonRoute(2 * 60, () => "cache:api:expenses:users:v1"),
   async (req, res) => {
     try {
       if (!expensesDatabaseId) {
@@ -11633,6 +11713,7 @@ app.get(
   "/api/expenses/user/:memberId",
   requireAuth,
   requirePage("Expenses Users"),
+  cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:user:${normalizeNotionId(req.params?.memberId || "")}:v1`),
   async (req, res) => {
     try {
       if (!expensesDatabaseId) {
