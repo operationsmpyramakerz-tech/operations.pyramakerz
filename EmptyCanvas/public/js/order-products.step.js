@@ -27,7 +27,12 @@
   const cartStepEl = document.getElementById('cartStep');
   const cartTypePillEl = document.getElementById('cartTypePill');
   const cartTypeValueEl = document.getElementById('cartTypeValue');
+  const cartTypeValueIconEl = document.getElementById('cartTypeValueIcon');
+  const cartTypeValueTextEl = document.getElementById('cartTypeValueText');
   const cartBackBtn = document.getElementById('cartBackBtn');
+
+  const pageTitleTextEl = document.getElementById('pageTitleText');
+  const pageTitleIconEl = document.getElementById('pageTitleIcon');
 
   const passwordInput = document.getElementById('voucherInput');
   const reasonInput = document.getElementById('orderReasonSummary');
@@ -65,8 +70,60 @@
   // Notion Products DB tag value to show in Request Maintenance
   const MAINTENANCE_TAG_KEY = normKey('4/ Machines');
 
+  const ORDER_TYPE_META = {
+    [REQUEST_PRODUCTS_KEY]: {
+      icon: 'shopping-cart',
+      description: 'Add new products or supplies and send them as a stock request.',
+      headingTitle: 'Shopping Cart',
+      headingIcon: 'shopping-cart',
+    },
+    [WITHDRAW_PRODUCTS_KEY]: {
+      icon: 'log-out',
+      description: 'Withdraw available items from stock with a dedicated outgoing flow.',
+      headingTitle: 'Withdraw Products',
+      headingIcon: 'log-out',
+    },
+    [REQUEST_MAINTENANCE_KEY]: {
+      icon: 'tool',
+      description: 'Report issues for machines and create a maintenance request quickly.',
+      headingTitle: 'Request Maintenance',
+      headingIcon: 'tool',
+    },
+  };
+
   let selectedOrderType = '';
   let cartBooted = false;
+
+  function featherIconMarkup(iconName) {
+    return `<i data-feather="${String(iconName || 'grid')}"></i>`;
+  }
+
+  function getOrderTypeMeta(type = selectedOrderType) {
+    const key = normKey(type);
+    return ORDER_TYPE_META[key] || {
+      icon: 'grid',
+      description: 'Open this workflow and continue to the next step.',
+      headingTitle: String(type || '').trim() || 'Shopping Cart',
+      headingIcon: 'grid',
+    };
+  }
+
+  function updatePageHeading(type = selectedOrderType) {
+    const v = String(type || '').trim();
+    const meta = getOrderTypeMeta(v);
+    const headingTitle = v ? meta.headingTitle : 'Shopping Cart';
+    const headingIcon = v ? meta.headingIcon : 'shopping-cart';
+
+    try {
+      if (pageTitleTextEl) pageTitleTextEl.textContent = headingTitle;
+      else {
+        const pageTitleEl = document.querySelector('.page-title');
+        if (pageTitleEl) pageTitleEl.textContent = headingTitle;
+      }
+      if (pageTitleIconEl) pageTitleIconEl.innerHTML = featherIconMarkup(headingIcon);
+      if (window.feather) feather.replace();
+    } catch {}
+  }
 
   function isWithdrawType(type = selectedOrderType) {
     return normKey(type) === WITHDRAW_PRODUCTS_KEY;
@@ -105,11 +162,11 @@
       if (issueFieldEl) issueFieldEl.style.display = maintenance ? '' : 'none';
     } catch {}
 
-    // Page title
+    // Page title + icon
     try {
-      const pageTitleEl = document.querySelector('.page-title');
-      if (pageTitleEl) pageTitleEl.textContent = withdraw ? 'Withdraw Products' : 'Shopping Cart';
-      document.title = withdraw ? 'Withdraw Products' : 'Shopping Cart';
+      updatePageHeading(type);
+      const meta = getOrderTypeMeta(type);
+      document.title = maintenance ? meta.headingTitle : (withdraw ? meta.headingTitle : 'Shopping Cart');
     } catch {}
 
     // Modal title
@@ -209,16 +266,30 @@
 
     for (const name of opts) {
       const btn = document.createElement('button');
+      const meta = getOrderTypeMeta(name);
+      const isActive = activeType && normKey(activeType) === normKey(name);
+
       btn.type = 'button';
       btn.className = 'order-type-btn';
-      btn.textContent = String(name);
       btn.dataset.type = String(name);
-      if (activeType && normKey(activeType) === normKey(name)) btn.classList.add('is-active');
+      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      btn.innerHTML = `
+        <span class="order-type-icon" aria-hidden="true">${featherIconMarkup(meta.icon)}</span>
+        <span class="order-type-copy">
+          <span class="order-type-name">${escapeHtml(name)}</span>
+          <span class="order-type-desc">${escapeHtml(meta.description)}</span>
+        </span>
+        <span class="order-type-arrow" aria-hidden="true">${featherIconMarkup('arrow-right')}</span>
+      `;
+
+      if (isActive) btn.classList.add('is-active');
       btn.addEventListener('click', () => {
         chooseOrderType(String(name));
       });
       orderTypeTabsEl.appendChild(btn);
     }
+
+    if (window.feather) feather.replace();
   }
 
   async function fetchOrderTypes() {
@@ -239,19 +310,27 @@
     if (!cartTypePillEl || !cartTypeValueEl) return;
     if (!v) {
       cartTypePillEl.style.display = 'none';
-      cartTypeValueEl.textContent = '—';
+      if (cartTypeValueTextEl) cartTypeValueTextEl.textContent = '—';
+      else cartTypeValueEl.textContent = '—';
+      if (cartTypeValueIconEl) cartTypeValueIconEl.innerHTML = featherIconMarkup('shopping-cart');
       // Reset UI to default state
       applyOrderTypeUi('');
+      if (window.feather) feather.replace();
       return;
     }
-    cartTypeValueEl.textContent = v;
-    cartTypePillEl.style.display = 'inline-flex';
+
+    const meta = getOrderTypeMeta(v);
+    if (cartTypeValueTextEl) cartTypeValueTextEl.textContent = v;
+    else cartTypeValueEl.textContent = v;
+    if (cartTypeValueIconEl) cartTypeValueIconEl.innerHTML = featherIconMarkup(meta.icon);
+    cartTypePillEl.style.display = 'flex';
 
     // Apply UI copy for this order type
     applyOrderTypeUi(v);
 
     // In edit mode, we don't want a back button to the order type step.
     if (cartBackBtn) cartBackBtn.style.display = isEditMode ? 'none' : '';
+    if (window.feather) feather.replace();
   }
 
   async function bootCart() {
@@ -278,7 +357,9 @@
     try {
       const buttons = orderTypeTabsEl?.querySelectorAll?.('button.order-type-btn') || [];
       buttons.forEach((b) => {
-        b.classList.toggle('is-active', normKey(b.dataset.type) === normKey(v));
+        const active = normKey(b.dataset.type) === normKey(v);
+        b.classList.toggle('is-active', active);
+        b.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
     } catch {}
 
@@ -311,6 +392,7 @@
     if (isEditMode) {
       selectedOrderType = readOrderTypeFromUrl() || loadStoredOrderType() || '';
       if (selectedOrderType) setCartTypePill(selectedOrderType);
+      else updatePageHeading('');
       showOnly('cart');
       await bootCart();
       return;
@@ -333,6 +415,7 @@
     const initial = fromUrl || fromStorage || '';
 
     renderOrderTypeTabs(safeOptions, initial);
+    if (!initial) updatePageHeading('');
 
     // If URL already has a type, open its second page immediately
     if (initial) {
