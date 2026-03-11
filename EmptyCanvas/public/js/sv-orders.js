@@ -539,7 +539,12 @@
     if (modalEls.totalPrice) modalEls.totalPrice.textContent = fmtMoney(group.totals?.estimateTotal ?? 0);
 
     if (modalEls.items) {
-      const items = group.products || [];
+      const items = (group.products || []).slice().sort((a, b) =>
+        String(a?.productName || '').localeCompare(String(b?.productName || ''), undefined, {
+          sensitivity: 'base',
+          numeric: true,
+        }),
+      );
       if (!items.length) {
         modalEls.items.innerHTML = `<div class="muted">No items.</div>`;
       } else {
@@ -665,7 +670,10 @@
     const edited = it && typeof it.quantityEdited === 'number' && Number.isFinite(it.quantityEdited)
       ? Number(it.quantityEdited)
       : null;
-    const currentVal = edited !== null ? edited : (it ? (Number(it.quantity) || 0) : 0);
+    const requestedQty = it ? roundQty(Number(it.quantity) || 0) : 0;
+    const currentVal = edited !== null ? edited : requestedQty;
+    const minAllowed = Math.min(requestedQty, 0);
+    const maxAllowed = Math.max(requestedQty, 0);
 
     popEl = document.createElement("div");
     popEl.className = "sv-qty-popover";
@@ -674,7 +682,7 @@
       <div class="sv-qty-popover__body">
         <div class="sv-qty-row">
           <button class="sv-qty-btn sv-qty-dec" type="button" aria-label="Decrease">−</button>
-          <input class="sv-qty-input" type="number" min="0" step="any" value="${escapeHTML(fmtQty(currentVal))}" />
+          <input class="sv-qty-input" type="number" min="${escapeHTML(String(minAllowed))}" max="${escapeHTML(String(maxAllowed))}" step="any" value="${escapeHTML(fmtQty(currentVal))}" />
           <button class="sv-qty-btn sv-qty-inc" type="button" aria-label="Increase">+</button>
         </div>
         <div class="sv-qty-actions">
@@ -696,8 +704,10 @@
 
     const clamp = (n) => {
       const raw = Number(n);
-      const v = Number.isFinite(raw) ? Math.max(0, raw) : 0;
-      return roundQty(v);
+      const v = Number.isFinite(raw) ? roundQty(raw) : 0;
+      if (v < minAllowed) return roundQty(minAllowed);
+      if (v > maxAllowed) return roundQty(maxAllowed);
+      return v;
     };
 
     decBtn.addEventListener("click", () => { input.value = fmtQty(clamp((Number(input.value) || 0) - 1)); });

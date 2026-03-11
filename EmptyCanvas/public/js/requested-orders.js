@@ -39,6 +39,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const arrivedBtn =
     document.getElementById("reqReceivedShippedBtn") ||
     document.getElementById("reqMarkArrivedBtn");
+  const createWithdrawalBtn = document.getElementById("reqCreateWithdrawalBtn");
   // Tracker steps
   const stepEls = {
     1: document.getElementById("reqStep1"),
@@ -88,6 +89,12 @@ document.addEventListener("DOMContentLoaded", () => {
   function writeRequestedCache(data) {
     try {
       sessionStorage.setItem(REQ_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: data || [] }));
+    } catch {}
+  }
+
+  function clearRequestedCache() {
+    try {
+      sessionStorage.removeItem(REQ_CACHE_KEY);
     } catch {}
   }
 
@@ -195,6 +202,31 @@ document.addEventListener("DOMContentLoaded", () => {
       .toFixed(QTY_DECIMALS)
       .replace(/\.0+$/, "")
       .replace(/(\.[0-9]*?)0+$/, "$1");
+  }
+
+  function compareItemsByProductName(a, b) {
+    return String(a?.productName || "").localeCompare(String(b?.productName || ""), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    });
+  }
+
+  function hasNonZeroQty(value) {
+    return Math.abs(roundQty(value)) > 1e-9;
+  }
+
+  function clampSignedToBase(base, value) {
+    const baseQty = roundQty(base);
+    const nextQty = roundQty(value);
+    if (!Number.isFinite(baseQty)) return 0;
+    if (baseQty >= 0) {
+      return Math.min(Math.max(nextQty, 0), baseQty);
+    }
+    return Math.max(Math.min(nextQty, 0), baseQty);
+  }
+
+  function orderTypeKey(type) {
+    return String(type || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   }
 
   function toDate(v) {
@@ -385,14 +417,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // Quantities helpers
   function baseQty(it) {
     const n = Number(it?.quantity);
-    return Number.isFinite(n) ? Math.max(0, roundQty(n)) : 0;
+    return Number.isFinite(n) ? roundQty(n) : 0;
   }
 
   // Raw received quantity from Notion (independent of current tab).
   function receivedQtyRaw(it) {
     const n = Number(it?.quantityReceived);
     if (!Number.isFinite(n)) return null;
-    return Math.max(0, roundQty(n));
+    return roundQty(n);
   }
 
   // Quantity shown in the UI. In "Not Started" we treat Quantity Progress as the primary value,
@@ -412,8 +444,12 @@ document.addEventListener("DOMContentLoaded", () => {
   // Remaining quantity. Prefer the dedicated Notion column "Quantity Remaining" if present.
   function remainingQty(it) {
     const stored = Number(it?.quantityRemaining);
-    if (Number.isFinite(stored)) return Math.max(0, roundQty(stored));
-    return Math.max(roundQty(baseQty(it) - receivedQtyOrZero(it)), 0);
+    if (Number.isFinite(stored)) return roundQty(stored);
+    return roundQty(baseQty(it) - receivedQtyOrZero(it));
+  }
+
+  function hasRemainingQty(it) {
+    return hasNonZeroQty(remainingQty(it));
   }
 
   function hasReceivedNumber(it) {
@@ -513,7 +549,7 @@ document.addEventListener("DOMContentLoaded", () => {
         0,
       );
       const remainingTotalQty = itemsArr.reduce((sum, x) => sum + remainingQty(x), 0);
-      const remainingItemsCount = itemsArr.reduce((sum, x) => sum + (remainingQty(x) > 0 ? 1 : 0), 0);
+      const remainingItemsCount = itemsArr.reduce((sum, x) => sum + (hasRemainingQty(x) ? 1 : 0), 0);
       const remainingEstimateTotal = itemsArr.reduce(
         (sum, x) => sum + remainingQty(x) * (Number(x.unitPrice) || 0),
         0,
@@ -717,7 +753,7 @@ document.addEventListener("DOMContentLoaded", () => {
     closeDownloadMenu();
     closeReceiptModal({ restoreFocus: false });
 
-    const all = g.items || [];
+    const all = (g.items || []).slice().sort(compareItemsByProductName);
     const stage = g.stage || computeStage(all);
 
     const isRemainingTab = currentTab === "remaining";
@@ -728,7 +764,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // - Received: show only items that have a value in "Quantity received by operations".
     // - Others: show all items.
     const items = isRemainingTab
-      ? all.filter((it) => remainingQty(it) > 0 || it.justUpdated)
+      ? all.filter((it) => hasRemainingQty(it) || it.justUpdated)
       : isReceivedTab
         ? all.filter((it) => hasReceivedNumber(it))
         : all;
@@ -786,6 +822,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // (We intentionally do NOT block it when there are remaining items — user requested it in Received tab.)
     if (arrivedBtn) {
       arrivedBtn.style.display = currentTab === "received" && stage.idx === 4 ? "inline-flex" : "none";
+    }
+    if (createWithdrawalBtn) {
+      const canCreateWithdrawal =
+        currentTab === "delivered" &&
+        (stage?.idx || 1) >= 5 &&
+        orderTypeKey(g.orderType || all[0]?.orderType) === "requestproducts";
+      createWithdrawalBtn.style.display = canCreateWithdrawal ? "inline-flex" : "none";
     }
 
     // Items list
@@ -1199,7 +1242,8 @@ async function postJson(url, body) {
     const currentVal = isAddMode
       ? rem
       : (recRaw !== null && recRaw !== undefined ? recRaw : base);
-    const maxVal = isAddMode ? rem : null;
+    const minVal = isAddMode ? Math.min(rem, 0) : Math.min(base, 0);
+    const maxVal = isAddMode ? Math.max(rem, 0) : Math.max(base, 0);
 
     popEl = document.createElement("div");
     popEl.className = "sv-qty-popover";
@@ -1209,7 +1253,7 @@ async function postJson(url, body) {
         ${isAddMode ? `<div class="sv-qty-hint">Receive quantity (remaining: ${escapeHTML(fmtQty(rem))})</div>` : ""}
         <div class="sv-qty-row">
           <button class="sv-qty-btn sv-qty-dec" type="button" aria-label="Decrease">−</button>
-          <input class="sv-qty-input" type="number" min="0" step="any" ${maxVal !== null ? `max="${escapeHTML(String(maxVal))}"` : ""} value="${escapeHTML(fmtQty(currentVal))}" />
+          <input class="sv-qty-input" type="number" min="${escapeHTML(String(minVal))}" max="${escapeHTML(String(maxVal))}" step="any" value="${escapeHTML(fmtQty(currentVal))}" />
           <button class="sv-qty-btn sv-qty-inc" type="button" aria-label="Increase">+</button>
         </div>
         <div class="sv-qty-actions">
@@ -1231,10 +1275,10 @@ async function postJson(url, body) {
 
     const clamp = (n) => {
       const raw = Number(n);
-      const v = Number.isFinite(raw) ? Math.max(0, raw) : 0;
-      const r = roundQty(v);
-      if (maxVal !== null) return Math.min(roundQty(maxVal), r);
-      return r;
+      const v = Number.isFinite(raw) ? roundQty(raw) : 0;
+      if (v < minVal) return roundQty(minVal);
+      if (v > maxVal) return roundQty(maxVal);
+      return v;
     };
 
     decBtn.addEventListener("click", () => { input.value = fmtQty(clamp((Number(input.value) || 0) - 1)); });
@@ -1244,7 +1288,9 @@ async function postJson(url, body) {
     saveBtn.addEventListener("click", async () => {
       const v = clamp(input.value);
       try {
-        const newReceived = isAddMode ? roundQty(Math.min(base, rec + v)) : v;
+        const newReceived = isAddMode
+          ? clampSignedToBase(base, roundQty(rec + v))
+          : clampSignedToBase(base, v);
 
         // For "Remaining" tab, we delay the API call until "Received by operations" is clicked.
         if (currentTab === "remaining") {
@@ -1252,7 +1298,7 @@ async function postJson(url, body) {
           if (idx >= 0) {
             allItems[idx].pendingReceived = newReceived;
             allItems[idx].pendingReceivedAdd = v; // used for display context if needed
-            allItems[idx].pendingRemaining = Math.max(0, roundQty(base - newReceived));
+            allItems[idx].pendingRemaining = roundQty(base - newReceived);
           }
 
           // Re-render to show pending state
@@ -1277,7 +1323,7 @@ async function postJson(url, body) {
           // Mark as an explicit ops edit (used to decide strike-through in "Not Started")
           allItems[idx].quantityReceivedEdited = true;
           // best-effort mirror for UI; backend is source of truth
-          allItems[idx].quantityRemaining = Math.max(0, roundQty(base - newReceived));
+          allItems[idx].quantityRemaining = roundQty(base - newReceived);
         }
 
         // rebuild + rerender (keep modal open)
@@ -1347,12 +1393,12 @@ async function markReceivedByOperations(g, receiptNumber) {
         if (!id) return;
 
         const base = baseQty(it);
-        const clampToBase = (n) => (base > 0 ? Math.min(base, n) : n);
+        const clampToBase = (n) => clampSignedToBase(base, n);
 
         // If the user edited this item in Remaining tab, use the pending absolute received value.
         if (it.pendingReceived !== undefined && it.pendingReceived !== null) {
           const raw = Number(it.pendingReceived);
-          const v = Number.isFinite(raw) ? Math.max(0, roundQty(raw)) : 0;
+          const v = Number.isFinite(raw) ? roundQty(raw) : 0;
           quantities[id] = clampToBase(v);
           return;
         }
@@ -1363,8 +1409,8 @@ async function markReceivedByOperations(g, receiptNumber) {
           const remNow = remainingQty(it);
 
           // Only update items that still have remaining qty.
-          if (remNow > 0) {
-            const nextReceived = clampToBase(Math.max(0, roundQty(recNow + remNow)));
+          if (hasRemainingQty(it)) {
+            const nextReceived = clampToBase(roundQty(recNow + remNow));
             quantities[id] = nextReceived;
           }
         }
@@ -1402,10 +1448,10 @@ async function markReceivedByOperations(g, receiptNumber) {
           const hasQty = Object.prototype.hasOwnProperty.call(quantities || {}, it.id);
           if (hasQty) {
             const raw = Number(quantities[it.id]);
-            const nextReceived = Number.isFinite(raw) ? Math.max(0, roundQty(raw)) : 0;
-            it.quantityReceived = base > 0 ? Math.min(base, nextReceived) : nextReceived;
+            const nextReceived = Number.isFinite(raw) ? roundQty(raw) : 0;
+            it.quantityReceived = clampSignedToBase(base, nextReceived);
             it.quantityReceivedEdited = true;
-            it.quantityRemaining = Math.max(0, roundQty(base - it.quantityReceived));
+            it.quantityRemaining = roundQty(base - it.quantityReceived);
 
             // Clear any pending UI state for this item
             delete it.pendingReceived;
@@ -1414,7 +1460,7 @@ async function markReceivedByOperations(g, receiptNumber) {
           } else {
             // No quantity update for this item; keep values but ensure remaining is consistent.
             const rec = receivedQtyOrZero(it);
-            it.quantityRemaining = Math.max(0, roundQty(base - rec));
+            it.quantityRemaining = roundQty(base - rec);
           }
           return;
         }
@@ -1425,7 +1471,7 @@ async function markReceivedByOperations(g, receiptNumber) {
         // - If there was a pending update (rare outside Remaining), apply it.
         if (it.pendingReceived !== undefined && it.pendingReceived !== null) {
           const raw = Number(it.pendingReceived);
-          it.quantityReceived = Number.isFinite(raw) ? Math.max(0, roundQty(raw)) : 0;
+          it.quantityReceived = clampSignedToBase(base, Number.isFinite(raw) ? roundQty(raw) : 0);
           it.quantityReceivedEdited = true;
           delete it.pendingReceived;
           delete it.pendingRemaining;
@@ -1438,7 +1484,7 @@ async function markReceivedByOperations(g, receiptNumber) {
           it.quantityRemaining = 0;
         } else {
           const rec = receivedQtyOrZero(it);
-          it.quantityRemaining = Math.max(0, roundQty(base - rec));
+          it.quantityRemaining = roundQty(base - rec);
         }
       });
 
@@ -1512,6 +1558,46 @@ async function markReceivedByOperations(g, receiptNumber) {
       }
     }
   }
+
+  async function createWithdrawalFromDelivered(g) {
+    if (!g || !g.orderIds?.length) return;
+
+    if (createWithdrawalBtn) {
+      createWithdrawalBtn.disabled = true;
+      createWithdrawalBtn.dataset.prevHtml = createWithdrawalBtn.innerHTML;
+      createWithdrawalBtn.textContent = "Creating...";
+    }
+
+    try {
+      const data = await postJson("/api/orders/requested/create-withdrawal", {
+        orderIds: g.orderIds,
+      });
+
+      clearRequestedCache();
+      closeOrderModal();
+      currentTab = "not-started";
+      updateTabUI();
+      await loadRequested();
+
+      toast(
+        "success",
+        "Created",
+        data?.message || "Withdrawal order created in Not Started.",
+      );
+    } catch (e) {
+      console.error(e);
+      toast("error", "Failed", e.message || "Failed to create withdrawal order.");
+    } finally {
+      if (createWithdrawalBtn) {
+        createWithdrawalBtn.disabled = false;
+        const prev = createWithdrawalBtn.dataset.prevHtml;
+        if (prev) createWithdrawalBtn.innerHTML = prev;
+        else createWithdrawalBtn.textContent = "Create Withdrawal";
+      }
+      if (window.feather) window.feather.replace();
+    }
+  }
+
 
   // ---------- Load data ----------
     async function loadRequested() {
@@ -1672,6 +1758,11 @@ async function markReceivedByOperations(g, receiptNumber) {
     openReceiptModal();
   });
   arrivedBtn?.addEventListener("click", () => markArrived(activeGroup));
+  createWithdrawalBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeDownloadMenu();
+    createWithdrawalFromDelivered(activeGroup);
+  });
 
   receiptCloseBtn?.addEventListener("click", (e) => {
     e.preventDefault();

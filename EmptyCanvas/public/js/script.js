@@ -331,7 +331,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     activeGroup = group;
 
-    const items = group.products || [];
+    const items = (group.products || []).slice().sort((a, b) =>
+      String(a?.productName || '').localeCompare(String(b?.productName || ''), undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      }),
+    );
     const stage = computeStage(items);
 
     // Populate header
