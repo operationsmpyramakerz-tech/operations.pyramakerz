@@ -149,7 +149,7 @@
 
         <!-- Extra fields shown for "Received" (and later) tabs only -->
         <div class="co-meta-row" id="reqReceiptRow" hidden>
-          <span>Receipt Number</span>
+          <span>Store Receipt Number</span>
           <strong id="reqModalReceiptNumber">—</strong>
         </div>
         <div class="co-meta-row" id="reqReceivedByRow" hidden>
@@ -209,21 +209,25 @@
     </button>
 
     <div class="co-submodal-header">
-      <div class="co-submodal-title" id="reqReceiptTitle">Receipt Number</div>
-      <div class="co-submodal-sub" id="reqReceiptSub">Enter the receipt number to confirm "Received by operations".</div>
+      <div class="co-submodal-title" id="reqReceiptTitle">Store Receipt Number</div>
+      <div class="co-submodal-sub" id="reqReceiptSub">Enter the store receipt number to confirm "Received by operations".</div>
     </div>
 
     <div class="co-submodal-body">
-      <label class="co-submodal-label" for="reqReceiptInput">Receipt number</label>
-      <input
-        class="co-submodal-input"
-        id="reqReceiptInput"
-        type="text"
-        inputmode="numeric"
-        pattern="[0-9]*"
-        autocomplete="off"
-        placeholder="e.g. 12345"
-      />
+      <label class="co-submodal-label" for="reqReceiptInput">Store Receipt Number</label>
+      <div class="co-submodal-inputs" id="reqReceiptInputs">
+        <input
+          class="co-submodal-input req-receipt-input"
+          id="reqReceiptInput"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          autocomplete="off"
+          placeholder="e.g. 12345"
+          aria-label="Store Receipt Number"
+        />
+      </div>
+      <button type="button" class="ro-action-btn ro-action-btn--light co-submodal-add" id="reqAddReceiptBtn">Add Other Receipt</button>
       <div class="co-submodal-error" id="reqReceiptError" role="alert" aria-live="polite"></div>
     </div>
 
