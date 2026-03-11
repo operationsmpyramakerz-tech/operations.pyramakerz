@@ -60,8 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const receiptCloseBtn = document.getElementById("reqReceiptClose");
   const receiptCancelBtn = document.getElementById("reqReceiptCancel");
   const receiptConfirmBtn = document.getElementById("reqReceiptConfirm");
-  const receiptFieldsWrap = document.getElementById("reqReceiptFields");
-  const receiptAddBtn = document.getElementById("reqReceiptAddBtn");
+  const receiptInput = document.getElementById("reqReceiptInput");
   const receiptError = document.getElementById("reqReceiptError");
 
   // ---------- Utils ----------
@@ -1004,90 +1003,29 @@ document.addEventListener("DOMContentLoaded", () => {
     return !!receiptModal && receiptModal.classList.contains("is-open");
   }
 
-  function getReceiptInputs() {
-    return Array.from(receiptFieldsWrap?.querySelectorAll(".js-req-receipt-input") || []);
-  }
-
-  function createReceiptField(index, value = "") {
-    const field = document.createElement("div");
-    field.style.display = "grid";
-    field.style.gap = "8px";
-
-    const label = document.createElement("label");
-    label.className = "co-submodal-label";
-    label.textContent = index === 1 ? "Store receipt number" : `Store receipt number ${index}`;
-    label.htmlFor = `reqReceiptInput${index}`;
-
-    const input = document.createElement("input");
-    input.className = "co-submodal-input js-req-receipt-input";
-    input.id = `reqReceiptInput${index}`;
-    input.type = "text";
-    input.inputMode = "numeric";
-    input.pattern = "[0-9]*";
-    input.autocomplete = "off";
-    input.placeholder = "e.g. 12345";
-    input.value = String(value || "");
-
-    field.appendChild(label);
-    field.appendChild(input);
-    return field;
-  }
-
-  function addReceiptField(value = "", { focus = false } = {}) {
-    if (!receiptFieldsWrap) return null;
-    const index = getReceiptInputs().length + 1;
-    const field = createReceiptField(index, value);
-    receiptFieldsWrap.appendChild(field);
-
-    if (focus) {
-      window.requestAnimationFrame(() => {
-        const input = field.querySelector(".js-req-receipt-input");
-        try {
-          input?.focus();
-          input?.select();
-        } catch {}
-      });
-    }
-
-    return field;
-  }
-
-  function resetReceiptFields() {
-    if (!receiptFieldsWrap) return;
-    receiptFieldsWrap.innerHTML = "";
-    addReceiptField();
-  }
-
-  function collectReceiptNumbers() {
-    return getReceiptInputs()
-      .map((input) => String(input?.value || "").trim())
-      .filter(Boolean);
-  }
-
   function openReceiptModal() {
-    if (!receiptModal || !receiptFieldsWrap || !receiptConfirmBtn || !receiptCancelBtn) {
+    if (!receiptModal || !receiptInput || !receiptConfirmBtn || !receiptCancelBtn) {
       // Fallback to prompt
-      const raw = window.prompt("Enter store receipt number:");
+      const raw = window.prompt("Enter receipt number:");
       if (raw === null) return;
       const val = String(raw).trim();
       if (!val) {
-        alert("Please enter a valid store receipt number.");
+        alert("Please enter a valid receipt number.");
         return;
       }
-      markReceivedByOperations(activeGroup, [val]);
+      markReceivedByOperations(activeGroup, val);
       return;
     }
 
     // Reset
     setReceiptError("");
-    // Do NOT pre-fill the inputs. Receipt Number is stored as rich_text and may contain
-    // multiple values (one per delivery). We want the user to enter only the new number(s).
-    resetReceiptFields();
+    // Do NOT pre-fill the input. Receipt Number is stored as rich_text and may contain
+    // multiple values (one per delivery). We want the user to enter a new number each time.
+    receiptInput.value = "";
 
     receiptConfirmBtn.disabled = false;
     receiptCancelBtn.disabled = false;
     if (receiptCloseBtn) receiptCloseBtn.disabled = false;
-    if (receiptAddBtn) receiptAddBtn.disabled = false;
 
     receiptLastFocus = document.activeElement;
     receiptModal.hidden = false;
@@ -1098,9 +1036,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.requestAnimationFrame(() => {
       try {
-        const firstInput = getReceiptInputs()[0];
-        firstInput?.focus();
-        firstInput?.select();
+        receiptInput.focus();
+        receiptInput.select();
       } catch {}
     });
   }
@@ -1422,20 +1359,16 @@ async function postJson(url, body) {
     }, 0);
   }
 
-async function markReceivedByOperations(g, receiptNumbersInput) {
+async function markReceivedByOperations(g, receiptNumber) {
     if (!g || !g.orderIds?.length) return;
 
-    // Receipt Number can be rich_text in Notion, so we keep it as text.
-    // Support sending one or multiple store receipt numbers at once.
-    const rnList = (Array.isArray(receiptNumbersInput) ? receiptNumbersInput : [receiptNumbersInput])
-      .flatMap((value) =>
-        String(value === null || value === undefined ? "" : value)
-          .replace(/\r\n/g, "\n")
-          .split(/\n+/)
-      )
-      .map((value) => value.trim())
-      .filter(Boolean);
-    const rnVal = rnList.length ? rnList : null;
+    // Receipt number can be text now (Notion column is rich_text) so we keep it as string.
+    // If missing, we still allow the action.
+    const rnText =
+      receiptNumber === null || receiptNumber === undefined
+        ? ""
+        : String(receiptNumber).trim();
+    const rnVal = rnText ? rnText : null;
 
     if (shippedBtn) {
       shippedBtn.disabled = true;
@@ -1485,7 +1418,7 @@ async function markReceivedByOperations(g, receiptNumbersInput) {
 
       const data = await postJson("/api/orders/requested/mark-shipped", {
         orderIds: g.orderIds,
-        receiptNumbers: rnVal,
+        receiptNumber: rnVal,
         quantities,
       });
 
@@ -1840,36 +1773,23 @@ async function markReceivedByOperations(g, receiptNumbersInput) {
     closeReceiptModal();
   });
 
-  receiptModal?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target?.closest?.(".js-req-receipt-input")) {
-      e.preventDefault();
-      receiptConfirmBtn?.click();
-    }
-  });
-
-  receiptModal?.addEventListener("input", (e) => {
-    if (e.target?.closest?.(".js-req-receipt-input")) setReceiptError("");
-  });
-
-  receiptAddBtn?.addEventListener("click", (e) => {
-    e.preventDefault();
-    addReceiptField("", { focus: true });
-    setReceiptError("");
+  receiptInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") receiptConfirmBtn?.click();
   });
 
   receiptConfirmBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
 
-    const values = collectReceiptNumbers();
-    if (!values.length) {
-      setReceiptError("Store receipt number is required.");
+    const raw = String(receiptInput?.value || "").trim();
+    if (!raw) {
+      setReceiptError("Receipt number is required.");
       return;
     }
 
     // Keep it as text (Notion Receipt Number is rich_text now).
     // We still validate it's numeric to match the expected workflow.
-    if (values.some((raw) => !/^\d+$/.test(raw))) {
-      setReceiptError("Please enter valid store receipt number(s).");
+    if (!/^\d+$/.test(raw)) {
+      setReceiptError("Please enter a valid receipt number.");
       return;
     }
 
@@ -1879,17 +1799,15 @@ async function markReceivedByOperations(g, receiptNumbersInput) {
     if (receiptConfirmBtn) receiptConfirmBtn.disabled = true;
     if (receiptCancelBtn) receiptCancelBtn.disabled = true;
     if (receiptCloseBtn) receiptCloseBtn.disabled = true;
-    if (receiptAddBtn) receiptAddBtn.disabled = true;
 
     try {
-      await markReceivedByOperations(activeGroup, values);
+      await markReceivedByOperations(activeGroup, raw);
     } finally {
       // Buttons are re-enabled when the modal opens again; keep it simple.
       // (closeReceiptModal is called on success)
       if (receiptConfirmBtn) receiptConfirmBtn.disabled = false;
       if (receiptCancelBtn) receiptCancelBtn.disabled = false;
       if (receiptCloseBtn) receiptCloseBtn.disabled = false;
-      if (receiptAddBtn) receiptAddBtn.disabled = false;
     }
   });
 
