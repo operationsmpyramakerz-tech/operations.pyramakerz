@@ -582,10 +582,15 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(err.error || 'Failed to init edit');
       }
 
+      const data = await res.json().catch(() => ({}));
+      const editUrl = new URL('/orders/new/products', window.location.origin);
+      editUrl.searchParams.set('edit', '1');
+      if (data?.orderType) editUrl.searchParams.set('type', String(data.orderType));
+
       // Success: close modals and go to edit page
       closeEditPasswordModal({ restoreFocus: false });
       closeOrderModal();
-      window.location.href = '/orders/new/products?edit=1';
+      window.location.href = `${editUrl.pathname}${editUrl.search}`;
     } catch (e) {
       console.error(e);
       setEditPwdError(e?.message || 'Failed to start editing.');
@@ -784,9 +789,14 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(err.error || 'Failed to init edit');
       }
 
+      const data = await res.json().catch(() => ({}));
+      const editUrl = new URL('/orders/new/products', window.location.origin);
+      editUrl.searchParams.set('edit', '1');
+      if (data?.orderType) editUrl.searchParams.set('type', String(data.orderType));
+
       // Close modal and go to edit page
       closeOrderModal();
-      window.location.href = '/orders/new/products?edit=1';
+      window.location.href = `${editUrl.pathname}${editUrl.search}`;
     } catch (e) {
       console.error(e);
       toast('error', 'Error', e?.message || 'Failed to start editing');

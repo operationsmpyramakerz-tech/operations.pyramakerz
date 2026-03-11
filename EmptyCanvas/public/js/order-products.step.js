@@ -115,6 +115,7 @@
 
   let selectedOrderType = '';
   let cartBooted = false;
+  let cartBootPromise = null;
 
   function featherIconMarkup(iconName) {
     return `<i data-feather="${String(iconName || 'grid')}"></i>`;
@@ -380,20 +381,36 @@
   }
 
   async function bootCart() {
-    if (cartBooted) return;
-    cartBooted = true;
+    if (cartBootPromise) return cartBootPromise;
 
-    // Run the existing cart init flow
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initCart, { once: true });
-    } else {
-      initCart();
-    }
+    cartBooted = true;
+    cartBootPromise = new Promise((resolve, reject) => {
+      const run = () => {
+        Promise.resolve(initCart()).then(resolve).catch(reject);
+      };
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', run, { once: true });
+      } else {
+        run();
+      }
+    });
+
+    return cartBootPromise;
   }
 
-  function chooseOrderType(type) {
+  async function chooseOrderType(type) {
     const v = String(type || '').trim();
     if (!v) return;
+
+    const prevType = String(selectedOrderType || '').trim();
+    const typeChanged = normKey(prevType) !== normKey(v);
+
+    if (cartBooted && typeChanged && prevType) {
+      cancelScheduledDraftSave();
+      syncReasonFromInput();
+      await persistDraft({ silent: true, orderType: prevType });
+    }
 
     selectedOrderType = v;
     storeOrderType(v);
@@ -418,13 +435,18 @@
     ) {
       setCartTypePill(v);
       showOnly('cart');
-      bootCart();
+      const wasBooted = Boolean(cartBootPromise);
+      await bootCart();
 
       // If the cart is already booted & components are loaded, re-render the dropdown
       // options to match the newly selected order type (e.g. Maintenance filter).
       try {
         if (cartBooted && componentsLoaded) refreshModalChoices();
       } catch {}
+
+      if (typeChanged && wasBooted) {
+        await reloadActiveDraft({ showLoader: true });
+      }
       return;
     }
 
@@ -471,7 +493,14 @@
     }
 
     // Back button (from placeholder)
-    const goBackToOrderTypes = () => {
+    const goBackToOrderTypes = async () => {
+      const prevType = String(selectedOrderType || '').trim();
+      if (cartBooted && prevType) {
+        cancelScheduledDraftSave();
+        syncReasonFromInput();
+        await persistDraft({ silent: true, orderType: prevType });
+      }
+
       selectedOrderType = '';
       clearStoredOrderType();
 
@@ -485,15 +514,21 @@
     };
 
     // Back button (from placeholder)
-    backToTypesBtn?.addEventListener('click', goBackToOrderTypes);
+    backToTypesBtn?.addEventListener('click', () => { goBackToOrderTypes(); });
 
     // Back button (from cart)
-    cartBackBtn?.addEventListener('click', goBackToOrderTypes);
+    cartBackBtn?.addEventListener('click', () => { goBackToOrderTypes(); });
 
     // Handle browser back/forward
     window.addEventListener('popstate', () => {
       const t = readOrderTypeFromUrl();
       if (!t) {
+        const prevType = String(selectedOrderType || '').trim();
+        if (cartBooted && prevType) {
+          cancelScheduledDraftSave();
+          syncReasonFromInput();
+          persistDraft({ silent: true, orderType: prevType });
+        }
         selectedOrderType = '';
         setCartTypePill('');
         showOnly('types');
@@ -696,25 +731,37 @@
     }
   }
 
-  async function loadDraft() {
+  function buildDraftUrl(orderType = selectedOrderType) {
+    const params = new URLSearchParams();
+    const v = String(orderType || '').trim();
+    if (v) params.set('orderType', v);
+    const q = params.toString();
+    return q ? `/api/order-draft?${q}` : '/api/order-draft';
+  }
+
+  function normalizeDraftItems(list) {
+    return (Array.isArray(list) ? list : [])
+      .map((p) => ({
+        id: String(p.id || ''),
+        quantity: normalizeQty(Number(p.quantity), 1),
+        reason: String(p.reason || '').trim(),
+        issueDescription: String(p.issueDescription || '').trim(),
+        schoolId: String(p.schoolId || '').trim(),
+        expectedSparePartId: String(p.expectedSparePartId || '').trim(),
+      }))
+      .filter((p) => p.id);
+  }
+
+  async function loadDraft(orderType = selectedOrderType) {
     try {
-      const res = await fetch('/api/order-draft');
-      if (!res.ok) return true;
+      const res = await fetch(buildDraftUrl(orderType));
+      if (!res.ok) return { cart: [] };
       const d = await res.json();
-      const list = Array.isArray(d.products) ? d.products : [];
-      cart = list
-        .map((p) => ({
-          id: String(p.id || ''),
-          quantity: normalizeQty(Number(p.quantity), 1),
-          reason: String(p.reason || '').trim(),
-          issueDescription: String(p.issueDescription || '').trim(),
-          schoolId: String(p.schoolId || '').trim(),
-          expectedSparePartId: String(p.expectedSparePartId || '').trim(),
-        }))
-        .filter((p) => p.id);
-      return true;
+      return {
+        cart: normalizeDraftItems(d?.products),
+      };
     } catch {
-      return true; // ignore
+      return { cart: [] }; // ignore
     }
   }
 
@@ -742,7 +789,7 @@
   function startPreload() {
     if (!componentsPromise) componentsPromise = loadComponents();
     if (isMaintenanceType() && !schoolsPromise) schoolsPromise = loadSchools();
-    if (!draftPromise) draftPromise = loadDraft();
+    draftPromise = loadDraft(selectedOrderType);
     return { componentsPromise, schoolsPromise, draftPromise };
   }
 
@@ -826,20 +873,30 @@
   }
 
   // ---------------------------- Draft persistence ----------------------------
-  function scheduleSaveDraft() {
-    if (saveTimer) window.clearTimeout(saveTimer);
+  function cancelScheduledDraftSave() {
+    if (!saveTimer) return;
+    window.clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+
+  function scheduleSaveDraft(orderType = selectedOrderType) {
+    const targetType = String(orderType || selectedOrderType || '').trim();
+    cancelScheduledDraftSave();
     saveTimer = window.setTimeout(() => {
-      persistDraft({ silent: true });
+      saveTimer = null;
+      persistDraft({ silent: true, orderType: targetType });
     }, 500);
   }
 
-  async function persistDraft({ silent = false } = {}) {
+  async function persistDraft({ silent = false, orderType = selectedOrderType } = {}) {
     if (isSavingNow) return false;
     isSavingNow = true;
 
     try {
+      const maintenanceDraft = isMaintenanceType(orderType);
+
       if (!Array.isArray(cart) || cart.length === 0) {
-        await fetch('/api/order-draft', { method: 'DELETE' });
+        await fetch(buildDraftUrl(orderType), { method: 'DELETE' });
         return true;
       }
 
@@ -848,13 +905,13 @@
       // reason yet. Reason will be validated on checkout ("Checkout Now").
       //
       // If a global reason exists, copy it into each item before saving.
-      applyGlobalReason();
+      if (!maintenanceDraft) applyGlobalReason();
 
       const clean = cart
         .map((p) => ({
           id: String(p.id),
-          quantity: isMaintenanceType() ? 1 : normalizeQty(Number(p.quantity), 1),
-          reason: isMaintenanceType()
+          quantity: maintenanceDraft ? 1 : normalizeQty(Number(p.quantity), 1),
+          reason: maintenanceDraft
             ? deriveMaintenanceReason(p.issueDescription)
             : String(p.reason || '').trim(),
           issueDescription: String(p.issueDescription || '').trim(),
@@ -866,7 +923,7 @@
       const res = await fetch('/api/order-draft/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: clean }),
+        body: JSON.stringify({ products: clean, orderType }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -882,6 +939,51 @@
     } finally {
       isSavingNow = false;
     }
+  }
+
+  function syncDraftUi(type = selectedOrderType) {
+    const maintenance = isMaintenanceType(type);
+    const firstReason = cart.find((p) => String(p.reason || '').trim())?.reason || '';
+
+    globalReason = maintenance ? '' : String(firstReason || '').trim();
+
+    if (reasonInput) {
+      reasonInput.value = maintenance ? '' : globalReason;
+    }
+
+    if (!maintenance) applyGlobalReason();
+    updateReady();
+  }
+
+  async function reloadActiveDraft({ showLoader = false } = {}) {
+    const activeType = String(selectedOrderType || '').trim();
+    if (!activeType) return false;
+
+    if (showLoader) {
+      renderLoadingState(isMaintenanceType(activeType) ? 'Loading machines...' : 'Loading components...');
+    }
+
+    const ok = isMaintenanceType(activeType)
+      ? await ensureMaintenanceModalReady()
+      : await ensureComponentsReady();
+    if (!ok) {
+      toast(
+        'error',
+        'Error',
+        isMaintenanceType(activeType)
+          ? 'Failed to load maintenance lists. Please reload the page.'
+          : 'Failed to load components list. Please reload the page.',
+      );
+      return false;
+    }
+
+    const draftState = await loadDraft(activeType);
+    if (normKey(selectedOrderType) !== normKey(activeType)) return false;
+
+    cart = normalizeDraftItems(draftState?.cart);
+    syncDraftUi(activeType);
+    renderCart();
+    return true;
   }
 
   // ---------------------------- Rendering ----------------------------
@@ -1785,13 +1887,10 @@
     if (isEditMode) {
       showSaving('Loading order...');
 
-      try { await dp; } catch {}
-
-      // derive reason from draft
-      const firstReason = cart.find((p) => String(p.reason || '').trim())?.reason || '';
-      globalReason = String(firstReason || '').trim();
-      if (reasonInput && !String(reasonInput.value || '').trim()) reasonInput.value = globalReason;
-      applyGlobalReason();
+      let draftState = { cart: [] };
+      try { draftState = await dp; } catch {}
+      cart = normalizeDraftItems(draftState?.cart);
+      syncDraftUi();
 
       try { await cp; } catch {}
       if (isMaintenanceType()) {
@@ -1814,14 +1913,10 @@
 
     // New order
     // Wait for both draft+components, then init select.
-    try { await dp; } catch {}
-
-    // If a draft exists, try to prefill reason
-    if (reasonInput && !String(reasonInput.value || '').trim()) {
-      const r = cart.find((p) => String(p.reason || '').trim())?.reason || '';
-      if (r) reasonInput.value = r;
-    }
-    syncReasonFromInput();
+    let draftState = { cart: [] };
+    try { draftState = await dp; } catch {}
+    cart = normalizeDraftItems(draftState?.cart);
+    syncDraftUi();
 
     try { await cp; } catch {}
     if (isMaintenanceType()) {

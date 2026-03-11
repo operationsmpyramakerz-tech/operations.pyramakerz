@@ -912,6 +912,74 @@ function _extractOrderTypeInfo(props = {}) {
   }
 }
 
+function _orderDraftBucketKey(orderType) {
+  const canonical = _canonicalOrderTypeLabel(orderType);
+  return _normKeyOrderType(canonical || orderType) || "default";
+}
+
+function _getOrderDraftStore(session, preferredOrderType = "") {
+  if (!session || typeof session !== "object") return {};
+
+  let store =
+    session.orderDrafts &&
+    typeof session.orderDrafts === "object" &&
+    !Array.isArray(session.orderDrafts)
+      ? session.orderDrafts
+      : {};
+
+  const legacyDraft =
+    session.orderDraft &&
+    typeof session.orderDraft === "object" &&
+    Array.isArray(session.orderDraft.products) &&
+    session.orderDraft.products.length
+      ? session.orderDraft
+      : null;
+
+  if (legacyDraft && Object.keys(store).length === 0) {
+    store[_orderDraftBucketKey(preferredOrderType)] = legacyDraft;
+  }
+
+  session.orderDrafts = store;
+  if (legacyDraft) delete session.orderDraft;
+  return store;
+}
+
+function _getOrderDraftForType(session, orderType = "") {
+  const store = _getOrderDraftStore(session, orderType);
+  return store[_orderDraftBucketKey(orderType)] || {};
+}
+
+function _setOrderDraftForType(session, orderType = "", draft = {}) {
+  if (!session || typeof session !== "object") return null;
+
+  const store = _getOrderDraftStore(session, orderType);
+  const key = _orderDraftBucketKey(orderType);
+
+  if (draft && Array.isArray(draft.products) && draft.products.length) {
+    store[key] = draft;
+    session.orderDrafts = store;
+  } else {
+    delete store[key];
+    if (Object.keys(store).length) session.orderDrafts = store;
+    else delete session.orderDrafts;
+  }
+
+  delete session.orderDraft;
+  return store[key] || null;
+}
+
+function _clearOrderDraftForType(session, orderType = "") {
+  if (!session || typeof session !== "object") return;
+
+  const store = _getOrderDraftStore(session, orderType);
+  delete store[_orderDraftBucketKey(orderType)];
+
+  if (Object.keys(store).length) session.orderDrafts = store;
+  else delete session.orderDrafts;
+
+  delete session.orderDraft;
+}
+
 // Issue Description (rich_text) — used by Request Maintenance orders
 async function detectIssueDescriptionPropName() {
   const props = await getOrdersDBProps();
@@ -4455,7 +4523,8 @@ app.get(
   requireAuth,
   requirePage("Create New Order"),
   (req, res) => {
-    res.json(req.session.orderDraft || {});
+    const orderType = String(req.query?.orderType || "").trim();
+    res.json(_getOrderDraftForType(req.session, orderType));
   },
 );
 app.post(
@@ -4464,6 +4533,7 @@ app.post(
   requirePage("Create New Order"),
   (req, res) => {
     const { products } = req.body;
+    const orderType = String(req.body?.orderType || "").trim();
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ error: "No products provided." });
     }
@@ -4486,8 +4556,8 @@ app.post(
         .status(400)
         .json({ error: "No valid products after sanitization." });
     }
-    req.session.orderDraft = req.session.orderDraft || {};
-    req.session.orderDraft.products = clean;
+
+    _setOrderDraftForType(req.session, orderType, { products: clean });
     return res.json({ ok: true, count: clean.length });
   },
 );
@@ -4496,7 +4566,8 @@ app.delete(
   requireAuth,
   requirePage("Create New Order"),
   (req, res) => {
-    delete req.session.orderDraft;
+    const orderType = String(req.query?.orderType || "").trim();
+    _clearOrderDraftForType(req.session, orderType);
     return res.json({ ok: true });
   },
 );
@@ -8989,7 +9060,8 @@ app.post(
 
 let { products } = req.body || {};
 // Optional: order type (select/status) — used by the Shopping Cart tabs
-const orderType = String(req.body?.orderType || "").trim();
+const requestedOrderType = String(req.body?.orderType || req.session?.editingOrder?.orderType || "").trim();
+const orderType = _canonicalOrderTypeLabel(requestedOrderType) || requestedOrderType;
 
 // Withdraw Products: store quantities as negative numbers in Notion.
 // We still validate/accept positive quantities from the UI and apply the sign here.
@@ -8998,7 +9070,7 @@ const _isWithdrawProducts = _normKeyOrderType(orderType) === _normKeyOrderType("
 const _isRequestMaintenance = _normKeyOrderType(orderType) === _normKeyOrderType("Request Maintenance");
 const _qtySign = _isWithdrawProducts ? -1 : 1;
 if (!Array.isArray(products) || products.length === 0) {
-  const d = req.session.orderDraft;
+  const d = _getOrderDraftForType(req.session, orderType);
   if (d && Array.isArray(d.products) && d.products.length > 0) {
     products = d.products;
   }
@@ -9321,7 +9393,7 @@ if (_isRequestMaintenance) {
 
         // Clear edit context + draft
         delete req.session.editingOrder;
-        delete req.session.orderDraft;
+        _clearOrderDraftForType(req.session, orderType);
         delete req.session.adminCreateOrderUnlockUntil;
 
         // Invalidate cached Current Orders list for this user
@@ -9405,7 +9477,7 @@ if (_isRequestMaintenance) {
         req.session.recentOrders = req.session.recentOrders.slice(-50);
       }
 
-      delete req.session.orderDraft;
+      _clearOrderDraftForType(req.session, orderType);
 
       // Invalidate cached Current Orders list for this user.
       const currentUserId = await getSessionUserNotionId(req);
@@ -9469,7 +9541,7 @@ app.post(
 // Init Edit Order (Current Orders) — requires admin password
 // - Verifies admin password
 // - Loads the selected order items
-// - Stores them into session.orderDraft so Create New Order page opens pre-filled
+// - Stores them into the matching order-type draft so Create New Order opens pre-filled
 // - Stores an edit context in the session so /api/submit-order can update existing pages
 app.post(
   "/api/orders/current/edit/init",
@@ -9540,6 +9612,9 @@ app.post(
       // Build draft products + edit context mapping
       const draft = [];
       const editItems = [];
+      let editOrderType = null;
+      let hasNegativeQty = false;
+      let hasIssueDescriptions = false;
 
       for (const p of pages) {
         const props = p.properties || {};
@@ -9548,6 +9623,9 @@ app.post(
 
         const reason = props?.Reason?.title?.[0]?.plain_text || "";
         const qty = Number(props?.["Quantity Requested"]?.number || 0);
+        const extractedOrderType = _extractOrderTypeInfo(props).orderType;
+        if (!editOrderType && extractedOrderType) editOrderType = extractedOrderType;
+        if (Number.isFinite(qty) && qty < 0) hasNegativeQty = true;
 
         let issueDescription = "";
         if (issueDescPropName && props?.[issueDescPropName]) {
@@ -9558,6 +9636,7 @@ app.post(
             issueDescription = (ip.title || []).map((r) => r?.plain_text || "").join("").trim();
           }
         }
+        if (issueDescription) hasIssueDescriptions = true;
 
         const schoolId = schoolPropName ? extractFirstRelationId(props?.[schoolPropName]) : null;
         const expectedSparePartId = expectedSparePropName
@@ -9566,7 +9645,7 @@ app.post(
 
         draft.push({
           id: String(productId),
-          quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
+          quantity: Number.isFinite(qty) && qty !== 0 ? Math.abs(qty) : 1,
           reason: String(reason || "").trim(),
           issueDescription: String(issueDescription || "").trim(),
           schoolId: schoolId ? String(schoolId) : "",
@@ -9583,8 +9662,14 @@ app.post(
         return res.status(400).json({ error: "No editable items found for this order." });
       }
 
+      if (!editOrderType) {
+        if (hasIssueDescriptions) editOrderType = "Request Maintenance";
+        else if (hasNegativeQty) editOrderType = "Withdraw Products";
+        else editOrderType = "Request Products";
+      }
+
       // Store as an order draft so /orders/new/products loads it
-      req.session.orderDraft = { products: draft };
+      _setOrderDraftForType(req.session, editOrderType, { products: draft });
 
       // Allow Create New Order page for a short window (admin override)
       const ADMIN_UNLOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -9596,9 +9681,10 @@ app.post(
         expiresAt: Date.now() + EDIT_CTX_TTL_MS,
         items: editItems,
         orderIdNumber: Number.isFinite(Number(orderGroupIdNumber)) ? Number(orderGroupIdNumber) : null,
+        orderType: editOrderType || null,
       };
 
-      return res.json({ ok: true, count: draft.length });
+      return res.json({ ok: true, count: draft.length, orderType: editOrderType || null });
     } catch (e) {
       console.error("edit init error:", e?.body || e);
       return res.status(500).json({ error: "Failed to init edit" });
