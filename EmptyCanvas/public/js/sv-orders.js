@@ -36,13 +36,35 @@
 
 
   // ===== Page cache (speed) =====
-  // Cache S.V orders list in sessionStorage to reduce repeated loads when navigating.
-  const SV_CACHE_KEY = "cache:svOrders:v2";
+  // Keep a small per-tab cache so opening Orders Review does not always need a full refetch.
+  const SV_CACHE_PREFIX = "cache:svOrders:v3:";
   const SV_CACHE_TTL_MS = 45 * 1000; // 45s
 
-  function readSvCache() {
+  function normalizeSvTab(tab) {
+    const raw = String(tab || "").toLowerCase().trim();
+    if (raw === "all") return "all";
+    return approvalKey(raw);
+  }
+
+  function getSvCacheKey(tab = TAB) {
+    return `${SV_CACHE_PREFIX}${normalizeSvTab(tab)}`;
+  }
+
+  function clearSvCache(tab) {
     try {
-      const raw = sessionStorage.getItem(SV_CACHE_KEY);
+      if (tab) {
+        sessionStorage.removeItem(getSvCacheKey(tab));
+        return;
+      }
+      ["not-started", "approved", "rejected", "all"].forEach((key) => {
+        sessionStorage.removeItem(getSvCacheKey(key));
+      });
+    } catch {}
+  }
+
+  function readSvCache(tab = TAB) {
+    try {
+      const raw = sessionStorage.getItem(getSvCacheKey(tab));
       if (!raw) return null;
       const obj = JSON.parse(raw);
       if (!obj || !Array.isArray(obj.data)) return null;
@@ -53,8 +75,10 @@
     }
   }
 
-  function writeSvCache(data) {
-    try { sessionStorage.setItem(SV_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: data || [] })); } catch {}
+  function writeSvCache(data, tab = TAB) {
+    try {
+      sessionStorage.setItem(getSvCacheKey(tab), JSON.stringify({ ts: Date.now(), data: data || [] }));
+    } catch {}
   }
 
   const toDate = (d) => new Date(d || 0);
@@ -171,14 +195,31 @@
   }
 
   const http = {
-    async get(url) {
-      const res = await fetch(url, { credentials: "include", cache: "no-store" });
-      if (res.status === 401) {
-        window.location.href = "/login";
-        return null;
+    async get(url, opts = {}) {
+      const timeoutMs = Math.max(0, Number(opts?.timeoutMs) || 0);
+      const controller = (typeof AbortController === "function" && timeoutMs > 0)
+        ? new AbortController()
+        : null;
+      const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+      try {
+        const res = await fetch(url, {
+          credentials: "include",
+          cache: "no-store",
+          signal: controller ? controller.signal : undefined,
+        });
+        if (res.status === 401) {
+          window.location.href = "/login";
+          return null;
+        }
+        if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        if (err?.name === "AbortError") throw new Error(`GET ${url} → timeout`);
+        throw err;
+      } finally {
+        if (timer) clearTimeout(timer);
       }
-      if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
-      return await res.json();
     },
     async post(url, body) {
       const res = await fetch(url, {
@@ -727,6 +768,7 @@
           allItems[idx].quantityEdited = (roundQty(v) === roundQty(req)) ? null : v;
         }
 
+        writeSvCache(allItems, TAB);
         toastOK("Quantity updated.");
         destroyPopover();
         renderAll({ preserveScroll: true, preserveModal: true });
@@ -750,6 +792,7 @@
   let filteredGroups = [];
   let groupsById = new Map();
   let loading = false;
+  let loadSeq = 0;
 
   function groupMatchesSearch(group, q) {
     if (!q) return true;
@@ -821,8 +864,10 @@
     }
   }
 
-    async function loadList() {
-    const cached = readSvCache();
+  async function loadList(opts = {}) {
+    const requestId = ++loadSeq;
+    const requestedTab = normalizeSvTab(opts?.tab || TAB || "not-started");
+    const cached = readSvCache(requestedTab);
     const hasCache = !!(cached && Array.isArray(cached.data));
 
     // Render cached data immediately (if available)
@@ -832,7 +877,7 @@
       renderAll();
 
       // If cache is still fresh, skip network refresh.
-      if (!cached.stale) return;
+      if (!cached.stale && !opts?.force) return;
     } else {
       // No cache → show loading spinner
       loading = true;
@@ -840,15 +885,17 @@
     }
 
     try {
-      const data = await http.get("/api/sv-orders?tab=all");
+      const data = await http.get(`/api/sv-orders?tab=${encodeURIComponent(requestedTab)}`, { timeoutMs: 25000 });
       if (!data) return;
+      if (requestId !== loadSeq || requestedTab !== normalizeSvTab(TAB)) return;
 
       allItems = Array.isArray(data) ? data : [];
-      writeSvCache(allItems);
+      writeSvCache(allItems, requestedTab);
 
       loading = false;
       renderAll({ preserveScroll: true, preserveModal: true });
     } catch (e) {
+      if (requestId !== loadSeq) return;
       console.error("loadList()", e);
 
       if (!hasCache) {
@@ -882,7 +929,7 @@
 
       const idx = allItems.findIndex((x) => String(x.id) === String(id));
       if (idx >= 0) allItems[idx].approval = normalized;
-      writeSvCache(allItems);
+      clearSvCache();
 
       toastOK(`Marked as ${normalized}.`);
       renderAll({ preserveScroll: true, preserveModal: true });
@@ -942,8 +989,8 @@
 
       await Promise.all(workers);
 
-      // Persist the updated approvals in the cache
-      writeSvCache(allItems);
+      // The item may move between tabs, so drop the per-tab cache and let the next view refetch fresh data.
+      clearSvCache();
 
       if (fail) toastERR(`Updated ${ok}/${toUpdate.length}. Some items failed.`);
       else toastOK(`All items marked as ${normalized}.`);
@@ -957,26 +1004,27 @@
   // ===== Wire events =====
   function wireEvents() {
 
-// Tabs: filter in place (no full page reload)
+// Tabs: fetch each tab on demand so large accounts do not wait for all review items at once.
 if (tabsWrap) {
   tabsWrap.addEventListener("click", (e) => {
     const a = e.target.closest("a.tab-portfolio");
     if (!a) return;
 
-    const targetTab = (a.dataset.tab || "not-started").toLowerCase();
+    const targetTab = normalizeSvTab(a.dataset.tab || "not-started");
     if (!targetTab || targetTab === TAB) return;
 
     e.preventDefault();
     destroyPopover();
+    closeModal();
 
     TAB = targetTab;
     setActiveTab();
 
-    renderAll({ preserveScroll: true, preserveModal: false });
-
     const u = new URL(window.location.href);
     u.searchParams.set("tab", TAB);
     history.replaceState({}, "", u.pathname + "?" + u.searchParams.toString());
+
+    loadList({ tab: TAB });
   });
 }
 
@@ -1047,8 +1095,9 @@ if (tabsWrap) {
 
   // ===== Boot =====
   document.addEventListener("DOMContentLoaded", () => {
+    TAB = normalizeSvTab(TAB);
     setActiveTab();
     wireEvents();
-    loadList();
+    loadList({ tab: TAB });
   });
 })();
