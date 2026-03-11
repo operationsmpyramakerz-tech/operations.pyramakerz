@@ -60,11 +60,107 @@ document.addEventListener("DOMContentLoaded", () => {
   const receiptCloseBtn = document.getElementById("reqReceiptClose");
   const receiptCancelBtn = document.getElementById("reqReceiptCancel");
   const receiptConfirmBtn = document.getElementById("reqReceiptConfirm");
+  const receiptInputsWrap = document.getElementById("reqReceiptInputs");
+  const addReceiptBtn = document.getElementById("reqAddReceiptBtn");
   const receiptInput = document.getElementById("reqReceiptInput");
   const receiptError = document.getElementById("reqReceiptError");
 
   // ---------- Utils ----------
   const norm = (s) => String(s || "").trim().toLowerCase();
+  const RECEIPT_INPUT_SELECTOR = ".req-receipt-input";
+
+  function getReceiptInputs() {
+    return Array.from(receiptInputsWrap?.querySelectorAll(RECEIPT_INPUT_SELECTOR) || []).filter(Boolean);
+  }
+
+  function createReceiptInput(value = "") {
+    const input = document.createElement("input");
+    input.className = "co-submodal-input req-receipt-input";
+    input.type = "text";
+    input.inputMode = "numeric";
+    input.pattern = "[0-9]*";
+    input.autocomplete = "off";
+    input.placeholder = "e.g. 12345";
+    input.value = String(value || "");
+    return input;
+  }
+
+  function resetReceiptInputs(values = [""]) {
+    if (!receiptInputsWrap) return;
+
+    const nextValues = Array.isArray(values) && values.length ? values : [""];
+    receiptInputsWrap.innerHTML = "";
+
+    nextValues.forEach((value, idx) => {
+      const input = idx === 0 && receiptInput ? receiptInput : createReceiptInput();
+      const inputId = idx === 0 ? "reqReceiptInput" : `reqReceiptInput${idx + 1}`;
+      input.id = inputId;
+      input.value = String(value || "");
+      input.setAttribute(
+        "aria-label",
+        idx === 0 ? "Store Receipt Number" : `Store Receipt Number ${idx + 1}`,
+      );
+      receiptInputsWrap.appendChild(input);
+    });
+  }
+
+  function addReceiptInput(value = "", { focus = true } = {}) {
+    if (!receiptInputsWrap) return null;
+
+    const input = createReceiptInput(value);
+    const nextIndex = getReceiptInputs().length + 1;
+    input.id = `reqReceiptInput${nextIndex}`;
+    input.setAttribute("aria-label", `Store Receipt Number ${nextIndex}`);
+    receiptInputsWrap.appendChild(input);
+
+    if (focus) {
+      window.requestAnimationFrame(() => {
+        try {
+          input.focus();
+          input.select();
+        } catch {}
+      });
+    }
+
+    return input;
+  }
+
+  function normalizeReceiptNumbers(receiptNumbers) {
+    const source = Array.isArray(receiptNumbers) ? receiptNumbers : [receiptNumbers];
+    const seen = new Set();
+    const values = [];
+
+    source.forEach((entry) => {
+      String(entry ?? "")
+        .replace(/\r\n/g, "\n")
+        .split(/[\n,]+/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .forEach((value) => {
+          if (seen.has(value)) return;
+          seen.add(value);
+          values.push(value);
+        });
+    });
+
+    return values;
+  }
+
+  function collectReceiptNumbers() {
+    const values = getReceiptInputs()
+      .map((input) => String(input?.value || "").trim())
+      .filter(Boolean);
+
+    if (!values.length) {
+      return { error: "Store receipt number is required.", values: [] };
+    }
+
+    if (values.some((value) => !/^\d+$/.test(value))) {
+      return { error: "Please enter valid store receipt numbers.", values: [] };
+    }
+
+    return { error: "", values: normalizeReceiptNumbers(values) };
+  }
 
 
   // ---------- Page cache (speed) ----------
@@ -1004,16 +1100,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function openReceiptModal() {
-    if (!receiptModal || !receiptInput || !receiptConfirmBtn || !receiptCancelBtn) {
+    if (!receiptModal || !receiptConfirmBtn || !receiptCancelBtn || (!receiptInputsWrap && !receiptInput)) {
       // Fallback to prompt
-      const raw = window.prompt("Enter receipt number:");
+      const raw = window.prompt("Enter store receipt number(s), separated by commas:");
       if (raw === null) return;
-      const val = String(raw).trim();
-      if (!val) {
-        alert("Please enter a valid receipt number.");
+      const values = normalizeReceiptNumbers(raw);
+      if (!values.length || values.some((value) => !/^\d+$/.test(value))) {
+        alert("Please enter valid store receipt numbers.");
         return;
       }
-      markReceivedByOperations(activeGroup, val);
+      markReceivedByOperations(activeGroup, values);
       return;
     }
 
@@ -1021,11 +1117,12 @@ document.addEventListener("DOMContentLoaded", () => {
     setReceiptError("");
     // Do NOT pre-fill the input. Receipt Number is stored as rich_text and may contain
     // multiple values (one per delivery). We want the user to enter a new number each time.
-    receiptInput.value = "";
+    resetReceiptInputs([""]);
 
     receiptConfirmBtn.disabled = false;
     receiptCancelBtn.disabled = false;
     if (receiptCloseBtn) receiptCloseBtn.disabled = false;
+    if (addReceiptBtn) addReceiptBtn.disabled = false;
 
     receiptLastFocus = document.activeElement;
     receiptModal.hidden = false;
@@ -1036,8 +1133,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.requestAnimationFrame(() => {
       try {
-        receiptInput.focus();
-        receiptInput.select();
+        const firstInput = getReceiptInputs()[0] || receiptInput;
+        firstInput?.focus();
+        firstInput?.select();
       } catch {}
     });
   }
@@ -1364,10 +1462,8 @@ async function markReceivedByOperations(g, receiptNumber) {
 
     // Receipt number can be text now (Notion column is rich_text) so we keep it as string.
     // If missing, we still allow the action.
-    const rnText =
-      receiptNumber === null || receiptNumber === undefined
-        ? ""
-        : String(receiptNumber).trim();
+    const rnList = normalizeReceiptNumbers(receiptNumber);
+    const rnText = rnList.join("\n").trim();
     const rnVal = rnText ? rnText : null;
 
     if (shippedBtn) {
@@ -1773,23 +1869,31 @@ async function markReceivedByOperations(g, receiptNumber) {
     closeReceiptModal();
   });
 
-  receiptInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") receiptConfirmBtn?.click();
+  receiptInputsWrap?.addEventListener("keydown", (e) => {
+    const target = e.target;
+    if (!target || !target.matches(RECEIPT_INPUT_SELECTOR)) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      receiptConfirmBtn?.click();
+    }
+  });
+
+  receiptInputsWrap?.addEventListener("input", () => {
+    if (receiptError?.textContent) setReceiptError("");
+  });
+
+  addReceiptBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    setReceiptError("");
+    addReceiptInput("");
   });
 
   receiptConfirmBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
 
-    const raw = String(receiptInput?.value || "").trim();
-    if (!raw) {
-      setReceiptError("Receipt number is required.");
-      return;
-    }
-
-    // Keep it as text (Notion Receipt Number is rich_text now).
-    // We still validate it's numeric to match the expected workflow.
-    if (!/^\d+$/.test(raw)) {
-      setReceiptError("Please enter a valid receipt number.");
+    const { error, values } = collectReceiptNumbers();
+    if (error) {
+      setReceiptError(error);
       return;
     }
 
@@ -1799,15 +1903,17 @@ async function markReceivedByOperations(g, receiptNumber) {
     if (receiptConfirmBtn) receiptConfirmBtn.disabled = true;
     if (receiptCancelBtn) receiptCancelBtn.disabled = true;
     if (receiptCloseBtn) receiptCloseBtn.disabled = true;
+    if (addReceiptBtn) addReceiptBtn.disabled = true;
 
     try {
-      await markReceivedByOperations(activeGroup, raw);
+      await markReceivedByOperations(activeGroup, values);
     } finally {
       // Buttons are re-enabled when the modal opens again; keep it simple.
       // (closeReceiptModal is called on success)
       if (receiptConfirmBtn) receiptConfirmBtn.disabled = false;
       if (receiptCancelBtn) receiptCancelBtn.disabled = false;
       if (receiptCloseBtn) receiptCloseBtn.disabled = false;
+      if (addReceiptBtn) addReceiptBtn.disabled = false;
     }
   });
 
