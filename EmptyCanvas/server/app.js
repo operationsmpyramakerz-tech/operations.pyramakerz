@@ -12572,6 +12572,20 @@ async function getVisibleTeamMemberIdsForSV(req) {
     return [];
   }
 }
+
+async function clearSVOrdersRouteCaches(req) {
+  try {
+    const usernameKey = cacheKeySafe(req?.session?.username || "");
+    await Promise.all([
+      cacheDel(`cache:api:sv-orders:${usernameKey}:all:v2`),
+      cacheDel(`cache:api:sv-orders:${usernameKey}:not-started:v2`),
+      cacheDel(`cache:api:sv-orders:${usernameKey}:approved:v2`),
+      cacheDel(`cache:api:sv-orders:${usernameKey}:rejected:v2`),
+    ]);
+  } catch (e) {
+    console.warn("clearSVOrdersRouteCaches failed:", e?.message || e);
+  }
+}
 async function detectSVApprovalPropName() {
   const props = await getOrdersDBProps();
   return (
@@ -12683,6 +12697,7 @@ app.post("/api/sv-orders/:id/quantity", requireAuth, requirePage("Orders Review"
         [editedQtyProp]: { number: editedVal },
       },
     });
+    await clearSVOrdersRouteCaches(req);
     return res.json({ ok: true, value: newVal, cleared: editedVal === null });
   } catch (e) {
     console.error("POST /api/sv-orders/:id/quantity error:", e?.body || e);
@@ -12704,299 +12719,233 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
     else if (tab === "not-started" || tab === "not started") label = "Not Started";
     else if (!tab) label = "Not Started"; // backward compatible default
 
-    // Identify which Team Members this S.V user can see (from Team Members DB)
-    const visibleIds = await getVisibleTeamMemberIdsForSV(req);
-    if (!visibleIds.length) {
-      // No supervised users → show empty list
-      res.set("Cache-Control", "no-store");
-      return res.json([]);
-    }
+    const cacheTabKey = label ? String(label).toLowerCase().replace(/\s+/g, "-") : "all";
+    const usernameKey = cacheKeySafe(req?.session?.username || "");
+    const cacheKey = `cache:api:sv-orders:${usernameKey}:${cacheTabKey}:v2`;
 
-    // Resolve property names on Orders DB
-    const reqQtyProp    = await detectRequestedQtyPropName();
-    const editedQtyProp = await detectSupervisorEditedQtyPropName();
-    const approvalProp  = await detectSVApprovalPropName();
-    const teamsProp     = await detectOrderTeamsMembersPropName();
-    const ordersProps   = await getOrdersDBProps();
-    const approvalType  = ordersProps[approvalProp]?.type || "select";
-
-    // Order process status (for tracking progress UI)
-    // Supports either a Notion "status" property or a "select".
-    const statusProp =
-      pickPropName(ordersProps, [
-        "Status",
-        "Order Status",
-        "Preparation Status",
-        "Prepared Status",
-        "state",
-      ]) || "Status";
-
-    // ----- Notion "ID" (unique_id) helpers (same as /api/orders) -----
-    const getPropInsensitive = (props, name) => {
-      if (!props || !name) return null;
-      const target = String(name).trim().toLowerCase();
-      for (const [k, v] of Object.entries(props)) {
-        if (String(k).trim().toLowerCase() === target) return v;
-      }
-      return null;
-    };
-
-    const extractUniqueIdDetails = (prop) => {
-      try {
-        if (!prop) return { text: null, prefix: null, number: null };
-
-        // Native Notion "ID" property
-        if (prop.type === 'unique_id') {
-          const u = prop.unique_id;
-          if (!u || typeof u.number !== 'number') {
-            return { text: null, prefix: null, number: null };
-          }
-          const prefix = u.prefix ? String(u.prefix).trim() : '';
-          const number = u.number;
-          const text = prefix ? `${prefix}-${number}` : String(number);
-          return { text, prefix: prefix || null, number };
-        }
-
-        // Best-effort fallback (if "ID" is stored in another type)
-        let text = null;
-        if (prop.type === 'number' && typeof prop.number === 'number') text = String(prop.number);
-        if (prop.type === 'formula') {
-          if (prop.formula?.type === 'string') text = String(prop.formula.string || '').trim() || null;
-          if (prop.formula?.type === 'number' && typeof prop.formula.number === 'number') text = String(prop.formula.number);
-        }
-        if (prop.type === 'rich_text') {
-          text = (prop.rich_text || []).map((x) => x?.plain_text || '').join('').trim() || null;
-        }
-        if (prop.type === 'title') {
-          text = (prop.title || []).map((x) => x?.plain_text || '').join('').trim() || null;
-        }
-        if (!text) return { text: null, prefix: null, number: null };
-
-        // Try to parse prefix/number from a string like "ORD-95"
-        const m = String(text).trim().match(/^(.*?)(\d+)\s*$/);
-        const prefix = m ? String(m[1] || '').replace(/[-\s]+$/, '').trim() : '';
-        const number = m ? Number(m[2]) : null;
-        return {
-          text: String(text).trim(),
-          prefix: prefix || null,
-          number: Number.isFinite(number) ? number : null,
-        };
-      } catch {
-        return { text: null, prefix: null, number: null };
-      }
-    };
-
-    const getOrderUniqueIdDetails = (props) => {
-      // Prefer the new numeric group id column: "Order - ID" (Number)
-      const orderNumProp =
-        getPropInsensitive(props, 'Order - ID') ||
-        getPropInsensitive(props, 'Order ID') ||
-        getPropInsensitive(props, 'Order-ID') ||
-        getPropInsensitive(props, 'Order Id') ||
-        null;
-      const orderNum = _extractPropNumber(orderNumProp);
-      if (Number.isFinite(Number(orderNum))) {
-        const n = Number(orderNum);
-        return { text: `ORD-${n}`, prefix: 'ORD', number: n };
+    const items = await cacheGetOrSet(cacheKey, 30, async () => {
+      // Identify which Team Members this S.V user can see (from Team Members DB)
+      const visibleIds = await getVisibleTeamMemberIdsForSV(req);
+      if (!visibleIds.length) {
+        return [];
       }
 
-      // Fallback to old unique_id column (legacy)
-      const direct = getPropInsensitive(props, 'ID');
-      const d = extractUniqueIdDetails(direct);
-      if (d.text) return d;
+      // Resolve property names on Orders DB
+      const reqQtyProp = await detectRequestedQtyPropName();
+      const editedQtyProp = await detectSupervisorEditedQtyPropName();
+      const approvalProp = await detectSVApprovalPropName();
+      const teamsProp = await detectOrderTeamsMembersPropName();
+      const ordersProps = await getOrdersDBProps();
+      const approvalType = ordersProps[approvalProp]?.type || "select";
 
-      // fallback: first unique_id property in the page
-      for (const v of Object.values(props || {})) {
-        if (v?.type === 'unique_id') {
-          const x = extractUniqueIdDetails(v);
-          if (x.text) return x;
+      // Order process status (for tracking progress UI)
+      const statusProp =
+        pickPropName(ordersProps, [
+          "Status",
+          "Order Status",
+          "Preparation Status",
+          "Prepared Status",
+          "state",
+        ]) || "Status";
+
+      const getPropInsensitive = (props, name) => {
+        if (!props || !name) return null;
+        const target = String(name).trim().toLowerCase();
+        for (const [k, v] of Object.entries(props)) {
+          if (String(k).trim().toLowerCase() === target) return v;
         }
-      }
-      return { text: null, prefix: null, number: null };
-    };
+        return null;
+      };
 
-    // ----- Product helpers (name, unit price, image) -----
-    const parseNumberProp = (prop) => {
-      if (!prop) return null;
-      try {
-        if (prop.type === "number") return prop.number ?? null;
+      const extractUniqueIdDetails = (prop) => {
+        try {
+          if (!prop) return { text: null, prefix: null, number: null };
 
-        if (prop.type === "formula") {
-          if (prop.formula?.type === "number") return prop.formula.number ?? null;
-          if (prop.formula?.type === "string") {
-            const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.-]/g, ""));
-            return Number.isFinite(n) ? n : null;
-          }
-        }
-
-        if (prop.type === "rollup") {
-          if (prop.rollup?.type === "number") return prop.rollup.number ?? null;
-
-          if (prop.rollup?.type === "array") {
-            const arr = prop.rollup.array || [];
-            for (const x of arr) {
-              if (x.type === "number" && typeof x.number === "number") return x.number;
-              if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
-              if (x.type === "formula" && x.formula?.type === "string") {
-                const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
-                if (Number.isFinite(n)) return n;
-              }
-              if (x.type === "rich_text") {
-                const t = (x.rich_text || []).map(r => r.plain_text).join("").trim();
-                const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
-                if (Number.isFinite(n)) return n;
-              }
+          if (prop.type === "unique_id") {
+            const u = prop.unique_id;
+            if (!u || typeof u.number !== "number") {
+              return { text: null, prefix: null, number: null };
             }
+            const prefix = u.prefix ? String(u.prefix).trim() : "";
+            const number = u.number;
+            const text = prefix ? `${prefix}-${number}` : String(number);
+            return { text, prefix: prefix || null, number };
+          }
+
+          let text = null;
+          if (prop.type === "number" && typeof prop.number === "number") text = String(prop.number);
+          if (prop.type === "formula") {
+            if (prop.formula?.type === "string") text = String(prop.formula.string || "").trim() || null;
+            if (prop.formula?.type === "number" && typeof prop.formula.number === "number") text = String(prop.formula.number);
+          }
+          if (prop.type === "rich_text") {
+            text = (prop.rich_text || []).map((x) => x?.plain_text || "").join("").trim() || null;
+          }
+          if (prop.type === "title") {
+            text = (prop.title || []).map((x) => x?.plain_text || "").join("").trim() || null;
+          }
+          if (!text) return { text: null, prefix: null, number: null };
+
+          const m = String(text).trim().match(/^(.*?)(\d+)\s*$/);
+          const prefix = m ? String(m[1] || "").replace(/[-\s]+$/, "").trim() : "";
+          const number = m ? Number(m[2]) : null;
+          return {
+            text: String(text).trim(),
+            prefix: prefix || null,
+            number: Number.isFinite(number) ? number : null,
+          };
+        } catch {
+          return { text: null, prefix: null, number: null };
+        }
+      };
+
+      const getOrderUniqueIdDetails = (props) => {
+        const orderNumProp =
+          getPropInsensitive(props, "Order - ID") ||
+          getPropInsensitive(props, "Order ID") ||
+          getPropInsensitive(props, "Order-ID") ||
+          getPropInsensitive(props, "Order Id") ||
+          null;
+        const orderNum = _extractPropNumber(orderNumProp);
+        if (Number.isFinite(Number(orderNum))) {
+          const n = Number(orderNum);
+          return { text: `ORD-${n}`, prefix: "ORD", number: n };
+        }
+
+        const direct = getPropInsensitive(props, "ID");
+        const d = extractUniqueIdDetails(direct);
+        if (d.text) return d;
+
+        for (const v of Object.values(props || {})) {
+          if (v?.type === "unique_id") {
+            const x = extractUniqueIdDetails(v);
+            if (x.text) return x;
           }
         }
+        return { text: null, prefix: null, number: null };
+      };
 
-        if (prop.type === "rich_text") {
-          const t = (prop.rich_text || []).map(r => r.plain_text).join("").trim();
-          const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
-          return Number.isFinite(n) ? n : null;
+      const orOwners = visibleIds.map((id) => ({
+        property: teamsProp,
+        relation: { contains: id },
+      }));
+
+      const andFilter = [
+        orOwners.length === 1 ? orOwners[0] : { or: orOwners },
+      ];
+
+      if (label) {
+        if (approvalType === "status") {
+          andFilter.push({ property: approvalProp, status: { equals: label } });
+        } else {
+          andFilter.push({ property: approvalProp, select: { equals: label } });
         }
-      } catch {}
-      return null;
-    };
-
-    const productCache = new Map();
-    async function getProductInfo(productPageId) {
-      if (!productPageId) return { name: null, unitPrice: null, image: null };
-      if (productCache.has(productPageId)) return productCache.get(productPageId);
-
-      try {
-        const productPage = await notion.pages.retrieve({ page_id: productPageId });
-        const name =
-          productPage.properties?.Name?.title?.[0]?.plain_text || null;
-
-        const unitPrice =
-          parseNumberProp(productPage.properties?.["Unity Price"]) ??
-          parseNumberProp(productPage.properties?.["Unit price"]) ??
-          parseNumberProp(productPage.properties?.["Unit Price"]) ??
-          parseNumberProp(productPage.properties?.["Price"]) ??
-          null;
-
-        let image = null;
-        if (productPage.cover?.type === "external") image = productPage.cover.external.url;
-        if (productPage.cover?.type === "file") image = productPage.cover.file.url;
-        if (!image && productPage.icon?.type === "external") image = productPage.icon.external.url;
-        if (!image && productPage.icon?.type === "file") image = productPage.icon.file.url;
-
-        const info = { name, unitPrice, image };
-        productCache.set(productPageId, info);
-        return info;
-      } catch {
-        const info = { name: null, unitPrice: null, image: null };
-        productCache.set(productPageId, info);
-        return info;
       }
-    }
 
-    // Resolve Team Member page title (creator name) once per id
-    const svTeamMemberNameCache = new Map();
-    async function getSVTeamMemberName(teamMemberPageId) {
-      if (!teamMemberPageId) return null;
-      if (svTeamMemberNameCache.has(teamMemberPageId)) return svTeamMemberNameCache.get(teamMemberPageId);
-      const name = (await pageTitleById(teamMemberPageId)) || null;
-      svTeamMemberNameCache.set(teamMemberPageId, name);
-      return name;
-    }
+      const rows = [];
+      const productIds = new Set();
+      const memberIds = new Set();
+      let hasMore = true;
+      let startCursor = undefined;
 
-    // Build Notion filter:
-    // Show ONLY orders created by users listed in current user's "S.V Schools" column.
-    const orOwners = visibleIds.map((id) => ({
-      property: teamsProp,
-      relation: { contains: id },
-    }));
-
-    const andFilter = [
-      orOwners.length === 1 ? orOwners[0] : { or: orOwners },
-    ];
-
-    // Only apply approval filter if a label is provided (tab !== all)
-    if (label) {
-      if (approvalType === "status") {
-        andFilter.push({ property: approvalProp, status: { equals: label } });
-      } else {
-        andFilter.push({ property: approvalProp, select: { equals: label } });
-      }
-    }
-
-    const items = [];
-    let hasMore = true;
-    let startCursor = undefined;
-
-    while (hasMore) {
-      const resp = await notion.databases.query({
-        database_id: ordersDatabaseId,
-        start_cursor: startCursor,
-        filter: { and: andFilter },
-        sorts: [{ timestamp: "created_time", direction: "descending" }],
-      });
-
-      for (const page of resp.results) {
-        const props = page.properties || {};
-
-        // Notion Unique ID ("ID" property)
-        const uid = getOrderUniqueIdDetails(props);
-
-        // Product info from relation if present
-        let productName = props.Name?.title?.[0]?.plain_text || "Item";
-        let unitPrice = null;
-        let productImage = null;
-
-        const productRel = props.Product?.relation;
-        const productPageId =
-          Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
-
-        if (productPageId) {
-          const prod = await getProductInfo(productPageId);
-          if (prod?.name) productName = prod.name;
-          unitPrice = typeof prod?.unitPrice === "number" ? prod.unitPrice : null;
-          productImage = prod?.image || null;
-        }
-
-        const teamMemberId = Array.isArray(props?.[teamsProp]?.relation) && props[teamsProp].relation.length
-          ? props[teamsProp].relation[0].id
-          : null;
-
-        const approvalObj = props[approvalProp]?.select || props[approvalProp]?.status || null;
-        const approvalName = approvalObj?.name || "";
-        const approvalColor = approvalObj?.color || null;
-        const { orderType, orderTypeColor } = _extractOrderTypeInfo(props);
-
-        const createdByName = await getSVTeamMemberName(teamMemberId);
-
-        const qtyRequested = Number(props[reqQtyProp]?.number || 0);
-        const qtyEditedRaw = props?.[editedQtyProp]?.number;
-        const qtyEdited = (typeof qtyEditedRaw === 'number' && Number.isFinite(qtyEditedRaw)) ? qtyEditedRaw : null;
-
-        items.push({
-          id: page.id,
-          // Who created this order item (Team Member relation)
-          teamMemberId,
-          createdByName,
-          orderId: uid.text,
-          orderIdPrefix: uid.prefix,
-          orderIdNumber: uid.number,
-          reason: props.Reason?.title?.[0]?.plain_text || "",
-          productName,
-          productImage,
-          unitPrice,
-          quantity: qtyRequested,
-          quantityEdited: qtyEdited,
-          status: props[statusProp]?.select?.name || props[statusProp]?.status?.name || "",
-          approval: approvalName,
-          approvalColor,
-          orderType,
-          orderTypeColor,
-          createdTime: page.created_time,
+      while (hasMore) {
+        const resp = await notion.databases.query({
+          database_id: ordersDatabaseId,
+          start_cursor: startCursor,
+          page_size: 100,
+          filter: { and: andFilter },
+          sorts: [{ timestamp: "created_time", direction: "descending" }],
         });
+
+        for (const page of resp.results) {
+          const props = page.properties || {};
+          const uid = getOrderUniqueIdDetails(props);
+
+          const productRel = props.Product?.relation;
+          const productPageId =
+            Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
+          if (productPageId) productIds.add(productPageId);
+
+          const teamMemberId = Array.isArray(props?.[teamsProp]?.relation) && props[teamsProp].relation.length
+            ? props[teamsProp].relation[0].id
+            : null;
+          if (teamMemberId) memberIds.add(teamMemberId);
+
+          const approvalObj = props[approvalProp]?.select || props[approvalProp]?.status || null;
+          const approvalName = approvalObj?.name || "";
+          const approvalColor = approvalObj?.color || null;
+          const { orderType, orderTypeColor } = _extractOrderTypeInfo(props);
+
+          const qtyRequested = Number(props[reqQtyProp]?.number || 0);
+          const qtyEditedRaw = props?.[editedQtyProp]?.number;
+          const qtyEdited = (typeof qtyEditedRaw === "number" && Number.isFinite(qtyEditedRaw)) ? qtyEditedRaw : null;
+
+          const unitPriceFromOrder =
+            _extractPropNumber(_propInsensitive(props, "Unity Price")) ??
+            _extractPropNumber(_propInsensitive(props, "Unit price")) ??
+            _extractPropNumber(_propInsensitive(props, "Unit Price")) ??
+            _extractPropNumber(_propInsensitive(props, "Price")) ??
+            null;
+
+          rows.push({
+            id: page.id,
+            teamMemberId,
+            orderId: uid.text,
+            orderIdPrefix: uid.prefix,
+            orderIdNumber: uid.number,
+            reason: props.Reason?.title?.[0]?.plain_text || "",
+            productPageId,
+            unitPriceFromOrder,
+            approval: approvalName,
+            approvalColor,
+            quantity: qtyRequested,
+            quantityEdited: qtyEdited,
+            status: props[statusProp]?.select?.name || props[statusProp]?.status?.name || "",
+            orderType,
+            orderTypeColor,
+            createdTime: page.created_time,
+          });
+        }
+
+        hasMore = resp.has_more;
+        startCursor = resp.next_cursor;
       }
 
-      hasMore = resp.has_more;
-      startCursor = resp.next_cursor;
-    }
+      const [productMap, memberMap] = await Promise.all([
+        mapWithConcurrency(productIds, 3, getProductInfoCached),
+        mapWithConcurrency(memberIds, 4, getTeamMemberNameCached),
+      ]);
+
+      return rows.map((row) => {
+        const product = row.productPageId ? productMap.get(row.productPageId) : null;
+        const unitFromOrder = Number(row.unitPriceFromOrder);
+        const unitFromProduct = Number(product?.unitPrice);
+        const unitPrice = Number.isFinite(unitFromOrder)
+          ? unitFromOrder
+          : (Number.isFinite(unitFromProduct) ? unitFromProduct : null);
+
+        return {
+          id: row.id,
+          teamMemberId: row.teamMemberId,
+          createdByName: row.teamMemberId ? (memberMap.get(row.teamMemberId) || null) : null,
+          orderId: row.orderId,
+          orderIdPrefix: row.orderIdPrefix,
+          orderIdNumber: row.orderIdNumber,
+          reason: row.reason,
+          productName: product?.name || "Unknown Product",
+          productImage: product?.image || null,
+          unitPrice,
+          quantity: row.quantity,
+          quantityEdited: row.quantityEdited,
+          status: row.status,
+          approval: row.approval,
+          approvalColor: row.approvalColor,
+          orderType: row.orderType,
+          orderTypeColor: row.orderTypeColor,
+          createdTime: row.createdTime,
+        };
+      });
+    });
 
     res.set("Cache-Control", "no-store");
     return res.json(items);
@@ -13056,6 +13005,7 @@ app.post(
         : { [approvalProp]: { select: { name: decision } } };
 
       await notion.pages.update({ page_id: pageId, properties });
+      await clearSVOrdersRouteCaches(req);
 
       return res.json({ ok:true, id: pageId, decision });
     } catch (e) {
