@@ -5633,6 +5633,7 @@ if (svApproval !== "Approved") continue;
           // Receipt Number (Text/Number) — may be used in Operations header.
           // It can be rich_text now (to allow multiple receipt numbers).
           const receiptNumber =
+            parseTextProp(getPropInsensitive(props, "Store Receipt Number")) ??
             parseTextProp(getPropInsensitive(props, "Receipt Number")) ??
             parseTextProp(getPropInsensitive(props, "ReceiptNumber")) ??
             parseTextProp(getPropInsensitive(props, "Receipt No")) ??
@@ -5922,6 +5923,7 @@ app.post(
       let receiptProp = null;
       let receiptMeta = null;
       const receiptCandidates = [
+        "Store Receipt Number",
         "Receipt Number",
         "ReceiptNumber",
         "Receipt No",
@@ -5958,16 +5960,25 @@ app.post(
       };
 
       const appendReceiptLine = (existing, next) => {
-        const e = String(existing || "").replace(/\r\n/g, "\n").trim();
-        const n = String(next || "").replace(/\r\n/g, "\n").trim();
-        if (!n) return e;
-        if (!e) return n;
-        const lines = e
-          .split(/\n+/)
-          .map((x) => x.trim())
-          .filter(Boolean);
-        if (lines.includes(n)) return e;
-        return `${e}\n${n}`;
+        const out = [];
+        const seen = new Set();
+
+        const pushLines = (value) => {
+          String(value || "")
+            .replace(/\r\n/g, "\n")
+            .split(/\n+/)
+            .map((x) => x.trim())
+            .filter(Boolean)
+            .forEach((line) => {
+              if (seen.has(line)) return;
+              seen.add(line);
+              out.push(line);
+            });
+        };
+
+        pushLines(existing);
+        pushLines(next);
+        return out.join("\n");
       };
 
       let receiptToReturn = null;
