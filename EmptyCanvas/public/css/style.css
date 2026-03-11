@@ -967,6 +967,16 @@ body.co-modal-open{ overflow: hidden; }
 
 .co-submodal-body{ margin-top: 14px; }
 
+.co-submodal-inputs{
+  display: grid;
+  gap: 10px;
+}
+
+.co-submodal-add{
+  margin-top: 10px;
+  align-self: flex-start;
+}
+
 .co-submodal-label{
   display: block;
   font-weight: 800;
