@@ -5758,7 +5758,7 @@ app.post(
   requirePage("Requested Orders"),
   async (req, res) => {
     try {
-      const { orderIds, receiptNumber, quantities } = req.body || {};
+      const { orderIds, receiptNumber, receiptNumbers, quantities } = req.body || {};
       if (!Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "orderIds required" });
       }
@@ -5912,12 +5912,39 @@ app.post(
 
       // Receipt Number — can be rich_text now (so we can append multiple receipt numbers).
       // If provided, we write/update it in Notion so it can be shown in the Operations header.
-      let rnText =
-        receiptNumber === null || receiptNumber === undefined ? "" : String(receiptNumber);
-      rnText = rnText.replace(/\r\n/g, "\n").trim();
-      if (rnText.length > 120) rnText = rnText.slice(0, 120);
+      const normalizeReceiptLines = (value) => {
+        if (Array.isArray(value)) {
+          return value.flatMap((entry) => normalizeReceiptLines(entry));
+        }
+        if (value === null || value === undefined) return [];
+        return String(value)
+          .replace(/\r\n/g, "\n")
+          .split(/\n+/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+      };
 
-      const rnNum = /^\d+$/.test(rnText) ? Math.floor(Number(rnText)) : null;
+      const dedupeReceiptLines = (lines) => {
+        const out = [];
+        const seen = new Set();
+        for (const rawLine of lines || []) {
+          const line = String(rawLine || "").trim();
+          if (!line) continue;
+          if (seen.has(line)) continue;
+          seen.add(line);
+          out.push(line.slice(0, 120));
+        }
+        return out;
+      };
+
+      const incomingReceiptLines = normalizeReceiptLines(receiptNumbers);
+      const rnLines = dedupeReceiptLines(
+        incomingReceiptLines.length ? incomingReceiptLines : normalizeReceiptLines(receiptNumber)
+      );
+      const rnText = rnLines.join("\n");
+      const rnNum = rnLines.length === 1 && /^\d+$/.test(rnLines[0])
+        ? Math.floor(Number(rnLines[0]))
+        : null;
 
       let receiptProp = null;
       let receiptMeta = null;
@@ -5929,7 +5956,7 @@ app.post(
         "Receipt",
       ];
 
-      if (rnText) {
+      if (rnLines.length) {
         for (const cand of receiptCandidates) {
           for (const [key, meta] of Object.entries(dbProps || {})) {
             if (normKey(key) === normKey(cand)) {
@@ -5957,17 +5984,12 @@ app.post(
         return "";
       };
 
-      const appendReceiptLine = (existing, next) => {
-        const e = String(existing || "").replace(/\r\n/g, "\n").trim();
-        const n = String(next || "").replace(/\r\n/g, "\n").trim();
-        if (!n) return e;
-        if (!e) return n;
-        const lines = e
-          .split(/\n+/)
-          .map((x) => x.trim())
-          .filter(Boolean);
-        if (lines.includes(n)) return e;
-        return `${e}\n${n}`;
+      const appendReceiptLines = (existing, nextValues) => {
+        const lines = dedupeReceiptLines([
+          ...normalizeReceiptLines(existing),
+          ...normalizeReceiptLines(nextValues),
+        ]);
+        return lines.join("\n");
       };
 
       let receiptToReturn = null;
@@ -5991,13 +6013,13 @@ app.post(
           // IMPORTANT:
           // - The Notion column might be changed by the user (Number -> Text) while our DB schema cache is still warm.
           // - To avoid "validation_error" on update, always prefer the *actual page property type* when available.
-          if (rnText && receiptProp && pageProps) {
+          if (rnLines.length && receiptProp && pageProps) {
             const actualType = pageProps?.[receiptProp]?.type || receiptMeta?.type || null;
 
             // If Receipt Number is a text field, append the new receipt number on a new line.
             if (actualType === "rich_text") {
               const existing = propPlainText(pageProps[receiptProp]);
-              const merged = appendReceiptLine(existing, rnText);
+              const merged = appendReceiptLines(existing, rnLines);
               updateProps[receiptProp] = {
                 rich_text: [{ text: { content: merged } }],
               };
@@ -6006,7 +6028,7 @@ app.post(
 
             if (actualType === "title") {
               const existing = propPlainText(pageProps[receiptProp]);
-              const merged = appendReceiptLine(existing, rnText);
+              const merged = appendReceiptLines(existing, rnLines);
               updateProps[receiptProp] = {
                 title: [{ text: { content: merged } }],
               };
