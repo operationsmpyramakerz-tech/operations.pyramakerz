@@ -926,6 +926,81 @@ async function detectIssueDescriptionPropName() {
   );
 }
 
+async function detectMaintenanceSchoolPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "B2B Schools",
+      "B2B School",
+      "School",
+      "Schools",
+    ]) || null
+  );
+}
+
+async function detectExpectedSparePartsPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "Expected spare parts to be replaced",
+      "Expected spare parts to replace",
+      "Expected spare parts",
+      "Expected spare part to be replaced",
+      "Expected spare part",
+      "Spare Parts",
+      "Spare parts",
+    ]) || null
+  );
+}
+
+function extractFirstRelationId(prop) {
+  try {
+    const rel = Array.isArray(prop?.relation) ? prop.relation : [];
+    return rel[0]?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+async function buildLinkedOrderPropValue({ propName, propType, pageId }) {
+  if (!propName) return null;
+
+  const cleanType = String(propType || "").trim();
+  const cleanId = String(pageId || "").trim();
+
+  if (cleanType === "relation") {
+    return { [propName]: { relation: cleanId ? [{ id: cleanId }] : [] } };
+  }
+
+  let label = "";
+  if (cleanId) {
+    try {
+      label = String(await pageTitleById(cleanId) || "").trim();
+    } catch {
+      label = "";
+    }
+  }
+
+  if (!label) {
+    if (cleanType === "select") return { [propName]: { select: null } };
+    if (cleanType === "multi_select") return { [propName]: { multi_select: [] } };
+    if (cleanType === "rich_text") return { [propName]: { rich_text: [] } };
+    return null;
+  }
+
+  if (cleanType === "select") {
+    return { [propName]: { select: { name: label } } };
+  }
+  if (cleanType === "multi_select") {
+    return { [propName]: { multi_select: [{ name: label }] } };
+  }
+  if (cleanType === "rich_text") {
+    return { [propName]: { rich_text: [{ text: { content: label } }] } };
+  }
+
+  return null;
+}
+
 
 
 // ===== Order Group ID (Order - ID) helpers =====
@@ -4349,6 +4424,33 @@ app.get(
 );
 // Order Draft APIs — require Create New Order
 app.get(
+  "/api/create-order/schools",
+  requireAuth,
+  requirePage("Create New Order"),
+  async (req, res) => {
+    if (!b2bDatabaseId) {
+      return res.status(500).json({ error: "B2B database ID is not configured." });
+    }
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const list = await _getB2BSchoolsList();
+      return res.json(
+        (Array.isArray(list) ? list : [])
+          .map((school) => ({
+            id: String(school?.id || "").trim(),
+            name: String(school?.name || "").trim(),
+          }))
+          .filter((school) => school.id && school.name),
+      );
+    } catch (e) {
+      console.error("Error fetching Create Order schools:", e?.body || e);
+      return res.status(500).json({ error: "Failed to fetch schools." });
+    }
+  },
+);
+
+app.get(
   "/api/order-draft",
   requireAuth,
   requirePage("Create New Order"),
@@ -4374,6 +4476,8 @@ app.post(
         quantity: Number(p.quantity) || 0,
         reason: String(p.reason || "").trim(),
         issueDescription: String(p.issueDescription || "").trim(),
+        schoolId: String(p.schoolId || "").trim(),
+        expectedSparePartId: String(p.expectedSparePartId || "").trim(),
       }))
       .filter((p) => p.id && p.quantity > 0);
 
@@ -8911,6 +9015,8 @@ const cleanedProducts = products
     quantity: Number(p.quantity),
     reason: String(p.reason || "").trim(),
     issueDescription: String(p.issueDescription || "").trim(),
+    schoolId: String(p.schoolId || "").trim(),
+    expectedSparePartId: String(p.expectedSparePartId || "").trim(),
   }))
   .filter(p => p.id && (_isRequestMaintenance ? true : p.quantity > 0));
 
@@ -8954,11 +9060,20 @@ if (_isRequestMaintenance) {
             : { select: { name: orderType } })
         : null;
 
+      const _dbPropsForMaintenance = _isRequestMaintenance ? await getOrdersDBProps() : null;
+
       // Request Maintenance: store Issue Description per item if the column exists
       const issueDescPropName = _isRequestMaintenance ? await detectIssueDescriptionPropName() : null;
-      const _dbPropsForIssueDesc = issueDescPropName ? await getOrdersDBProps() : null;
       const _issueDescPropType = issueDescPropName
-        ? String(_dbPropsForIssueDesc?.[issueDescPropName]?.type || "rich_text")
+        ? String(_dbPropsForMaintenance?.[issueDescPropName]?.type || "rich_text")
+        : null;
+      const schoolPropName = _isRequestMaintenance ? await detectMaintenanceSchoolPropName() : null;
+      const schoolPropType = schoolPropName
+        ? String(_dbPropsForMaintenance?.[schoolPropName]?.type || "relation")
+        : null;
+      const expectedSparePropName = _isRequestMaintenance ? await detectExpectedSparePartsPropName() : null;
+      const expectedSparePropType = expectedSparePropName
+        ? String(_dbPropsForMaintenance?.[expectedSparePropName]?.type || "relation")
         : null;
 
       const _issueDescPropValueFor = (desc) => {
@@ -8976,6 +9091,25 @@ if (_isRequestMaintenance) {
 
         // Unsupported / non-editable types (formula, rollup, etc.)
         return null;
+      };
+
+      const _maintenanceLinkedPropsFor = async (product) => {
+        if (!_isRequestMaintenance) return {};
+
+        const linkedProps = await Promise.all([
+          buildLinkedOrderPropValue({
+            propName: schoolPropName,
+            propType: schoolPropType,
+            pageId: product?.schoolId,
+          }),
+          buildLinkedOrderPropValue({
+            propName: expectedSparePropName,
+            propType: expectedSparePropType,
+            pageId: product?.expectedSparePartId,
+          }),
+        ]);
+
+        return Object.assign({}, ...linkedProps.filter(Boolean));
       };
 
       const userQuery = await notion.databases.query({
@@ -9114,10 +9248,13 @@ if (_isRequestMaintenance) {
         await mapWithConcurrency(updateTasks, 3, async (t) => {
           if (!t?.pageId || !t?.prod) return;
 
+          const maintenanceProps = await _maintenanceLinkedPropsFor(t.prod);
+
           const props = {
             Reason: { title: [{ text: { content: String(t.prod.reason || "").trim() } }] },
             "Quantity Requested": { number: Number(t.prod.quantity) * _qtySign },
             ...(_issueDescPropValueFor(t.prod.issueDescription) || {}),
+            ...maintenanceProps,
             ...(orderGroupIdProp && Number.isFinite(orderGroupIdNumber)
               ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
               : {}),
@@ -9153,12 +9290,14 @@ if (_isRequestMaintenance) {
         // Create new pages for extra items (if user added more without removing)
         const createStatusProp = statusPropName || "Status";
         const creations = await mapWithConcurrency(remainingToCreate, 3, async (product) => {
+          const maintenanceProps = await _maintenanceLinkedPropsFor(product);
           const created = await notion.pages.create({
             parent: { database_id: ordersDatabaseId },
             properties: {
               Reason: { title: [{ text: { content: product.reason } }] },
               "Quantity Requested": { number: Number(product.quantity) * _qtySign },
               ...(_issueDescPropValueFor(product.issueDescription) || {}),
+              ...maintenanceProps,
               Product: { relation: [{ id: product.id }] },
               [createStatusProp]: statusPlaced,
               "Teams Members": { relation: [{ id: userId }] },
@@ -9200,12 +9339,14 @@ if (_isRequestMaintenance) {
 
       const creations = await Promise.all(
   cleanedProducts.map(async (product) => {
+          const maintenanceProps = await _maintenanceLinkedPropsFor(product);
           const created = await notion.pages.create({
             parent: { database_id: ordersDatabaseId },
             properties: {
               Reason: { title: [{ text: { content: product.reason } }] },
               "Quantity Requested": { number: Number(product.quantity) * _qtySign },
               ...(_issueDescPropValueFor(product.issueDescription) || {}),
+              ...maintenanceProps,
               Product: { relation: [{ id: product.id }] },
               "Status": { select: { name: "Order Placed" } },
               "Teams Members": { relation: [{ id: userId }] },
@@ -9383,6 +9524,8 @@ app.post(
       // Try to capture the Order - ID number from these pages (used to keep the same order number on edits)
       const orderGroupIdProp = await detectOrderGroupIdPropName();
       const issueDescPropName = await detectIssueDescriptionPropName();
+      const schoolPropName = await detectMaintenanceSchoolPropName();
+      const expectedSparePropName = await detectExpectedSparePartsPropName();
       let orderGroupIdNumber = null;
       if (orderGroupIdProp) {
         for (const p of pages) {
@@ -9416,11 +9559,18 @@ app.post(
           }
         }
 
+        const schoolId = schoolPropName ? extractFirstRelationId(props?.[schoolPropName]) : null;
+        const expectedSparePartId = expectedSparePropName
+          ? extractFirstRelationId(props?.[expectedSparePropName])
+          : null;
+
         draft.push({
           id: String(productId),
           quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
           reason: String(reason || "").trim(),
           issueDescription: String(issueDescription || "").trim(),
+          schoolId: schoolId ? String(schoolId) : "",
+          expectedSparePartId: expectedSparePartId ? String(expectedSparePartId) : "",
         });
 
         editItems.push({
