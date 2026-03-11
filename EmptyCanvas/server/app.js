@@ -895,6 +895,38 @@ function _defaultOrderTypeNotionColor(value) {
   return null;
 }
 
+
+function _receiptPresentationForOrderType(orderType) {
+  const isWithdraw = _normKeyOrderType(orderType) === _normKeyOrderType("Withdraw Products");
+  return {
+    isWithdraw,
+    documentTitle: isWithdraw ? "Withdrawal Receipt" : "Delivery Receipt",
+    filePrefix: isWithdraw ? "withdrawal_receipt" : "delivery_receipt",
+    recipientLabelLeft: isWithdraw ? "Received from" : "Delivered to",
+  };
+}
+
+function roundOrderQty(n, decimals = 6) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  const p = 10 ** decimals;
+  return Math.round(v * p) / p;
+}
+
+function hasNonZeroOrderQty(value) {
+  return Math.abs(roundOrderQty(value)) > 1e-9;
+}
+
+function clampOrderQtyToBase(base, value) {
+  const baseQty = roundOrderQty(base);
+  const nextQty = roundOrderQty(value);
+  if (!Number.isFinite(baseQty)) return 0;
+  if (baseQty >= 0) {
+    return Math.min(Math.max(nextQty, 0), baseQty);
+  }
+  return Math.max(Math.min(nextQty, 0), baseQty);
+}
+
 function _extractOrderTypeInfo(props = {}) {
   try {
     const propName = pickPropName(props, ORDER_TYPE_PROP_CANDIDATES);
@@ -4937,7 +4969,7 @@ app.get(
           if (prop.type === "formula") {
             if (prop.formula?.type === "number") return prop.formula.number ?? null;
             if (prop.formula?.type === "string") {
-              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.-]/g, ""));
               return Number.isFinite(n) ? n : null;
             }
           }
@@ -4951,12 +4983,12 @@ app.get(
                 if (x.type === "number" && typeof x.number === "number") return x.number;
                 if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
                 if (x.type === "formula" && x.formula?.type === "string") {
-                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
                   if (Number.isFinite(n)) return n;
                 }
                 if (x.type === "rich_text") {
                   const t = (x.rich_text || []).map(r => r.plain_text).join("").trim();
-                  const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+                  const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
                   if (Number.isFinite(n)) return n;
                 }
               }
@@ -4965,7 +4997,7 @@ app.get(
 
           if (prop.type === "rich_text") {
             const t = (prop.rich_text || []).map(r => r.plain_text).join("").trim();
-            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
             return Number.isFinite(n) ? n : null;
           }
         } catch {}
@@ -5161,7 +5193,7 @@ app.get(
     res.set("Cache-Control", "no-store");
     try {
       // Cache version is bumped when response logic/shape changes.
-      const cacheKey = "cache:api:orders:requested:v5";
+      const cacheKey = "cache:api:orders:requested:v6";
       const data = await cacheGetOrSet(cacheKey, 60, async () => {
       const all = [];
       let hasMore = true,
@@ -5205,7 +5237,7 @@ app.get(
             if (prop.formula?.type === "number") return prop.formula.number ?? null;
             if (prop.formula?.type === "string") {
               const n = parseFloat(
-                String(prop.formula.string || "").replace(/[^0-9.]/g, ""),
+                String(prop.formula.string || "").replace(/[^0-9.-]/g, ""),
               );
               return Number.isFinite(n) ? n : null;
             }
@@ -5221,7 +5253,7 @@ app.get(
                   return x.formula.number;
                 if (x.type === "formula" && x.formula?.type === "string") {
                   const n = parseFloat(
-                    String(x.formula.string || "").replace(/[^0-9.]/g, ""),
+                    String(x.formula.string || "").replace(/[^0-9.-]/g, ""),
                   );
                   if (Number.isFinite(n)) return n;
                 }
@@ -5230,7 +5262,7 @@ app.get(
                     .map((r) => r.plain_text)
                     .join("")
                     .trim();
-                  const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+                  const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
                   if (Number.isFinite(n)) return n;
                 }
               }
@@ -5242,7 +5274,7 @@ app.get(
               .map((r) => r.plain_text)
               .join("")
               .trim();
-            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
             return Number.isFinite(n) ? n : null;
           }
         } catch {}
@@ -5506,9 +5538,9 @@ const quantityReceivedEdited =
     ? (Math.abs(Number(qtyReceived) || 0) > 1e-9 || qtyRemainingStored !== null)
     : false;
 
-const qtyRemainingComputed = Math.max(
-  0,
-  (Number.isFinite(Number(qty)) ? Number(qty) : 0) - (qtyReceived === null || qtyReceived === undefined ? 0 : Number(qtyReceived)),
+const qtyRemainingComputed = roundOrderQty(
+  (Number.isFinite(Number(qty)) ? Number(qty) : 0) -
+  (qtyReceived === null || qtyReceived === undefined ? 0 : Number(qtyReceived)),
 );
 
 const qtyRemaining = qtyRemainingStored !== null ? qtyRemainingStored : qtyRemainingComputed;
@@ -5701,7 +5733,7 @@ app.post(
       );
 
       // Invalidate caches so lists reflect the assignment immediately.
-      await cacheDel("cache:api:orders:requested:v5");
+      await cacheDel("cache:api:orders:requested:v6");
       const memberIdsNorm = (memberIds || [])
         .map((x) => String(x || "").trim())
         .filter(Boolean)
@@ -5814,7 +5846,7 @@ app.post(
           if (prop.type === "formula") {
             if (prop.formula?.type === "number") return prop.formula.number ?? null;
             if (prop.formula?.type === "string") {
-              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.-]/g, ""));
               return Number.isFinite(n) ? n : null;
             }
           }
@@ -5826,7 +5858,7 @@ app.post(
                 if (x.type === "number" && typeof x.number === "number") return x.number;
                 if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
                 if (x.type === "formula" && x.formula?.type === "string") {
-                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
                   if (Number.isFinite(n)) return n;
                 }
               }
@@ -5834,7 +5866,7 @@ app.post(
           }
           if (prop.type === "rich_text") {
             const t = (prop.rich_text || []).map((r) => r.plain_text).join("").trim();
-            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
             return Number.isFinite(n) ? n : null;
           }
         } catch {}
@@ -6010,7 +6042,7 @@ app.post(
                   ? Number(qtyRequestedRaw)
                   : 0;
           }
-          const safeBaseQty = Math.max(0, roundQty(baseQtyNum || 0));
+          const safeBaseQty = roundQty(baseQtyNum || 0);
 
           // Received quantity
           let receivedFinal = null;
@@ -6019,8 +6051,8 @@ app.post(
           const explicitQty = quantities?.[id];
 
           if (typeof explicitQty === "number" && Number.isFinite(explicitQty) && receivedProp) {
-            const v = Math.max(0, roundQty(explicitQty));
-            receivedFinal = safeBaseQty > 0 ? Math.min(safeBaseQty, v) : v;
+            const v = roundQty(explicitQty);
+            receivedFinal = clampOrderQtyToBase(safeBaseQty, v);
             updateProps[receivedProp] = { number: receivedFinal };
           } else if (receivedProp && pageProps) {
             const recValRaw = parseNumberProp(pageProps[receivedProp]);
@@ -6045,13 +6077,14 @@ app.post(
 
             const placeholderZero = recVal !== null && Math.abs(Number(recVal) || 0) < 1e-9 && !remainingWasSet;
 
-            // Fill only if it's missing (null) OR looks like an unedited placeholder 0
-            if (recVal === null || (placeholderZero && safeBaseQty > 0)) {
+            // Fill only if it's missing (null) OR looks like an unedited placeholder 0.
+            // For withdrawal rows (negative base qty), 0 is only a placeholder when remaining is still empty.
+            if (recVal === null || placeholderZero) {
               receivedFinal = safeBaseQty;
               updateProps[receivedProp] = { number: receivedFinal };
             } else {
-              const v = Math.max(0, roundQty(Number(recVal) || 0));
-              receivedFinal = safeBaseQty > 0 ? Math.min(safeBaseQty, v) : v;
+              const v = roundQty(Number(recVal) || 0);
+              receivedFinal = clampOrderQtyToBase(safeBaseQty, v);
             }
           }
 
@@ -6060,8 +6093,8 @@ app.post(
             const recForRemaining =
               receivedFinal === null || receivedFinal === undefined
                 ? 0
-                : Math.max(0, roundQty(Number(receivedFinal) || 0));
-            const remainingVal = Math.max(0, roundQty(safeBaseQty - recForRemaining));
+                : roundQty(Number(receivedFinal) || 0);
+            const remainingVal = roundQty(safeBaseQty - recForRemaining);
             updateProps[remainingProp] = { number: remainingVal };
           }
 
@@ -6073,7 +6106,7 @@ app.post(
       );
 
       // Invalidate cached lists (Operations view).
-      await cacheDel("cache:api:orders:requested:v5");
+      await cacheDel("cache:api:orders:requested:v6");
 
       res.json({
         success: true,
@@ -6166,12 +6199,194 @@ app.post(
         ),
       );
 
-      await cacheDel("cache:api:orders:requested:v5");
+      await cacheDel("cache:api:orders:requested:v6");
 
       res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
     } catch (e) {
       console.error("mark-arrived error:", e.body || e);
       res.status(500).json({ error: "Failed to update status" });
+    }
+  },
+);
+
+app.post(
+  "/api/orders/requested/create-withdrawal",
+  requireAuth,
+  requirePage("Requested Orders"),
+  async (req, res) => {
+    try {
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const dbProps = await getOrdersDBProps();
+      const statusProp = await detectStatusPropName();
+      const orderTypeProp = await detectOrderTypePropName();
+      const approvalProp = await detectSVApprovalPropName();
+      const reqQtyProp = await detectRequestedQtyPropName();
+      const editedQtyProp = await detectSupervisorEditedQtyPropName();
+      const teamsProp = await detectOrderTeamsMembersPropName();
+      const orderGroupIdProp = await detectOrderGroupIdPropName();
+      const receivedProp = await (async () => {
+        if (dbProps?.[REC_PROP_HARDBIND]?.type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })();
+
+      const normLabel = (s) => String(s || "").trim().toLowerCase();
+      const exactOptionName = (propName, desired) => {
+        const meta = propName ? dbProps?.[propName] : null;
+        const options = meta?.type === "status" ? meta?.status?.options : meta?.select?.options;
+        if (Array.isArray(options) && options.length) {
+          const exact = options.find((o) => normLabel(o?.name) === normLabel(desired));
+          const partial = options.find((o) => normLabel(o?.name).includes(normLabel(desired)));
+          return exact?.name || partial?.name || desired;
+        }
+        return desired;
+      };
+      const makeOptionValue = (propName, desired, fallbackType = "select") => {
+        if (!propName) return null;
+        const meta = dbProps?.[propName] || null;
+        const type = meta?.type || fallbackType;
+        const name = exactOptionName(propName, desired);
+        return type === "status" ? { status: { name } } : { select: { name } };
+      };
+      const getPropInsensitive = (props, name) => {
+        const want = String(name || "").trim().toLowerCase();
+        for (const [k, v] of Object.entries(props || {})) {
+          if (String(k || "").trim().toLowerCase() === want) return v;
+        }
+        return null;
+      };
+
+      const pages = (await Promise.all(
+        ids.map(async (id) => {
+          try {
+            return await notion.pages.retrieve({ page_id: id });
+          } catch {
+            return null;
+          }
+        }),
+      )).filter(Boolean);
+
+      if (!pages.length) return res.status(404).json({ error: "Orders not found" });
+
+      const firstProps = pages[0]?.properties || {};
+      const sourceOrderType = _extractOrderTypeInfo(firstProps).orderType;
+      if (_normKeyOrderType(sourceOrderType) !== _normKeyOrderType("Request Products")) {
+        return res.status(400).json({ error: "Only delivered Request Products orders can create a withdrawal." });
+      }
+
+      const sourceStatusProp = firstProps?.[statusProp] || getPropInsensitive(firstProps, statusProp);
+      const sourceStatusName =
+        sourceStatusProp?.status?.name ||
+        sourceStatusProp?.select?.name ||
+        "";
+      if (!/(arrived|delivered|received)/i.test(String(sourceStatusName || ""))) {
+        return res.status(400).json({ error: "Order must be in Delivered before creating a withdrawal." });
+      }
+
+      let orderGroupIdNumber = null;
+      if (orderGroupIdProp) {
+        orderGroupIdNumber = await allocateNextOrderGroupIdNumber(orderGroupIdProp);
+      }
+
+      const statusPlacedValue = makeOptionValue(statusProp, "Order Placed", "select");
+      const withdrawOrderTypeValue = makeOptionValue(orderTypeProp, "Withdraw Products", "select");
+      const approvalApprovedValue = makeOptionValue(approvalProp, "Approved", "select");
+
+      const ownerIdsToInvalidate = new Set();
+      const creations = [];
+
+      for (const page of pages) {
+        const props = page.properties || {};
+        const productRel = Array.isArray(props?.Product?.relation) ? props.Product.relation : [];
+        const productPageId = productRel[0]?.id || null;
+        if (!productPageId) continue;
+
+        const teamsRelation = Array.isArray(props?.[teamsProp]?.relation) ? props[teamsProp].relation : [];
+        teamsRelation.forEach((r) => {
+          const id = String(r?.id || "").trim();
+          if (id) ownerIdsToInvalidate.add(id);
+        });
+
+        const qtyProgressRaw =
+          _extractPropNumber(getPropInsensitive(props, "Quantity Progress")) ??
+          _extractPropNumber(getPropInsensitive(props, "Quantity progress"));
+        const qtyRequestedRaw =
+          _extractPropNumber(props?.[reqQtyProp]) ??
+          _extractPropNumber(getPropInsensitive(props, "Quantity Requested")) ??
+          _extractPropNumber(getPropInsensitive(props, "Quantity requested"));
+        const baseQty =
+          qtyProgressRaw !== null && qtyProgressRaw !== undefined && Number.isFinite(Number(qtyProgressRaw))
+            ? Number(qtyProgressRaw)
+            : qtyRequestedRaw !== null && qtyRequestedRaw !== undefined && Number.isFinite(Number(qtyRequestedRaw))
+              ? Number(qtyRequestedRaw)
+              : 0;
+        const receivedQtyRaw = receivedProp ? _extractPropNumber(props?.[receivedProp]) : null;
+        const effectiveQty =
+          receivedQtyRaw !== null && receivedQtyRaw !== undefined && Number.isFinite(Number(receivedQtyRaw))
+            ? Number(receivedQtyRaw)
+            : baseQty;
+        const withdrawQty = -Math.abs(roundOrderQty(effectiveQty));
+        if (!hasNonZeroOrderQty(withdrawQty)) continue;
+
+        const reasonText =
+          props?.Reason?.title?.map((x) => x?.plain_text || "").join("").trim() ||
+          "Withdraw Products";
+
+        const createProps = {
+          Reason: { title: [{ text: { content: reasonText } }] },
+          Product: { relation: [{ id: productPageId }] },
+          [reqQtyProp]: { number: withdrawQty },
+          [teamsProp]: { relation: teamsRelation.map((r) => ({ id: r.id })) },
+          ...(statusProp && statusPlacedValue ? { [statusProp]: statusPlacedValue } : {}),
+          ...(orderTypeProp && withdrawOrderTypeValue ? { [orderTypeProp]: withdrawOrderTypeValue } : {}),
+          ...(approvalProp && approvalApprovedValue ? { [approvalProp]: approvalApprovedValue } : {}),
+          ...(orderGroupIdProp && Number.isFinite(Number(orderGroupIdNumber))
+            ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
+            : {}),
+        };
+
+        if (receivedProp && dbProps?.[receivedProp]?.type === "number") {
+          createProps[receivedProp] = { number: null };
+        }
+        if (editedQtyProp && dbProps?.[editedQtyProp]?.type === "number") {
+          createProps[editedQtyProp] = { number: null };
+        }
+
+        const created = await notion.pages.create({
+          parent: { database_id: ordersDatabaseId },
+          properties: createProps,
+        });
+        creations.push(created.id);
+      }
+
+      if (!creations.length) {
+        return res.status(400).json({ error: "No delivered quantities were found to withdraw." });
+      }
+
+      await cacheDel("cache:api:orders:requested:v6");
+      await Promise.all(
+        Array.from(ownerIdsToInvalidate).map((mid) => cacheDel(`cache:api:orders:list:${mid}:v7`)),
+      );
+
+      return res.json({
+        success: true,
+        createdCount: creations.length,
+        orderIdNumber: Number.isFinite(Number(orderGroupIdNumber)) ? Number(orderGroupIdNumber) : null,
+        message: "Withdrawal order created in Not Started.",
+      });
+    } catch (e) {
+      console.error("create-withdrawal error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to create withdrawal order" });
     }
   },
 );
@@ -6189,8 +6404,8 @@ app.post(
       const { value } = req.body || {};
 
       const vNumRaw = Number(value);
-      if (!Number.isFinite(vNumRaw) || vNumRaw < 0) {
-        return res.status(400).json({ error: "value must be a non-negative number" });
+      if (!Number.isFinite(vNumRaw)) {
+        return res.status(400).json({ error: "value must be a number" });
       }
 
       // Support fractional quantities (e.g. 0.5). Keep values stable by rounding.
@@ -6200,7 +6415,7 @@ app.post(
         return Math.round(v * 1e6) / 1e6;
       };
 
-      const vNum = Math.max(0, roundQty(vNumRaw));
+      const vNumRounded = roundQty(vNumRaw);
 
       // Detect received quantity property name (Number)
       const receivedProp = (await (async () => {
@@ -6243,7 +6458,7 @@ app.post(
           if (prop.type === "formula") {
             if (prop.formula?.type === "number") return prop.formula.number ?? null;
             if (prop.formula?.type === "string") {
-              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.-]/g, ""));
               return Number.isFinite(n) ? n : null;
             }
           }
@@ -6255,7 +6470,7 @@ app.post(
                 if (x.type === "number" && typeof x.number === "number") return x.number;
                 if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
                 if (x.type === "formula" && x.formula?.type === "string") {
-                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
                   if (Number.isFinite(n)) return n;
                 }
               }
@@ -6281,8 +6496,9 @@ app.post(
               ? Number(qtyRequestedRaw)
               : 0;
       }
-      const safeBaseQty = Math.max(0, roundQty(baseQtyNum || 0));
-      const remainingVal = Math.max(0, roundQty(safeBaseQty - vNum));
+      const safeBaseQty = roundQty(baseQtyNum || 0);
+      const vNum = clampOrderQtyToBase(safeBaseQty, vNumRounded);
+      const remainingVal = roundQty(safeBaseQty - vNum);
 
       const updateProps = {
         [receivedProp]: { number: vNum },
@@ -6297,7 +6513,7 @@ app.post(
       });
 
       // Invalidate caches so quantities update immediately.
-      await cacheDel("cache:api:orders:requested:v5");
+      await cacheDel("cache:api:orders:requested:v6");
       try {
         const page = await notion.pages.retrieve({ page_id: id });
         const rel = page?.properties?.["Teams Members"]?.relation || [];
@@ -6351,7 +6567,7 @@ app.post(
           if (prop.type === "formula") {
             if (prop.formula?.type === "number") return prop.formula.number ?? null;
             if (prop.formula?.type === "string") {
-              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.-]/g, ""));
               return Number.isFinite(n) ? n : null;
             }
           }
@@ -6363,7 +6579,7 @@ app.post(
                 if (x.type === "number" && typeof x.number === "number") return x.number;
                 if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
                 if (x.type === "formula" && x.formula?.type === "string") {
-                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
                   if (Number.isFinite(n)) return n;
                 }
               }
@@ -6371,7 +6587,7 @@ app.post(
           }
           if (prop.type === "rich_text") {
             const t = (prop.rich_text || []).map((r) => r.plain_text).join("").trim();
-            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
             return Number.isFinite(n) ? n : null;
           }
         } catch {}
@@ -6514,6 +6730,7 @@ app.post(
 
       const uids = pages.map((p) => getOrderUniqueIdDetails(p.properties || {}));
       const orderIdRange = computeOrderIdRange(uids);
+      const receiptView = _receiptPresentationForOrderType(_extractOrderTypeInfo(firstProps).orderType);
 
       // Build rows
       const rows = [];
@@ -6590,7 +6807,7 @@ app.post(
         .replace(/\s+/g, "_")
         .slice(0, 60);
 
-      const fileName = `delivery_receipt_${safeName}.pdf`;
+      const fileName = `${receiptView.filePrefix}_${safeName}.pdf`;
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(
@@ -6620,6 +6837,8 @@ app.post(
           headerColorKey: groupReason,
           // Hide unit/total columns for Received/Delivered exports
           showCosts: !hideCosts,
+          documentTitle: receiptView.documentTitle,
+          recipientLabelLeft: receiptView.recipientLabelLeft,
         },
         res,
       );
@@ -6662,7 +6881,7 @@ app.post(
             if (prop.formula?.type === "number") return prop.formula.number ?? null;
             if (prop.formula?.type === "string") {
               const n = parseFloat(
-                String(prop.formula.string || "").replace(/[^0-9.]/g, ""),
+                String(prop.formula.string || "").replace(/[^0-9.-]/g, ""),
               );
               return Number.isFinite(n) ? n : null;
             }
@@ -6676,7 +6895,7 @@ app.post(
                 if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
                 if (x.type === "formula" && x.formula?.type === "string") {
                   const n = parseFloat(
-                    String(x.formula.string || "").replace(/[^0-9.]/g, ""),
+                    String(x.formula.string || "").replace(/[^0-9.-]/g, ""),
                   );
                   if (Number.isFinite(n)) return n;
                 }
@@ -7178,7 +7397,7 @@ app.post(
           if (prop.type === "formula") {
             if (prop.formula?.type === "number") return prop.formula.number ?? null;
             if (prop.formula?.type === "string") {
-              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.-]/g, ""));
               return Number.isFinite(n) ? n : null;
             }
           }
@@ -7190,7 +7409,7 @@ app.post(
                 if (x.type === "number" && typeof x.number === "number") return x.number;
                 if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
                 if (x.type === "formula" && x.formula?.type === "string") {
-                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
                   if (Number.isFinite(n)) return n;
                 }
               }
@@ -7198,7 +7417,7 @@ app.post(
           }
           if (prop.type === "rich_text") {
             const t = (prop.rich_text || []).map((r) => r.plain_text).join("").trim();
-            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
             return Number.isFinite(n) ? n : null;
           }
         } catch {}
@@ -7307,6 +7526,7 @@ app.post(
 
       const uids = pages.map((p) => getOrderUniqueIdDetails(p.properties || {}));
       const orderIdRange = computeOrderIdRange(uids);
+      const receiptView = _receiptPresentationForOrderType(_extractOrderTypeInfo(firstProps).orderType);
 
       // Product cache
       const productCache = new Map();
@@ -7386,7 +7606,7 @@ app.post(
         .replace(/[\\/:*?"<>|]/g, "-")
         .replace(/\s+/g, "_")
         .slice(0, 60);
-      const fileName = `delivery_receipt_${safeName}.pdf`;
+      const fileName = `${receiptView.filePrefix}_${safeName}.pdf`;
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(
@@ -7424,6 +7644,8 @@ app.post(
           // Current Orders are already grouped by Reason in the UI
           groupByReason: false,
           headerColorKey: groupReason,
+          documentTitle: receiptView.documentTitle,
+          recipientLabelLeft: receiptView.recipientLabelLeft,
         },
         res,
       );
@@ -7469,7 +7691,7 @@ app.post(
           if (prop.type === "formula") {
             if (prop.formula?.type === "number") return prop.formula.number ?? null;
             if (prop.formula?.type === "string") {
-              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+              const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.-]/g, ""));
               return Number.isFinite(n) ? n : null;
             }
           }
@@ -7481,7 +7703,7 @@ app.post(
                 if (x.type === "number" && typeof x.number === "number") return x.number;
                 if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
                 if (x.type === "formula" && x.formula?.type === "string") {
-                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                  const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
                   if (Number.isFinite(n)) return n;
                 }
               }
@@ -9750,7 +9972,7 @@ function _extractPropNumber(prop) {
       if (prop.formula?.type === "string") {
         const t = String(prop.formula.string || "").trim();
         if (!t) return null;
-        const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+        const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
         return Number.isFinite(n) ? n : null;
       }
     }
@@ -9767,12 +9989,12 @@ function _extractPropNumber(prop) {
             return x.formula.number;
           }
           if (x?.type === "formula" && x.formula?.type === "string") {
-            const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+            const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
             if (Number.isFinite(n)) return n;
           }
           if (x?.type === "rich_text") {
             const t = (x.rich_text || []).map((r) => r?.plain_text || "").join("").trim();
-            const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+            const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
             if (Number.isFinite(n)) return n;
           }
         }
@@ -9781,7 +10003,7 @@ function _extractPropNumber(prop) {
 
     if (prop.type === "rich_text") {
       const t = (prop.rich_text || []).map((r) => r?.plain_text || "").join("").trim();
-      const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+      const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
       return Number.isFinite(n) ? n : null;
     }
   } catch {}
@@ -12412,7 +12634,7 @@ app.post("/api/sv-orders/:id/quantity", requireAuth, requirePage("Orders Review"
     const pageId = req.params.id;
     const value = Number((req.body?.value ?? "").toString().trim());
     if (!pageId) return res.status(400).json({ error: "Missing id" });
-    if (!Number.isFinite(value) || value < 0) return res.status(400).json({ error: "Invalid quantity" });
+    if (!Number.isFinite(value)) return res.status(400).json({ error: "Invalid quantity" });
 
     // Security: allow editing ONLY for orders created by members listed in
     // the current user's "S.V Schools" column.
@@ -12452,7 +12674,7 @@ app.post("/api/sv-orders/:id/quantity", requireAuth, requirePage("Orders Review"
     };
 
     const requested = roundQty(Number(pg?.properties?.[reqQtyProp]?.number ?? 0));
-    const newVal = Math.max(0, roundQty(value));
+    const newVal = clampOrderQtyToBase(requested, value);
     const editedVal = (Number.isFinite(requested) && roundQty(newVal) === roundQty(requested)) ? null : newVal;
 
     await notion.pages.update({
@@ -12602,7 +12824,7 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
         if (prop.type === "formula") {
           if (prop.formula?.type === "number") return prop.formula.number ?? null;
           if (prop.formula?.type === "string") {
-            const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.]/g, ""));
+            const n = parseFloat(String(prop.formula.string || "").replace(/[^0-9.-]/g, ""));
             return Number.isFinite(n) ? n : null;
           }
         }
@@ -12616,12 +12838,12 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
               if (x.type === "number" && typeof x.number === "number") return x.number;
               if (x.type === "formula" && x.formula?.type === "number") return x.formula.number;
               if (x.type === "formula" && x.formula?.type === "string") {
-                const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.]/g, ""));
+                const n = parseFloat(String(x.formula.string || "").replace(/[^0-9.-]/g, ""));
                 if (Number.isFinite(n)) return n;
               }
               if (x.type === "rich_text") {
                 const t = (x.rich_text || []).map(r => r.plain_text).join("").trim();
-                const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+                const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
                 if (Number.isFinite(n)) return n;
               }
             }
@@ -12630,7 +12852,7 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
 
         if (prop.type === "rich_text") {
           const t = (prop.rich_text || []).map(r => r.plain_text).join("").trim();
-          const n = parseFloat(t.replace(/[^0-9.]/g, ""));
+          const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
           return Number.isFinite(n) ? n : null;
         }
       } catch {}

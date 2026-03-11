@@ -119,6 +119,8 @@ function pipeDeliveryReceiptPDF(
     showCosts = true,
     // Used for header colors when grouping is disabled
     headerColorKey = null,
+    documentTitle = "Delivery Receipt",
+    recipientLabelLeft = "Delivered to",
   },
   stream,
 ) {
@@ -175,7 +177,7 @@ function pipeDeliveryReceiptPDF(
   function drawPageHeader({ compact = false } = {}) {
     // Match Stocktaking header style (logo LEFT + title + subtitle + divider)
     drawStocktakingHeader(doc, {
-      title: "Delivery Receipt",
+      title: String(documentTitle || "Delivery Receipt"),
       subtitle: `Order: ${String(orderId || "-")}  •  Generated: ${formatDateTime(createdAt)}`,
       variant: compact ? "compact" : "default",
       logoPath,
@@ -231,7 +233,7 @@ function pipeDeliveryReceiptPDF(
         .stroke();
     }
 
-    drawSignatureBox("Delivered to", leftX, boxesY);
+    drawSignatureBox(String(recipientLabelLeft || "Delivered to"), leftX, boxesY);
     drawSignatureBox("Operations", rightX, boxesY);
 
     doc.restore();
