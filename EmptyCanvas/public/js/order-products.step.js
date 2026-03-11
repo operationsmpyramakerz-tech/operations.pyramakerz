@@ -3,7 +3,14 @@
 (() => {
   /**
    * Draft model (stored in session on server):
-   *   [{ id: string, quantity: number, reason: string, issueDescription?: string }]
+   *   [{
+   *      id: string,
+   *      quantity: number,
+   *      reason: string,
+   *      issueDescription?: string,
+   *      schoolId?: string,
+   *      expectedSparePartId?: string,
+   *   }]
    *
    * Feb 2026 update:
    * - Reason is collected ONCE per order (in the Order Summary card)
@@ -44,12 +51,17 @@
   const modalCloseBtn = document.getElementById('updateCartClose');
   const addToCartBtn = document.getElementById('addToCartBtn');
   const componentSelectEl = document.getElementById('cartComponentSelect');
+  const componentLabelEl = document.getElementById('cartComponentLabel');
+  const schoolSelectEl = document.getElementById('cartSchoolSelect');
+  const expectedSpareSelectEl = document.getElementById('cartExpectedSpareSelect');
   const qtyInputEl = document.getElementById('cartQtyInput');
 
   // Request Maintenance: Issue Description field (replaces Qty)
   const issueDescInputEl = document.getElementById('cartIssueDescInput');
   const qtyFieldEl = document.getElementById('cartQtyField');
   const issueFieldEl = document.getElementById('cartIssueDescField');
+  const schoolFieldEl = document.getElementById('cartSchoolField');
+  const expectedSpareFieldEl = document.getElementById('cartExpectedSpareField');
   const modalGridEl = modalEl?.querySelector?.('.modal-grid') || document.querySelector('#updateCartModal .modal-grid');
 
   const savingOverlayEl = document.getElementById('cartSavingOverlay');
@@ -69,6 +81,7 @@
 
   // Notion Products DB tag value to show in Request Maintenance
   const MAINTENANCE_TAG_KEY = normKey('4/ Machines');
+  const SPARE_PARTS_TAG_KEY = normKey('Spare parts');
 
   const ORDER_TYPE_META = {
     [REQUEST_PRODUCTS_KEY]: {
@@ -171,7 +184,7 @@
     try {
       if (cartHeadEl) {
         cartHeadEl.innerHTML = maintenance
-          ? '<div>Product</div><div>Issue Description</div><div>Action</div>'
+          ? '<div>Machine</div><div>Issue Description</div><div>Action</div>'
           : '<div>Product</div><div>URL</div><div>Quantity</div><div>Total</div><div>Action</div>';
       }
     } catch {}
@@ -181,6 +194,13 @@
       if (modalGridEl) modalGridEl.classList.toggle('is-maintenance', maintenance);
       if (qtyFieldEl) qtyFieldEl.style.display = maintenance ? 'none' : '';
       if (issueFieldEl) issueFieldEl.style.display = maintenance ? '' : 'none';
+      if (schoolFieldEl) schoolFieldEl.style.display = maintenance ? '' : 'none';
+      if (expectedSpareFieldEl) expectedSpareFieldEl.style.display = maintenance ? '' : 'none';
+      if (componentLabelEl) {
+        componentLabelEl.innerHTML = maintenance
+          ? 'Machine <span class="req-star">*</span>'
+          : 'Component <span class="req-star">*</span>';
+      }
     } catch {}
 
     // Page title + icon
@@ -199,6 +219,8 @@
     // Buttons
     if (updateCartBtn) updateCartBtn.textContent = withdraw ? 'Update Withdraw Cart' : 'Update Cart';
     if (checkoutBtn) checkoutBtn.textContent = withdraw ? 'Withdraw Now' : 'Checkout Now';
+
+    if (maintenance && !schoolsPromise) schoolsPromise = loadSchools();
 
     // Summary title
     try {
@@ -401,7 +423,7 @@
       // If the cart is already booted & components are loaded, re-render the dropdown
       // options to match the newly selected order type (e.g. Maintenance filter).
       try {
-        if (cartBooted && componentsLoaded) initComponentChoices();
+        if (cartBooted && componentsLoaded) refreshModalChoices();
       } catch {}
       return;
     }
@@ -618,6 +640,10 @@
     return Array.isArray(components) ? components : [];
   }
 
+  function getSparePartsForSelect() {
+    return (Array.isArray(components) ? components : []).filter((c) => hasTag(c, SPARE_PARTS_TAG_KEY));
+  }
+
   // NOTE:
   // The cart thumbnail uses a sequential number when there is no image.
   // Requirement: keep it in English digits (1,2,3,...) regardless of locale.
@@ -626,27 +652,32 @@
   const MIN_QTY = 0.01;
 
   let components = []; // [{id,name,url,unitPrice,imageUrl,displayId}]
+  let schools = []; // [{id,name}]
   let byId = new Map();
-  let cart = []; // [{id, quantity, reason, issueDescription?}]
+  let schoolsById = new Map();
+  let cart = []; // [{id, quantity, reason, issueDescription?, schoolId?, expectedSparePartId?}]
 
   let globalReason = '';
 
-  let choicesInst = null;
-  let choicesShowHandler = null;
-  let choicesHideHandler = null;
+  let componentChoicesInst = null;
+  let schoolChoicesInst = null;
+  let expectedSpareChoicesInst = null;
   let saveTimer = null;
   let isSavingNow = false;
   let editingId = null; // when modal opened for editing an existing cart item
 
   let componentsLoaded = false;
+  let schoolsLoaded = false;
   let readyToUse = false; // reason + components loaded
 
   // Preload promises
   let componentsPromise = null;
+  let schoolsPromise = null;
   let draftPromise = null;
 
   // Avoid double init races if the modal is opened while components are loading
   let ensureComponentsPromise = null;
+  let ensureSchoolsPromise = null;
 
   // ---------------------------- Data loading ----------------------------
   async function loadComponents() {
@@ -677,6 +708,8 @@
           quantity: normalizeQty(Number(p.quantity), 1),
           reason: String(p.reason || '').trim(),
           issueDescription: String(p.issueDescription || '').trim(),
+          schoolId: String(p.schoolId || '').trim(),
+          expectedSparePartId: String(p.expectedSparePartId || '').trim(),
         }))
         .filter((p) => p.id);
       return true;
@@ -685,10 +718,32 @@
     }
   }
 
+  async function loadSchools() {
+    try {
+      const res = await fetch('/api/create-order/schools');
+      if (!res.ok) throw new Error(await res.text());
+      const list = await res.json();
+      schools = (Array.isArray(list) ? list : [])
+        .map((s) => ({
+          id: String(s?.id || '').trim(),
+          name: String(s?.name || '').trim(),
+        }))
+        .filter((s) => s.id && s.name);
+      schoolsById = new Map(schools.map((s) => [String(s.id), s]));
+      return true;
+    } catch (err) {
+      console.error('Failed to load schools:', err);
+      schools = [];
+      schoolsById = new Map();
+      return false;
+    }
+  }
+
   function startPreload() {
     if (!componentsPromise) componentsPromise = loadComponents();
+    if (isMaintenanceType() && !schoolsPromise) schoolsPromise = loadSchools();
     if (!draftPromise) draftPromise = loadDraft();
-    return { componentsPromise, draftPromise };
+    return { componentsPromise, schoolsPromise, draftPromise };
   }
 
   async function ensureComponentsReady() {
@@ -712,6 +767,28 @@
     });
 
     return ensureComponentsPromise;
+  }
+
+  async function ensureSchoolsReady() {
+    if (schoolsLoaded) return true;
+    if (ensureSchoolsPromise) return ensureSchoolsPromise;
+
+    ensureSchoolsPromise = (async () => {
+      if (!schoolsPromise) schoolsPromise = loadSchools();
+
+      let ok = false;
+      try { ok = await schoolsPromise; } catch {}
+
+      if (!ok) return false;
+
+      initSchoolChoices();
+      schoolsLoaded = true;
+      return true;
+    })().finally(() => {
+      ensureSchoolsPromise = null;
+    });
+
+    return ensureSchoolsPromise;
   }
 
   // ---------------------------- Ready gating ----------------------------
@@ -781,6 +858,8 @@
             ? deriveMaintenanceReason(p.issueDescription)
             : String(p.reason || '').trim(),
           issueDescription: String(p.issueDescription || '').trim(),
+          schoolId: String(p.schoolId || '').trim(),
+          expectedSparePartId: String(p.expectedSparePartId || '').trim(),
         }))
         .filter((p) => p.id);
 
@@ -829,16 +908,17 @@
 
   function renderEmptyState() {
     const withdraw = isWithdrawType();
+    const maintenance = isMaintenanceType();
     const btnLabel = withdraw ? 'Update Withdraw Cart' : 'Update Cart';
     cartItemsEl.innerHTML = `
       <div class="cart-empty">
-        <strong>${withdraw ? 'Your withdrawal cart is empty' : 'Your cart is empty'}</strong>
-        <div>Click <b>${escapeHtml(btnLabel)}</b> to add a component.</div>
+        <strong>${withdraw ? 'Your withdrawal cart is empty' : maintenance ? 'Your maintenance cart is empty' : 'Your cart is empty'}</strong>
+        <div>Click <b>${escapeHtml(btnLabel)}</b> to add a ${maintenance ? 'machine' : 'component'}.</div>
       </div>
     `;
   }
 
-  function renderLoadingState(text = 'Loading components...') {
+  function renderLoadingState(text = isMaintenanceType() ? 'Loading machines...' : 'Loading components...') {
     if (!cartItemsEl) return;
     cartItemsEl.innerHTML = `
       <div class="cart-loading" role="status" aria-live="polite">
@@ -866,6 +946,8 @@
     cart.forEach((p, idx) => {
       const c = byId.get(String(p.id)) || null;
       const name = c?.name || 'Unknown component';
+      const schoolName = schoolsById.get(String(p.schoolId || ''))?.name || '';
+      const expectedSpareName = byId.get(String(p.expectedSparePartId || ''))?.name || '';
       const qty = normalizeQty(Number(p.quantity), MIN_QTY);
       const total = itemTotal({ id: p.id, quantity: qty });
 
@@ -893,9 +975,16 @@
 
       const meta = document.createElement('div');
       meta.className = 'prod-meta';
-      meta.innerHTML = `
+      let metaHtml = `
         <div class="prod-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
       `;
+      if (isMaintenanceType() && schoolName) {
+        metaHtml += `<div class="prod-submeta">School: ${escapeHtml(schoolName)}</div>`;
+      }
+      if (isMaintenanceType() && expectedSpareName) {
+        metaHtml += `<div class="prod-submeta">Expected spare part: ${escapeHtml(expectedSpareName)}</div>`;
+      }
+      meta.innerHTML = metaHtml;
 
       productCell.appendChild(thumb);
       productCell.appendChild(meta);
@@ -1037,16 +1126,18 @@
     scheduleSaveDraft();
   }
 
-  function upsertItem({ id, quantity, issueDescription }) {
+  function upsertItem({ id, quantity, issueDescription, schoolId, expectedSparePartId }) {
     const cleanId = String(id || '');
     const maintenance = isMaintenanceType();
     const cleanQty = maintenance ? 1 : normalizeQty(Number(quantity), NaN);
     const issue = String(issueDescription || '').trim();
+    const cleanSchoolId = maintenance ? String(schoolId || '').trim() : '';
+    const cleanExpectedSparePartId = maintenance ? String(expectedSparePartId || '').trim() : '';
 
     const r = maintenance ? deriveMaintenanceReason(issue) : String(globalReason || '').trim();
 
     if (!cleanId) {
-      toast('error', 'Missing field', 'Please choose a component.');
+      toast('error', 'Missing field', maintenance ? 'Please choose a machine.' : 'Please choose a component.');
       return false;
     }
 
@@ -1068,9 +1159,20 @@
       cart[idx].quantity = cleanQty;
       // Only overwrite the stored reason if the user already entered one.
       if (r) cart[idx].reason = r;
-      if (maintenance) cart[idx].issueDescription = issue;
+      if (maintenance) {
+        cart[idx].issueDescription = issue;
+        cart[idx].schoolId = cleanSchoolId;
+        cart[idx].expectedSparePartId = cleanExpectedSparePartId;
+      }
     } else {
-      cart.push({ id: cleanId, quantity: cleanQty, reason: r, issueDescription: maintenance ? issue : '' });
+      cart.push({
+        id: cleanId,
+        quantity: cleanQty,
+        reason: r,
+        issueDescription: maintenance ? issue : '',
+        schoolId: maintenance ? cleanSchoolId : '',
+        expectedSparePartId: maintenance ? cleanExpectedSparePartId : '',
+      });
     }
 
     return true;
@@ -1089,31 +1191,32 @@
     setModalOpen(false);
   }
 
-  function setModalLoading(loading, text = 'Loading components...') {
+  function setModalLoading(loading, text = isMaintenanceType() ? 'Loading machines...' : 'Loading components...') {
     const isOn = !!loading;
     try {
       if (qtyInputEl) qtyInputEl.disabled = isOn;
       if (issueDescInputEl) issueDescInputEl.disabled = isOn;
       if (addToCartBtn) addToCartBtn.disabled = isOn;
+      if (schoolSelectEl) schoolSelectEl.disabled = isOn;
+      if (expectedSpareSelectEl) expectedSpareSelectEl.disabled = isOn;
 
-      if (choicesInst && typeof choicesInst.disable === 'function') {
-        if (isOn) choicesInst.disable();
-        else choicesInst.enable();
+      [componentSelectEl, schoolSelectEl, expectedSpareSelectEl].forEach((selectEl) => {
+        const inst = getChoicesInstance(selectEl);
+        if (inst && typeof inst.disable === 'function') {
+          if (isOn) inst.disable();
+          else inst.enable();
+        }
+      });
+
+      if (isOn && !getChoicesInstance(componentSelectEl)) {
+        setNativeSelectLoading(componentSelectEl, text);
       }
-
-      if (componentSelectEl) {
-        componentSelectEl.disabled = isOn;
-
-        // If Choices isn't initialized yet, show a friendly placeholder
-        // so the user sees the modal immediately.
-        if (isOn && !choicesInst) {
-          componentSelectEl.innerHTML = '';
-          const opt = document.createElement('option');
-          opt.value = '';
-          opt.disabled = true;
-          opt.selected = true;
-          opt.textContent = text;
-          componentSelectEl.appendChild(opt);
+      if (isMaintenanceType() && isOn) {
+        if (schoolSelectEl && !getChoicesInstance(schoolSelectEl)) {
+          setNativeSelectLoading(schoolSelectEl, 'Loading schools...');
+        }
+        if (expectedSpareSelectEl && !getChoicesInstance(expectedSpareSelectEl)) {
+          setNativeSelectLoading(expectedSpareSelectEl, 'Loading spare parts...');
         }
       }
     } catch {}
@@ -1125,23 +1228,30 @@
 
     if (qtyInputEl) qtyInputEl.value = '1';
     if (issueDescInputEl) issueDescInputEl.value = '';
+    clearSelectValue(schoolSelectEl);
+    clearSelectValue(expectedSpareSelectEl);
 
     // Open the modal immediately so "Update Cart" always shows the small window.
     setModalOpen(true);
 
-    // If components are already ready, just clear the selection and focus.
-    if (componentsLoaded && Array.isArray(components) && components.length) {
+    const maintenance = isMaintenanceType();
+    const componentReady = componentsLoaded && Array.isArray(components) && components.length;
+    const schoolReady = !maintenance || schoolsLoaded;
+
+    // If everything is already ready, just clear the selection and focus.
+    if (componentReady && schoolReady) {
+      refreshModalChoices();
       setModalLoading(false);
 
-      if (choicesInst) {
-        try { choicesInst.removeActiveItems(); } catch {}
-      } else if (componentSelectEl) {
-        componentSelectEl.value = '';
+      clearSelectValue(componentSelectEl);
+      if (maintenance) {
+        clearSelectValue(schoolSelectEl);
+        clearSelectValue(expectedSpareSelectEl);
       }
 
       window.setTimeout(() => {
         try {
-          const focusEl = modalEl?.querySelector?.('.choices__inner') || componentSelectEl;
+          const focusEl = getSelectFocusElement(componentSelectEl);
           focusEl?.focus?.();
         } catch {}
       }, 50);
@@ -1152,25 +1262,30 @@
     // Otherwise show loading state and initialize once ready.
     setModalLoading(true);
 
-    ensureComponentsReady().then((ok) => {
+    const readyPromise = maintenance
+      ? ensureMaintenanceModalReady()
+      : ensureComponentsReady();
+
+    readyPromise.then((ok) => {
       if (!ok) {
-        toast('error', 'Error', 'Failed to load components list. Please reload the page.');
+        toast('error', 'Error', maintenance ? 'Failed to load maintenance lists. Please reload the page.' : 'Failed to load components list. Please reload the page.');
         closeModal();
         return;
       }
 
+      refreshModalChoices();
       setModalLoading(false);
 
       // Clear selection for "Add" mode
-      if (choicesInst) {
-        try { choicesInst.removeActiveItems(); } catch {}
-      } else if (componentSelectEl) {
-        componentSelectEl.value = '';
+      clearSelectValue(componentSelectEl);
+      if (maintenance) {
+        clearSelectValue(schoolSelectEl);
+        clearSelectValue(expectedSpareSelectEl);
       }
 
       window.setTimeout(() => {
         try {
-          const focusEl = modalEl?.querySelector?.('.choices__inner') || componentSelectEl;
+          const focusEl = getSelectFocusElement(componentSelectEl);
           focusEl?.focus?.();
         } catch {}
       }, 50);
@@ -1188,72 +1303,112 @@
     if (addToCartBtn) addToCartBtn.textContent = 'Update';
     if (qtyInputEl) qtyInputEl.value = String(normalizeQty(Number(item.quantity), 1));
     if (issueDescInputEl) issueDescInputEl.value = String(item.issueDescription || '').trim();
+    clearSelectValue(schoolSelectEl);
+    clearSelectValue(expectedSpareSelectEl);
 
     // Open first, then ensure components list is ready.
     setModalOpen(true);
+    const maintenance = isMaintenanceType();
 
     const applySelection = () => {
-      if (choicesInst) {
-        try {
-          choicesInst.setChoiceByValue(String(item.id));
-        } catch {
-          try { componentSelectEl.value = String(item.id); } catch {}
-        }
-      } else if (componentSelectEl) {
-        componentSelectEl.value = String(item.id);
+      setSelectValue(componentSelectEl, String(item.id));
+      if (maintenance) {
+        setSelectValue(schoolSelectEl, String(item.schoolId || ''));
+        setSelectValue(expectedSpareSelectEl, String(item.expectedSparePartId || ''));
       }
     };
 
-    if (componentsLoaded && Array.isArray(components) && components.length) {
+    const componentReady = componentsLoaded && Array.isArray(components) && components.length;
+    const schoolReady = !maintenance || schoolsLoaded;
+
+    if (componentReady && schoolReady) {
+      refreshModalChoices();
       setModalLoading(false);
       applySelection();
       return;
     }
 
     setModalLoading(true);
-    ensureComponentsReady().then((ok) => {
+    const readyPromise = maintenance
+      ? ensureMaintenanceModalReady()
+      : ensureComponentsReady();
+
+    readyPromise.then((ok) => {
       if (!ok) {
-        toast('error', 'Error', 'Failed to load components list. Please reload the page.');
+        toast('error', 'Error', maintenance ? 'Failed to load maintenance lists. Please reload the page.' : 'Failed to load components list. Please reload the page.');
         closeModal();
         return;
       }
+      refreshModalChoices();
       setModalLoading(false);
       applySelection();
     });
   }
 
-  function initComponentChoices() {
-    if (!componentSelectEl) return;
+  function getChoicesInstance(selectEl) {
+    if (selectEl === componentSelectEl) return componentChoicesInst;
+    if (selectEl === schoolSelectEl) return schoolChoicesInst;
+    if (selectEl === expectedSpareSelectEl) return expectedSpareChoicesInst;
+    return null;
+  }
 
-    componentSelectEl.innerHTML = '';
+  function setChoicesInstance(selectEl, inst) {
+    if (selectEl === componentSelectEl) componentChoicesInst = inst;
+    else if (selectEl === schoolSelectEl) schoolChoicesInst = inst;
+    else if (selectEl === expectedSpareSelectEl) expectedSpareChoicesInst = inst;
+  }
 
-    const selectComponents = getComponentsForSelect();
+  function destroyChoicesInstance(selectEl) {
+    const inst = getChoicesInstance(selectEl);
+    if (!inst) return;
+    try { inst.destroy(); } catch {}
+    setChoicesInstance(selectEl, null);
+  }
+
+  function setNativeSelectLoading(selectEl, text) {
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.disabled = true;
+    opt.selected = true;
+    opt.textContent = String(text || 'Loading...');
+    selectEl.appendChild(opt);
+  }
+
+  function setSelectOptions(selectEl, items, placeholderText, emptyText) {
+    if (!selectEl) return;
+
+    selectEl.innerHTML = '';
+    const list = Array.isArray(items) ? items : [];
 
     const ph = document.createElement('option');
     ph.value = '';
     ph.disabled = true;
     ph.selected = true;
-    ph.textContent = selectComponents.length ? 'Select component...' : 'No components available';
-    componentSelectEl.appendChild(ph);
+    ph.textContent = list.length ? placeholderText : emptyText;
+    selectEl.appendChild(ph);
 
-    for (const c of selectComponents) {
+    for (const item of list) {
       const opt = document.createElement('option');
-      opt.value = String(c.id);
-      opt.textContent = String(c.name || '');
-      componentSelectEl.appendChild(opt);
+      opt.value = String(item?.id || '');
+      opt.textContent = String(item?.name || '');
+      selectEl.appendChild(opt);
     }
+  }
+
+  function initChoicesSelect(selectEl, { items, placeholderText, emptyText }) {
+    if (!selectEl) return null;
+
+    setSelectOptions(selectEl, items, placeholderText, emptyText);
+    destroyChoicesInstance(selectEl);
 
     try {
-      if (choicesInst) {
-        choicesInst.destroy();
-        choicesInst = null;
-      }
-
-      choicesInst = new Choices(componentSelectEl, {
+      const inst = new Choices(selectEl, {
         searchEnabled: true,
         searchPlaceholderValue: 'Search...',
         placeholder: true,
-        placeholderValue: 'Select component...',
+        placeholderValue: placeholderText,
         itemSelectText: '',
         shouldSort: true,
         allowHTML: false,
@@ -1261,41 +1416,124 @@
         searchResultLimit: 500,
       });
 
-      // Add a clear (x) button inside the dropdown search input
-      setupChoicesSearchClearButton();
+      setChoicesInstance(selectEl, inst);
+      setupChoicesSearchClearButton(selectEl);
+      return inst;
     } catch (e) {
       console.warn('Choices init failed:', e);
-      choicesInst = null;
+      setChoicesInstance(selectEl, null);
+      return null;
     }
   }
 
-  function setupChoicesSearchClearButton() {
-    if (!componentSelectEl) return;
+  function initComponentChoices() {
+    return initChoicesSelect(componentSelectEl, {
+      items: getComponentsForSelect(),
+      placeholderText: isMaintenanceType() ? 'Select machine...' : 'Select component...',
+      emptyText: isMaintenanceType() ? 'No machines available' : 'No components available',
+    });
+  }
 
-    // Ensure we (re)inject whenever the dropdown opens
-    if (choicesShowHandler) componentSelectEl.removeEventListener('showDropdown', choicesShowHandler);
-    if (choicesHideHandler) componentSelectEl.removeEventListener('hideDropdown', choicesHideHandler);
+  function initSchoolChoices() {
+    return initChoicesSelect(schoolSelectEl, {
+      items: schools,
+      placeholderText: 'Select school...',
+      emptyText: 'No schools available',
+    });
+  }
 
-    choicesShowHandler = () => window.setTimeout(ensureChoicesSearchClearButton, 0);
-    choicesHideHandler = () => {
+  function initExpectedSpareChoices() {
+    return initChoicesSelect(expectedSpareSelectEl, {
+      items: getSparePartsForSelect(),
+      placeholderText: 'Select spare part...',
+      emptyText: 'No spare parts available',
+    });
+  }
+
+  function refreshModalChoices() {
+    initComponentChoices();
+    if (isMaintenanceType()) {
+      initSchoolChoices();
+      initExpectedSpareChoices();
+    }
+  }
+
+  async function ensureMaintenanceModalReady() {
+    const [componentsOk, schoolsOk] = await Promise.all([
+      ensureComponentsReady(),
+      ensureSchoolsReady(),
+    ]);
+    if (!componentsOk || !schoolsOk) return false;
+    initExpectedSpareChoices();
+    return true;
+  }
+
+  function getSelectFocusElement(selectEl) {
+    try {
+      return selectEl?.closest('.choices')?.querySelector('.choices__inner') || selectEl;
+    } catch {
+      return selectEl;
+    }
+  }
+
+  function clearSelectValue(selectEl) {
+    if (!selectEl) return;
+    const inst = getChoicesInstance(selectEl);
+    if (inst) {
+      try { inst.removeActiveItems(); } catch {}
+      return;
+    }
+    try { selectEl.value = ''; } catch {}
+  }
+
+  function setSelectValue(selectEl, value) {
+    if (!selectEl) return;
+    const v = String(value || '').trim();
+    if (!v) {
+      clearSelectValue(selectEl);
+      return;
+    }
+
+    const inst = getChoicesInstance(selectEl);
+    if (inst) {
       try {
-        const root = componentSelectEl.closest('.choices');
+        inst.removeActiveItems();
+        inst.setChoiceByValue(v);
+        return;
+      } catch {}
+    }
+
+    try { selectEl.value = v; } catch {}
+  }
+
+  function setupChoicesSearchClearButton(selectEl) {
+    if (!selectEl) return;
+
+    if (selectEl._choicesShowHandler) {
+      selectEl.removeEventListener('showDropdown', selectEl._choicesShowHandler);
+    }
+    if (selectEl._choicesHideHandler) {
+      selectEl.removeEventListener('hideDropdown', selectEl._choicesHideHandler);
+    }
+
+    selectEl._choicesShowHandler = () => window.setTimeout(() => ensureChoicesSearchClearButton(selectEl), 0);
+    selectEl._choicesHideHandler = () => {
+      try {
+        const root = selectEl.closest('.choices');
         const dropdown = root?.querySelector('.choices__list--dropdown');
         const btn = dropdown?.querySelector('.choices-search-clear');
         if (btn) btn.style.display = 'none';
       } catch {}
     };
 
-    componentSelectEl.addEventListener('showDropdown', choicesShowHandler);
-    componentSelectEl.addEventListener('hideDropdown', choicesHideHandler);
-
-    // Try once now as well
-    ensureChoicesSearchClearButton();
+    selectEl.addEventListener('showDropdown', selectEl._choicesShowHandler);
+    selectEl.addEventListener('hideDropdown', selectEl._choicesHideHandler);
+    ensureChoicesSearchClearButton(selectEl);
   }
 
-  function ensureChoicesSearchClearButton() {
+  function ensureChoicesSearchClearButton(selectEl) {
     try {
-      const root = componentSelectEl.closest('.choices');
+      const root = selectEl?.closest('.choices');
       if (!root) return;
 
       const dropdown = root.querySelector('.choices__list--dropdown');
@@ -1310,8 +1548,7 @@
         btn.type = 'button';
         btn.className = 'choices-search-clear';
         btn.setAttribute('aria-label', 'Clear search');
-        // Use a plain × character for maximum reliability on mobile browsers
-        btn.innerHTML = '<span aria-hidden="true">×</span>';
+        btn.innerHTML = '<span aria-hidden="true">x</span>';
         dropdown.appendChild(btn);
       }
 
@@ -1327,7 +1564,6 @@
           e.preventDefault();
           e.stopPropagation();
           input.value = '';
-          // Trigger Choices filtering refresh
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.dispatchEvent(new Event('keyup', { bubbles: true }));
           update();
@@ -1354,7 +1590,11 @@
       toast(
         'error',
         withdraw ? 'Empty withdrawal' : 'Empty cart',
-        withdraw ? 'Please add at least one component to withdraw.' : 'Please add at least one component.',
+        withdraw
+          ? 'Please add at least one component to withdraw.'
+          : maintenance
+            ? 'Please add at least one machine.'
+            : 'Please add at least one component.',
       );
       return;
     }
@@ -1487,6 +1727,8 @@
       const id = componentSelectEl?.value;
       const maintenance = isMaintenanceType();
       const qty = maintenance ? 1 : Number(qtyInputEl?.value);
+      const schoolId = maintenance ? String(schoolSelectEl?.value || '').trim() : '';
+      const expectedSparePartId = maintenance ? String(expectedSpareSelectEl?.value || '').trim() : '';
       const issueDescription = maintenance
         ? String(issueDescInputEl?.value || '').trim()
         : '';
@@ -1497,7 +1739,13 @@
         cart = cart.filter((p) => String(p.id) !== String(editingId));
       }
 
-      const ok = upsertItem({ id, quantity: qty, issueDescription });
+      const ok = upsertItem({
+        id,
+        quantity: qty,
+        issueDescription,
+        schoolId,
+        expectedSparePartId,
+      });
       if (!ok) return;
 
       closeModal();
@@ -1529,7 +1777,7 @@
     // disable until reason+components loaded
     setReady(false);
 
-    const { componentsPromise: cp, draftPromise: dp } = startPreload();
+    const { componentsPromise: cp, schoolsPromise: sp, draftPromise: dp } = startPreload();
 
     // Show loading state instead of "Your cart is empty" until data is ready
     renderLoadingState();
@@ -1546,11 +1794,16 @@
       applyGlobalReason();
 
       try { await cp; } catch {}
+      if (isMaintenanceType()) {
+        try { await sp; } catch {}
+      }
       hideSaving();
 
-      const ok = await ensureComponentsReady();
+      const ok = isMaintenanceType()
+        ? await ensureMaintenanceModalReady()
+        : await ensureComponentsReady();
       if (!ok) {
-        toast('error', 'Error', 'Failed to load components list. Please reload the page.');
+        toast('error', 'Error', isMaintenanceType() ? 'Failed to load maintenance lists. Please reload the page.' : 'Failed to load components list. Please reload the page.');
         return;
       }
 
@@ -1571,10 +1824,15 @@
     syncReasonFromInput();
 
     try { await cp; } catch {}
+    if (isMaintenanceType()) {
+      try { await sp; } catch {}
+    }
 
-    const ok = await ensureComponentsReady();
+    const ok = isMaintenanceType()
+      ? await ensureMaintenanceModalReady()
+      : await ensureComponentsReady();
     if (!ok) {
-      toast('error', 'Error', 'Failed to load components list. Please reload the page.');
+      toast('error', 'Error', isMaintenanceType() ? 'Failed to load maintenance lists. Please reload the page.' : 'Failed to load components list. Please reload the page.');
       return;
     }
 
