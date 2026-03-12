@@ -796,12 +796,10 @@
 
   /* Toggle fields (Qty vs Issue Description) */
   #cartIssueDescField{ display: none; }
-  #cartSchoolField,
-  #cartExpectedSpareField{ display: none; }
+  #cartSchoolField{ display: none; }
   body.is-maintenance #cartIssueDescField{ display: block; }
   body.is-maintenance #cartQtyField{ display: none; }
-  body.is-maintenance #cartSchoolField,
-  body.is-maintenance #cartExpectedSpareField{ display: block; }
+  body.is-maintenance #cartSchoolField{ display: block; }
   /* ===== Shopping Cart modern refresh (Mar 2026) ===== */
   .create-order-cart-wrap{
     padding-top: 1.25rem;
@@ -1532,13 +1530,8 @@
           </div>
 
           <div class="mfield" id="cartSchoolField">
-            <label id="cartSchoolLabel" for="cartSchoolSelect">School</label>
+            <label id="cartSchoolLabel" for="cartSchoolSelect">School <span class="req-star">*</span></label>
             <select id="cartSchoolSelect"></select>
-          </div>
-
-          <div class="mfield" id="cartExpectedSpareField">
-            <label id="cartExpectedSpareLabel" for="cartExpectedSpareSelect">Expected spare parts to be replaced</label>
-            <select id="cartExpectedSpareSelect"></select>
           </div>
 
           <div class="mfield" id="cartQtyField">

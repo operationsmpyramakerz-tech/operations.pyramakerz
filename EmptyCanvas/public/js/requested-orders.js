@@ -261,6 +261,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return `<div class="co-thumb co-thumb--order-type" style="${style}" title="${escapeHTML(meta.label)}" aria-label="${escapeHTML(meta.label)}"><i data-feather="${meta.icon}"></i></div>`;
   }
 
+  function orderTypeSubtitle(type, notionColor, fallback = '—') {
+    const meta = orderTypeMeta(type, notionColor);
+    return meta.label && meta.label !== 'Order' ? meta.label : fallback;
+  }
+
   const moneyFmt = (() => {
     try {
       return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -867,7 +872,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Header
     if (modalTitle) modalTitle.textContent = stage.label || "—";
-    if (modalSub) modalSub.textContent = stage.sub || "—";
+    if (modalSub) {
+      modalSub.textContent = orderTypeSubtitle(
+        g.orderType || all[0]?.orderType,
+        g.orderTypeColor || all[0]?.orderTypeColor,
+        stage.sub || '—',
+      );
+    }
 
     // Tracker
     setActiveStep(stage.idx || 1);
@@ -1006,6 +1017,10 @@ document.addEventListener("DOMContentLoaded", () => {
              </button>`
           : "";
 
+        const itemStatusLabel = String(it.status || stage.label || '—').trim() || '—';
+        const itemStatusVars = notionColorVars(it.statusColor || stage.color);
+        const itemStatusStyle = `--tag-bg:${itemStatusVars.bg};--tag-fg:${itemStatusVars.fg};--tag-border:${itemStatusVars.bd};`;
+
         const row = document.createElement("div");
         row.className = "co-item";
         row.innerHTML = `
@@ -1019,6 +1034,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="co-item-right">
             <div class="co-item-total">${isRemainingTab ? "Qty remaining:" : "Qty:"} ${qtyHTML}</div>
             <div class="co-item-right-row">
+              <div class="co-item-status" style="${itemStatusStyle}">${escapeHTML(itemStatusLabel)}</div>
               ${editBtnHTML}
             </div>
           </div>

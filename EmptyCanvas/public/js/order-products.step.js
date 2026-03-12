@@ -196,7 +196,7 @@
       if (qtyFieldEl) qtyFieldEl.style.display = maintenance ? 'none' : '';
       if (issueFieldEl) issueFieldEl.style.display = maintenance ? '' : 'none';
       if (schoolFieldEl) schoolFieldEl.style.display = maintenance ? '' : 'none';
-      if (expectedSpareFieldEl) expectedSpareFieldEl.style.display = maintenance ? '' : 'none';
+      if (expectedSpareFieldEl) expectedSpareFieldEl.style.display = 'none';
       if (componentLabelEl) {
         componentLabelEl.innerHTML = maintenance
           ? 'Machine <span class="req-star">*</span>'
@@ -222,6 +222,7 @@
     if (checkoutBtn) checkoutBtn.textContent = withdraw ? 'Withdraw Now' : 'Checkout Now';
 
     if (maintenance && !schoolsPromise) schoolsPromise = loadSchools();
+    syncUpdateCartButtonVisibility();
 
     // Summary title
     try {
@@ -1030,10 +1031,20 @@
     `;
   }
 
+  function syncUpdateCartButtonVisibility() {
+    if (!updateCartBtn) return;
+    const footerEl = updateCartBtn.closest('.cart-footer');
+    const hideForMaintenance = isMaintenanceType() && Array.isArray(cart) && cart.length > 0;
+    updateCartBtn.hidden = hideForMaintenance;
+    updateCartBtn.setAttribute('aria-hidden', hideForMaintenance ? 'true' : 'false');
+    if (footerEl) footerEl.style.display = hideForMaintenance ? 'none' : '';
+  }
+
   function renderCart() {
     if (!cartItemsEl) return;
 
     cartItemsEl.innerHTML = '';
+    syncUpdateCartButtonVisibility();
 
     if (!Array.isArray(cart) || cart.length === 0) {
       renderEmptyState();
@@ -1049,7 +1060,6 @@
       const c = byId.get(String(p.id)) || null;
       const name = c?.name || 'Unknown component';
       const schoolName = schoolsById.get(String(p.schoolId || ''))?.name || '';
-      const expectedSpareName = byId.get(String(p.expectedSparePartId || ''))?.name || '';
       const qty = normalizeQty(Number(p.quantity), MIN_QTY);
       const total = itemTotal({ id: p.id, quantity: qty });
 
@@ -1082,9 +1092,6 @@
       `;
       if (isMaintenanceType() && schoolName) {
         metaHtml += `<div class="prod-submeta">School: ${escapeHtml(schoolName)}</div>`;
-      }
-      if (isMaintenanceType() && expectedSpareName) {
-        metaHtml += `<div class="prod-submeta">Expected spare part: ${escapeHtml(expectedSpareName)}</div>`;
       }
       meta.innerHTML = metaHtml;
 
@@ -1228,13 +1235,12 @@
     scheduleSaveDraft();
   }
 
-  function upsertItem({ id, quantity, issueDescription, schoolId, expectedSparePartId }) {
+  function upsertItem({ id, quantity, issueDescription, schoolId }) {
     const cleanId = String(id || '');
     const maintenance = isMaintenanceType();
     const cleanQty = maintenance ? 1 : normalizeQty(Number(quantity), NaN);
     const issue = String(issueDescription || '').trim();
     const cleanSchoolId = maintenance ? String(schoolId || '').trim() : '';
-    const cleanExpectedSparePartId = maintenance ? String(expectedSparePartId || '').trim() : '';
 
     const r = maintenance ? deriveMaintenanceReason(issue) : String(globalReason || '').trim();
 
@@ -1249,6 +1255,11 @@
         return false;
       }
     } else {
+      if (!cleanSchoolId) {
+        toast('error', 'Missing field', 'Please choose a school.');
+        try { schoolSelectEl?.focus?.(); } catch {}
+        return false;
+      }
       if (!issue) {
         toast('error', 'Missing field', 'Please describe the issue.');
         try { issueDescInputEl?.focus?.(); } catch {}
@@ -1257,6 +1268,10 @@
     }
 
     const idx = cart.findIndex((p) => String(p.id) === cleanId);
+    if (maintenance && idx === -1 && Array.isArray(cart) && cart.length >= 1) {
+      toast('error', 'One machine only', 'Request Maintenance allows one machine only. Edit or remove the current machine first.');
+      return false;
+    }
     if (idx >= 0) {
       cart[idx].quantity = cleanQty;
       // Only overwrite the stored reason if the user already entered one.
@@ -1264,7 +1279,6 @@
       if (maintenance) {
         cart[idx].issueDescription = issue;
         cart[idx].schoolId = cleanSchoolId;
-        cart[idx].expectedSparePartId = cleanExpectedSparePartId;
       }
     } else {
       cart.push({
@@ -1273,7 +1287,7 @@
         reason: r,
         issueDescription: maintenance ? issue : '',
         schoolId: maintenance ? cleanSchoolId : '',
-        expectedSparePartId: maintenance ? cleanExpectedSparePartId : '',
+        expectedSparePartId: '',
       });
     }
 
@@ -1328,6 +1342,12 @@
     editingId = null;
     if (addToCartBtn) addToCartBtn.textContent = 'Add';
 
+    const maintenance = isMaintenanceType();
+    if (maintenance && Array.isArray(cart) && cart.length >= 1) {
+      toast('error', 'One machine only', 'Request Maintenance allows one machine only. Edit or remove the current machine first.');
+      return;
+    }
+
     if (qtyInputEl) qtyInputEl.value = '1';
     if (issueDescInputEl) issueDescInputEl.value = '';
     clearSelectValue(schoolSelectEl);
@@ -1336,7 +1356,6 @@
     // Open the modal immediately so "Update Cart" always shows the small window.
     setModalOpen(true);
 
-    const maintenance = isMaintenanceType();
     const componentReady = componentsLoaded && Array.isArray(components) && components.length;
     const schoolReady = !maintenance || schoolsLoaded;
 
@@ -1448,6 +1467,7 @@
   }
 
   function getChoicesInstance(selectEl) {
+    if (!selectEl) return null;
     if (selectEl === componentSelectEl) return componentChoicesInst;
     if (selectEl === schoolSelectEl) return schoolChoicesInst;
     if (selectEl === expectedSpareSelectEl) return expectedSpareChoicesInst;
@@ -1455,6 +1475,7 @@
   }
 
   function setChoicesInstance(selectEl, inst) {
+    if (!selectEl) return;
     if (selectEl === componentSelectEl) componentChoicesInst = inst;
     else if (selectEl === schoolSelectEl) schoolChoicesInst = inst;
     else if (selectEl === expectedSpareSelectEl) expectedSpareChoicesInst = inst;
@@ -1710,6 +1731,12 @@
         return;
       }
     } else {
+      const missingSchool = cart.find((p) => !String(p.schoolId || '').trim());
+      if (missingSchool) {
+        toast('error', 'School required', 'Please choose a school for every machine in the cart.');
+        try { openModalForEdit(missingSchool.id); } catch {}
+        return;
+      }
       // Maintenance requires Issue Description per item
       const missing = cart.find((p) => !String(p.issueDescription || '').trim());
       if (missing) {
@@ -1830,7 +1857,6 @@
       const maintenance = isMaintenanceType();
       const qty = maintenance ? 1 : Number(qtyInputEl?.value);
       const schoolId = maintenance ? String(schoolSelectEl?.value || '').trim() : '';
-      const expectedSparePartId = maintenance ? String(expectedSpareSelectEl?.value || '').trim() : '';
       const issueDescription = maintenance
         ? String(issueDescInputEl?.value || '').trim()
         : '';
@@ -1846,7 +1872,6 @@
         quantity: qty,
         issueDescription,
         schoolId,
-        expectedSparePartId,
       });
       if (!ok) return;
 

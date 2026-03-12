@@ -27,6 +27,13 @@
     totalPrice: document.getElementById("svModalTotalPrice"),
     items: document.getElementById("svModalItems"),
   };
+  const modalRows = {
+    reason: modalEls.reason?.closest?.('.co-meta-row') || null,
+    date: modalEls.date?.closest?.('.co-meta-row') || null,
+    components: modalEls.components?.closest?.('.co-meta-row') || null,
+    totalPrice: modalEls.totalPrice?.closest?.('.co-meta-row') || null,
+  };
+  const modalReasonLabel = modalRows.reason?.querySelector?.('span') || null;
 
   // ===== Helpers =====
   const qs = new URLSearchParams(location.search);
@@ -143,6 +150,29 @@
     const meta = orderTypeMeta(type, notionColor);
     const style = `--co-thumb-bg:${meta.bg};--co-thumb-fg:${meta.fg};--co-thumb-border:${meta.bd};`;
     return `<div class="co-thumb co-thumb--order-type" style="${style}" title="${escapeHTML(meta.label)}" aria-label="${escapeHTML(meta.label)}"><i data-feather="${meta.icon}"></i></div>`;
+  }
+
+  function orderTypeSubtitle(type, notionColor, fallback = '—') {
+    const meta = orderTypeMeta(type, notionColor);
+    return meta.label && meta.label !== 'Order' ? meta.label : fallback;
+  }
+
+  function isMaintenanceOrderType(type) {
+    return String(type || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') === 'requestmaintenance';
+  }
+
+  function summarizeIssueDescriptions(items) {
+    const unique = [];
+    const seen = new Set();
+    for (const it of items || []) {
+      const value = String(it?.issueDescription || it?.reason || '').trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      unique.push(value);
+    }
+    if (!unique.length) return '—';
+    if (unique.length === 1) return unique[0];
+    return `${unique[0]} +${unique.length - 1}`;
   }
 
   function fmtMoney(value) {
@@ -567,16 +597,32 @@
 
     const approval = group.approval || "Not Started";
     const canAct = approvalKey(approval) === "not-started" && TAB === "not-started";
+    const modalItemsList = group.products || [];
+    const firstItem = modalItemsList[0] || {};
+    const isMaintenanceOrder = isMaintenanceOrderType(group.orderType || firstItem.orderType);
     if (modalEls.title) modalEls.title.textContent = approval;
-    if (modalEls.sub) modalEls.sub.textContent = approvalSubtitle(approval);
+    if (modalEls.sub) {
+      modalEls.sub.textContent = orderTypeSubtitle(
+        group.orderType || firstItem.orderType,
+        group.orderTypeColor || firstItem.orderTypeColor,
+        approvalSubtitle(approval),
+      );
+    }
 
     // Tracking progress (operations status) — always show in all tabs
-    const stage = computeStage(group.products || []);
+    const stage = computeStage(modalItemsList);
     setSVProgress(stage.idx);
 
-    if (modalEls.reason) modalEls.reason.textContent = String(group?.reason || group?.products?.[0]?.reason || '—').trim() || '—';
+    if (modalReasonLabel) modalReasonLabel.textContent = isMaintenanceOrder ? 'Issue Description' : 'Reason';
+    if (modalRows.components) modalRows.components.hidden = isMaintenanceOrder;
+    if (modalRows.totalPrice) modalRows.totalPrice.hidden = isMaintenanceOrder;
+    if (modalEls.reason) {
+      modalEls.reason.textContent = isMaintenanceOrder
+        ? summarizeIssueDescriptions(modalItemsList)
+        : (String(group?.reason || modalItemsList?.[0]?.reason || '—').trim() || '—');
+    }
     if (modalEls.date) modalEls.date.textContent = fmtCreated(group.latestCreated) || "—";
-    if (modalEls.components) modalEls.components.textContent = String((group.products || []).length);
+    if (modalEls.components) modalEls.components.textContent = String(modalItemsList.length);
     if (modalEls.totalPrice) modalEls.totalPrice.textContent = fmtMoney(group.totals?.estimateTotal ?? 0);
 
     if (modalEls.items) {
@@ -624,7 +670,7 @@
           const statusLabel = normalizeApproval(it.approval);
           const statusStyle = `--tag-bg:${pillVars.bg};--tag-fg:${pillVars.fg};--tag-border:${pillVars.bd};`;
 
-          const actionButtons = canAct ? `
+          const actionButtons = canAct && !isMaintenanceOrder ? `
             <div class="btn-group" style="justify-content:flex-end; margin-top:8px;">
               <button class="btn btn-warning btn-xs sv-edit" data-id="${escapeHTML(it.id)}" title="Edit qty">
                 <i data-feather="edit-2"></i> Edit
@@ -635,13 +681,17 @@
             </div>
           `.trim() : "";
 
+          const subLine = isMaintenanceOrder
+            ? escapeHTML(String(it.issueDescription || it.reason || 'Issue Description: —').trim() || 'Issue Description: —')
+            : `Unit: ${escapeHTML(fmtMoney(unit))} · Total: ${escapeHTML(fmtMoney(lineTotal))}`;
+
           return `
             <div class="co-item" data-id="${escapeHTML(it.id)}">
               <div class="co-item-left">
                 <div class="co-item-title">
                   <div class="co-item-name">${escapeHTML(it.productName || "Unknown Product")}</div>
                 </div>
-                <div class="co-item-sub">Unit: ${escapeHTML(fmtMoney(unit))} · Total: ${escapeHTML(fmtMoney(lineTotal))}</div>
+                <div class="co-item-sub">${subLine}</div>
               </div>
 
               <div class="co-item-right">

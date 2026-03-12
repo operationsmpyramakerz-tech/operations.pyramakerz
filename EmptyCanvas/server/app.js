@@ -4565,7 +4565,9 @@ app.post(
   requirePage("Create New Order"),
   (req, res) => {
     const { products } = req.body;
-    const orderType = String(req.body?.orderType || "").trim();
+    const requestedOrderType = String(req.body?.orderType || "").trim();
+    const orderType = _canonicalOrderTypeLabel(requestedOrderType) || requestedOrderType;
+    const isRequestMaintenance = _normKeyOrderType(orderType) === _normKeyOrderType("Request Maintenance");
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ error: "No products provided." });
     }
@@ -4579,7 +4581,7 @@ app.post(
         reason: String(p.reason || "").trim(),
         issueDescription: String(p.issueDescription || "").trim(),
         schoolId: String(p.schoolId || "").trim(),
-        expectedSparePartId: String(p.expectedSparePartId || "").trim(),
+        expectedSparePartId: "",
       }))
       .filter((p) => p.id && p.quantity > 0);
 
@@ -4587,6 +4589,18 @@ app.post(
       return res
         .status(400)
         .json({ error: "No valid products after sanitization." });
+    }
+
+    if (isRequestMaintenance) {
+      if (clean.length > 1) {
+        return res.status(400).json({ error: "Request Maintenance allows one machine only." });
+      }
+      if (clean.some((p) => !p.schoolId)) {
+        return res.status(400).json({ error: "Each machine must include a school." });
+      }
+      if (clean.some((p) => !p.issueDescription)) {
+        return res.status(400).json({ error: "Each machine must include an Issue Description." });
+      }
     }
 
     _setOrderDraftForType(req.session, orderType, { products: clean });
@@ -9321,7 +9335,7 @@ const cleanedProducts = products
     reason: String(p.reason || "").trim(),
     issueDescription: String(p.issueDescription || "").trim(),
     schoolId: String(p.schoolId || "").trim(),
-    expectedSparePartId: String(p.expectedSparePartId || "").trim(),
+    expectedSparePartId: "",
   }))
   .filter(p => p.id && (_isRequestMaintenance ? true : p.quantity > 0));
 
@@ -9331,6 +9345,12 @@ if (cleanedProducts.length === 0) {
 
 // Request Maintenance: Qty is not used; require Issue Description instead.
 if (_isRequestMaintenance) {
+  if (cleanedProducts.length > 1) {
+    return res.status(400).json({ success: false, message: "Request Maintenance allows one machine only." });
+  }
+  if (cleanedProducts.some(p => !p.schoolId)) {
+    return res.status(400).json({ success: false, message: "Each product must include a school." });
+  }
   if (cleanedProducts.some(p => !p.issueDescription)) {
     return res.status(400).json({ success: false, message: "Each product must include an Issue Description." });
   }
@@ -9340,6 +9360,7 @@ if (_isRequestMaintenance) {
   // - auto-fill Reason (page title) if missing
   for (const p of cleanedProducts) {
     p.quantity = 1;
+    p.expectedSparePartId = "";
     if (!p.reason) {
       const title = String(p.issueDescription || "").trim();
       p.reason = title ? title.slice(0, 80) : "Request Maintenance";
@@ -9376,10 +9397,8 @@ if (_isRequestMaintenance) {
       const schoolPropType = schoolPropName
         ? String(_dbPropsForMaintenance?.[schoolPropName]?.type || "relation")
         : null;
-      const expectedSparePropName = _isRequestMaintenance ? await detectExpectedSparePartsPropName() : null;
-      const expectedSparePropType = expectedSparePropName
-        ? String(_dbPropsForMaintenance?.[expectedSparePropName]?.type || "relation")
-        : null;
+      const expectedSparePropName = null;
+      const expectedSparePropType = null;
 
       const _issueDescPropValueFor = (desc) => {
         if (!issueDescPropName) return null;
@@ -12746,6 +12765,7 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
       const editedQtyProp = await detectSupervisorEditedQtyPropName();
       const approvalProp = await detectSVApprovalPropName();
       const teamsProp = await detectOrderTeamsMembersPropName();
+      const issueDescPropName = await detectIssueDescriptionPropName();
       const ordersProps = await getOrdersDBProps();
       const approvalType = ordersProps[approvalProp]?.type || "select";
 
@@ -12905,6 +12925,7 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
             orderIdPrefix: uid.prefix,
             orderIdNumber: uid.number,
             reason: props.Reason?.title?.[0]?.plain_text || "",
+            issueDescription: issueDescPropName ? (_extractPropText(props?.[issueDescPropName]) || "") : "",
             productPageId,
             unitPriceFromOrder,
             approval: approvalName,
@@ -12943,6 +12964,7 @@ app.get("/api/sv-orders", requireAuth, requirePage("Orders Review"), async (req,
           orderIdPrefix: row.orderIdPrefix,
           orderIdNumber: row.orderIdNumber,
           reason: row.reason,
+          issueDescription: row.issueDescription,
           productName: product?.name || "Unknown Product",
           productImage: product?.image || null,
           unitPrice,

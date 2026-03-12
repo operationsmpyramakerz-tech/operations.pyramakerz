@@ -190,6 +190,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return `<div class="co-thumb co-thumb--order-type" style="${style}" title="${escapeHTML(meta.label)}" aria-label="${escapeHTML(meta.label)}"><i data-feather="${meta.icon}"></i></div>`;
   }
 
+  function orderTypeSubtitle(type, notionColor, fallback = '—') {
+    const meta = orderTypeMeta(type, notionColor);
+    return meta.label && meta.label !== 'Order' ? meta.label : fallback;
+  }
+
   const moneyFmt = (() => {
     try {
       return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' });
@@ -341,7 +346,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Populate header
     if (modalEls.statusTitle) modalEls.statusTitle.textContent = stage.label;
-    if (modalEls.statusSub) modalEls.statusSub.textContent = stage.sub;
+    if (modalEls.statusSub) {
+      const first = items[0] || {};
+      modalEls.statusSub.textContent = orderTypeSubtitle(
+        group?.orderType || first.orderType,
+        group?.orderTypeColor || first.orderTypeColor,
+        stage.sub,
+      );
+    }
 
     // In Current Orders we show Qty based on:
     // - Quantity Requested (original request)
