@@ -14,7 +14,7 @@
 <script src="/pwa-register.js" defer></script>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Operations Orders</title>
+<title>Maintenance Orders</title>
 <!-- CRITICAL: Prevent sidebar links flash before CSS/permissions load -->
 <style>
   body.permissions-loading .sidebar li { display: none !important; }
@@ -23,7 +23,7 @@
 <link href="/css/ui-redesign.css" rel="stylesheet"/>
 <script src="https://unpkg.com/feather-icons"></script>
 </head>
-<body class="permissions-loading">
+<body class="permissions-loading" data-orders-view="maintenance">
 <script>
         (function() {
           try {
@@ -45,8 +45,8 @@
 <nav class="sidebar-nav">
 <ul class="nav-list">
 <li><a class="nav-link" href="/orders"><i data-feather="list"></i><span class="nav-label">Current Orders</span></a></li>
-        <li><a class="nav-link active" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
-        <li><a class="nav-link" href="/orders/maintenance-orders"><i data-feather="tool"></i><span class="nav-label">Maintenance Orders</span></a></li>
+        <li><a class="nav-link" href="/orders/requested"><i data-feather="users"></i><span class="nav-label">Operations Orders</span></a></li>
+        <li><a class="nav-link active" href="/orders/maintenance-orders"><i data-feather="tool"></i><span class="nav-label">Maintenance Orders</span></a></li>
         <li><a class="nav-link" href="/orders/new"><i data-feather="shopping-cart"></i><span class="nav-label">Create New Order</span></a></li>
         <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
         <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">Orders Review</span></a></li>
@@ -68,12 +68,12 @@
 </span>
 <div class="greet-text">
 <div class="greet-title">Hi, <span data-username="">...</span> 👋</div>
-<div class="greet-sub">Manage operations orders</div>
+<div class="greet-sub">Manage maintenance orders</div>
 </div>
 </div>
 <div class="searchbar" id="req-searchbar" role="search" style="margin-left:8px;">
 <i data-feather="search"></i>
-<input aria-label="Search requested orders" id="requestedSearch" placeholder="Search by reason or user..." type="search"/>
+<input aria-label="Search maintenance orders" id="requestedSearch" placeholder="Search by issue, machine, or user..." type="search"/>
 </div>
 </div>
 <div class="right topbar-right">
@@ -84,20 +84,16 @@
 </div>
 </div>
 <div class="header-row2">
-<h1 class="page-title">Operations Orders</h1>
+<h1 class="page-title">Maintenance Orders</h1>
 </div>
 </header>
 <main class="page-body">
   <!-- Tabs -->
-  <div id="reqTabs" class="portfolio-tabs" role="tablist" aria-label="Requested Orders">
-    <a class="tab-portfolio" data-tab="not-started" role="tab" aria-selected="true"
-       href="/orders/requested?tab=not-started">Not Started</a>
-    <a class="tab-portfolio" data-tab="remaining" role="tab" aria-selected="false"
-       href="/orders/requested?tab=remaining">Remaining</a>
-    <a class="tab-portfolio" data-tab="received" role="tab" aria-selected="false"
-       href="/orders/requested?tab=received">Received</a>
+  <div id="reqTabs" class="portfolio-tabs" role="tablist" aria-label="Maintenance Orders">
+    <a class="tab-portfolio" data-tab="received" role="tab" aria-selected="true"
+       href="/orders/maintenance-orders?tab=received">Requested Technical Visit</a>
     <a class="tab-portfolio" data-tab="delivered" role="tab" aria-selected="false"
-       href="/orders/requested?tab=delivered">Delivered</a>
+       href="/orders/maintenance-orders?tab=delivered">Delivered</a>
   </div>
 
   <!-- Orders list (Current Orders card style) -->
@@ -106,7 +102,7 @@
       <div class="modern-loading" role="status" aria-live="polite">
         <div class="modern-loading__spinner" aria-hidden="true"></div>
         <div class="modern-loading__text">
-          Loading requested orders
+          Loading maintenance orders
           <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span>
         </div>
       </div>
@@ -160,81 +156,13 @@
       </div>
 
       <div class="co-modal-actions ro-actions ro-actions--right" id="reqModalActions">
-        <!-- Download dropdown (single button like Current Orders) -->
-        <div class="download-menu" id="reqDownloadMenuWrap">
-          <button type="button" class="ro-action-btn ro-action-btn--light download-menu__btn" id="reqDownloadMenuBtn" aria-haspopup="menu" aria-expanded="false">
-            <i data-feather="download"></i>
-            <span>Download</span>
-            <i data-feather="chevron-down"></i>
-          </button>
-
-          <div class="download-menu__panel" id="reqDownloadMenuPanel" role="menu" aria-label="Download options" hidden>
-            <button class="download-menu__item" id="reqDownloadPdfBtn" role="menuitem" type="button">
-              <span>Download PDF</span>
-              <i data-feather="file-text"></i>
-            </button>
-            <div class="download-menu__sep" role="separator"></div>
-            <button class="download-menu__item" id="reqDownloadExcelBtn" role="menuitem" type="button">
-              <span>Download Excel</span>
-              <i data-feather="grid"></i>
-            </button>
-          </div>
-        </div>
-
-        <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqReceivedBtn">
-          <i data-feather="truck"></i>
-          Received by operations
-        </button>
-
         <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqReceivedShippedBtn" style="display:none;">
           <i data-feather="check-circle"></i>
           Mark as Delivered
         </button>
-
-        <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqCreateWithdrawalBtn" style="display:none;">
-          <i data-feather="repeat"></i>
-          Create Withdrawal
-        </button>
       </div>
 
       <div class="co-modal-items" id="reqModalItems"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ===================== RECEIPT NUMBER (SUB-MODAL) ===================== -->
-<div id="reqReceiptModal" class="co-submodal-overlay" aria-hidden="true" hidden>
-  <div class="co-submodal-dialog" role="dialog" aria-modal="true" aria-labelledby="reqReceiptTitle" aria-describedby="reqReceiptSub">
-    <button type="button" class="co-submodal-close" id="reqReceiptClose" aria-label="Close">
-      <i data-feather="x"></i>
-    </button>
-
-    <div class="co-submodal-header">
-      <div class="co-submodal-title" id="reqReceiptTitle">Store Receipt Number</div>
-      <div class="co-submodal-sub" id="reqReceiptSub">Enter the store receipt number to confirm "Received by operations".</div>
-    </div>
-
-    <div class="co-submodal-body">
-      <label class="co-submodal-label" for="reqReceiptInput">Store Receipt Number</label>
-      <div class="co-submodal-inputs" id="reqReceiptInputs">
-        <input
-          class="co-submodal-input req-receipt-input"
-          id="reqReceiptInput"
-          type="text"
-          inputmode="numeric"
-          pattern="[0-9]*"
-          autocomplete="off"
-          placeholder="e.g. 12345"
-          aria-label="Store Receipt Number"
-        />
-      </div>
-      <button type="button" class="ro-action-btn ro-action-btn--light co-submodal-add" id="reqAddReceiptBtn">Add Other Receipt</button>
-      <div class="co-submodal-error" id="reqReceiptError" role="alert" aria-live="polite"></div>
-    </div>
-
-    <div class="co-submodal-actions">
-      <button type="button" class="ro-action-btn ro-action-btn--light" id="reqReceiptCancel">Cancel</button>
-      <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqReceiptConfirm">Confirm</button>
     </div>
   </div>
 </div>
