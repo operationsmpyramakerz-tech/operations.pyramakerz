@@ -5,6 +5,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const searchInput = document.getElementById("requestedSearch");
   const listDiv = document.getElementById("requested-list");
   const tabsWrap = document.getElementById("reqTabs");
+  const pageMode = String(
+    document.body?.dataset?.ordersView ||
+    (window.location.pathname === "/orders/maintenance-orders" ? "maintenance" : "requested"),
+  )
+    .trim()
+    .toLowerCase();
+  const isMaintenancePage = pageMode === "maintenance";
 
   // Modal
   const orderModal = document.getElementById("reqOrderModal");
@@ -17,6 +24,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const modalDate = document.getElementById("reqModalDate");
   const modalComponents = document.getElementById("reqModalComponents");
   const modalTotalPrice = document.getElementById("reqModalTotalPrice");
+  const modalReasonRow = modalReason?.closest?.(".co-meta-row") || null;
+  const modalDateRow = modalDate?.closest?.(".co-meta-row") || null;
+  const modalComponentsRow = modalComponents?.closest?.(".co-meta-row") || null;
+  const modalTotalPriceRow = modalTotalPrice?.closest?.(".co-meta-row") || null;
+  const modalReasonLabel = modalReasonRow?.querySelector?.("span") || null;
 
   // Extra header rows (shown in "Received" tab)
   const receiptRow = document.getElementById("reqReceiptRow");
@@ -330,6 +342,24 @@ document.addEventListener("DOMContentLoaded", () => {
     return String(type || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   }
 
+  function isMaintenanceOrderType(type) {
+    return orderTypeKey(type) === "requestmaintenance";
+  }
+
+  function summarizeMaintenanceReasons(items) {
+    const unique = [];
+    const seen = new Set();
+    for (const it of items || []) {
+      const value = String(it?.issueDescription || it?.reason || "").trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      unique.push(value);
+    }
+    if (!unique.length) return "—";
+    if (unique.length === 1) return unique[0];
+    return `${unique[0]} +${unique.length - 1}`;
+  }
+
   function toDate(v) {
     if (!v) return null;
     try {
@@ -419,8 +449,11 @@ document.addEventListener("DOMContentLoaded", () => {
   function readTabFromUrl() {
     const url = new URL(window.location.href);
     const tab = norm(url.searchParams.get("tab"));
-    const allowed = new Set(["not-started", "remaining", "received", "delivered"]);
-    return allowed.has(tab) ? tab : "not-started";
+    const allowed = isMaintenancePage
+      ? new Set(["received", "delivered"])
+      : new Set(["not-started", "remaining", "received", "delivered"]);
+    if (allowed.has(tab)) return tab;
+    return isMaintenancePage ? "received" : "not-started";
   }
 
   // Stage alone is not enough because we split "Shipped" into:
@@ -731,6 +764,17 @@ document.addEventListener("DOMContentLoaded", () => {
     return (groups || [])
       .filter((g) => {
         const idx = g?.stage?.idx || 1;
+        const first = (g.items || [])[0] || {};
+        const isMaintenanceOrder = isMaintenanceOrderType(g.orderType || first.orderType);
+
+        if (isMaintenancePage) {
+          if (!isMaintenanceOrder) return false;
+          if (currentTab === "received") return idx === 4;
+          if (currentTab === "delivered") return idx >= 5;
+          return false;
+        }
+
+        if (isMaintenanceOrder && idx >= 4) return false;
         if (currentTab === "not-started") return idx < 4;
         if (currentTab === "remaining") return idx === 4 && !!g?.hasRemaining;
         if (currentTab === "received") return idx === 4 && !!g?.hasReceived;
@@ -856,6 +900,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const all = (g.items || []).slice().sort(compareItemsByProductName);
     const stage = g.stage || computeStage(all);
+    const isMaintenanceOrder = isMaintenanceOrderType(g.orderType || all[0]?.orderType);
 
     const isRemainingTab = currentTab === "remaining";
     const isReceivedTab = currentTab === "received";
@@ -867,7 +912,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const items = isRemainingTab
       ? all.filter((it) => hasRemainingQty(it) || it.justUpdated)
       : isReceivedTab
-        ? all.filter((it) => hasReceivedNumber(it))
+        ? (isMaintenanceOrder ? all : all.filter((it) => hasReceivedNumber(it)))
         : all;
 
     // Header
@@ -883,9 +928,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // Tracker
     setActiveStep(stage.idx || 1);
 
-    // Meta (match Current Orders)
-    if (modalReason) modalReason.textContent = String(g.reason || "—").trim() || "—";
+    // Meta (match Current Orders / Orders Review for Maintenance)
+    if (modalReasonLabel) modalReasonLabel.textContent = isMaintenanceOrder ? "Issue Description" : "Reason";
+    if (modalReason) {
+      modalReason.textContent = isMaintenanceOrder
+        ? summarizeMaintenanceReasons(items)
+        : (String(g.reason || "—").trim() || "—");
+    }
     if (modalDate) modalDate.textContent = fmtDateTime(g.latestCreated) || "—";
+    if (modalComponentsRow) modalComponentsRow.hidden = !!isMaintenanceOrder;
+    if (modalTotalPriceRow) modalTotalPriceRow.hidden = !!isMaintenanceOrder;
     if (modalComponents) {
       const c = isRemainingTab
         ? (Number(g.remainingItemsCount) || items.length)
@@ -905,7 +957,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Extra fields: show for "Received" and later only
     // NOTE: User request: in "Not Started" tab hide Receipt/Received-by even if present.
-    const shouldShowExtras = currentTab !== "not-started" && (stage?.idx || 1) >= 4;
+    const shouldShowExtras = !isMaintenanceOrder && currentTab !== "not-started" && (stage?.idx || 1) >= 4;
     const receiptVal = g && (g.receiptNumber !== null && g.receiptNumber !== undefined) ? g.receiptNumber : null;
     const receivedByVal = String(g.operationsByName || "").trim();
 
@@ -919,19 +971,25 @@ document.addEventListener("DOMContentLoaded", () => {
     // - Not Started: show "Received by operations" only before shipping
     // - Remaining: show it again so operations can add another receipt number
     if (shippedBtn) {
-      shippedBtn.style.display =
-        (currentTab === "not-started" && stage.idx < 4) || currentTab === "remaining"
-          ? "inline-flex"
-          : "none";
+      const showShippedBtn = !isMaintenancePage && (
+        isMaintenanceOrder
+          ? currentTab === "not-started" && stage.idx < 4
+          : ((currentTab === "not-started" && stage.idx < 4) || currentTab === "remaining")
+      );
+      shippedBtn.style.display = showShippedBtn ? "inline-flex" : "none";
+      shippedBtn.dataset.mode = isMaintenanceOrder ? "maintenance" : "requested";
+      shippedBtn.innerHTML = isMaintenanceOrder
+        ? '<i data-feather="tool"></i> Request Technical Visit'
+        : '<i data-feather="truck"></i> Received by operations';
     }
-    // "Mark as Delivered" button (Requested change):
+    // "Mark as Delivered" button:
     // Show it in the "Received" tab when the order is in Shipped stage.
-    // (We intentionally do NOT block it when there are remaining items — user requested it in Received tab.)
     if (arrivedBtn) {
       arrivedBtn.style.display = currentTab === "received" && stage.idx === 4 ? "inline-flex" : "none";
     }
     if (createWithdrawalBtn) {
       const canCreateWithdrawal =
+        !isMaintenanceOrder &&
         currentTab === "delivered" &&
         (stage?.idx || 1) >= 5 &&
         orderTypeKey(g.orderType || all[0]?.orderType) === "requestproducts";
@@ -943,7 +1001,7 @@ document.addEventListener("DOMContentLoaded", () => {
       modalItems.innerHTML = "";
       const frag = document.createDocumentFragment();
 
-      const canEditQty = currentTab === "not-started" || currentTab === "remaining";
+      const canEditQty = !isMaintenanceOrder && (currentTab === "not-started" || currentTab === "remaining");
 
       if (isRemainingTab && items.length === 0) {
         const empty = document.createElement("div");
@@ -1005,7 +1063,7 @@ document.addEventListener("DOMContentLoaded", () => {
             : `<strong data-role="qty-val">${escapeHTML(fmtQty(qtyEffective))}</strong>`;
 
         const href = safeHttpUrl(it.productUrl);
-        const linkHTML = href
+        const linkHTML = !isMaintenanceOrder && href
           ? `<a class="co-item-link" href="${escapeHTML(href)}" target="_blank" rel="noopener" title="Open link">
                <i data-feather="external-link"></i>
              </a>`
@@ -1020,6 +1078,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const itemStatusLabel = String(it.status || stage.label || '—').trim() || '—';
         const itemStatusVars = notionColorVars(it.statusColor || stage.color);
         const itemStatusStyle = `--tag-bg:${itemStatusVars.bg};--tag-fg:${itemStatusVars.fg};--tag-border:${itemStatusVars.bd};`;
+        const subLine = isMaintenanceOrder ? '' : `Unit: ${fmtMoney(unit)} · Total: ${fmtMoney(total)}`;
+        const rightRowHtml = isMaintenanceOrder
+          ? ''
+          : `
+            <div class="co-item-right-row">
+              <div class="co-item-status" style="${itemStatusStyle}">${escapeHTML(itemStatusLabel)}</div>
+              ${editBtnHTML}
+            </div>
+          `;
 
         const row = document.createElement("div");
         row.className = "co-item";
@@ -1029,14 +1096,11 @@ document.addEventListener("DOMContentLoaded", () => {
               <div class="co-item-name">${product}</div>
               ${linkHTML}
             </div>
-            <div class="co-item-sub">Unit: ${fmtMoney(unit)} · Total: ${fmtMoney(total)}</div>
+            ${subLine ? `<div class="co-item-sub">${subLine}</div>` : ''}
           </div>
           <div class="co-item-right">
             <div class="co-item-total">${isRemainingTab ? "Qty remaining:" : "Qty:"} ${qtyHTML}</div>
-            <div class="co-item-right-row">
-              <div class="co-item-status" style="${itemStatusStyle}">${escapeHTML(itemStatusLabel)}</div>
-              ${editBtnHTML}
-            </div>
+            ${rightRowHtml}
           </div>
         `;
         frag.appendChild(row);
@@ -1476,6 +1540,8 @@ async function postJson(url, body) {
 async function markReceivedByOperations(g, receiptNumber) {
     if (!g || !g.orderIds?.length) return;
 
+    const isMaintenanceOrder = isMaintenanceOrderType(g.orderType || g.items?.[0]?.orderType);
+
     // Receipt number can be text now (Notion column is rich_text) so we keep it as string.
     // If missing, we still allow the action.
     const rnList = normalizeReceiptNumbers(receiptNumber);
@@ -1485,7 +1551,7 @@ async function markReceivedByOperations(g, receiptNumber) {
     if (shippedBtn) {
       shippedBtn.disabled = true;
       shippedBtn.dataset.prevHtml = shippedBtn.innerHTML;
-      shippedBtn.textContent = "Receiving...";
+      shippedBtn.textContent = isMaintenanceOrder ? "Requesting..." : "Receiving...";
     }
 
     try {
@@ -1605,25 +1671,31 @@ async function markReceivedByOperations(g, receiptNumber) {
       groups = buildGroups(allItems);
       render();
 
-      // Keep modal open and refreshed
+      // Keep modal open and refreshed, except maintenance orders that move to Maintenance Orders page.
       const updated = groups.find((x) => x.groupId === g.groupId);
-      if (updated && orderModal?.classList.contains("is-open")) {
+      if (isMaintenanceOrder && !isMaintenancePage) {
+        closeOrderModal();
+      } else if (updated && orderModal?.classList.contains("is-open")) {
         openOrderModal(updated);
       }
 
-      toast("success", "Received", "Marked as received by operations.");
+      toast(
+        "success",
+        isMaintenanceOrder ? "Requested" : "Received",
+        isMaintenanceOrder ? "Technical visit requested." : "Marked as received by operations.",
+      );
 
       // Close receipt prompt (if opened)
       closeReceiptModal({ restoreFocus: false });
     } catch (e) {
       console.error(e);
-      alert(e.message || "Failed to mark as received.");
+      alert(e.message || (isMaintenanceOrder ? "Failed to request technical visit." : "Failed to mark as received."));
     } finally {
       if (shippedBtn) {
         shippedBtn.disabled = false;
         const prev = shippedBtn.dataset.prevHtml;
         if (prev) shippedBtn.innerHTML = prev;
-        else shippedBtn.textContent = "Received by operations";
+        else shippedBtn.textContent = isMaintenanceOrder ? "Request Technical Visit" : "Received by operations";
       }
     }
   }
@@ -1863,10 +1935,16 @@ async function markReceivedByOperations(g, receiptNumber) {
     downloadPdf(activeGroup);
   });
 
-  // "Received by operations" now asks for a receipt number first
+  // Request Products / Withdraw Products use the receipt modal.
+  // Request Maintenance skips the receipt modal and moves directly to Shipped.
   shippedBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     closeDownloadMenu();
+    const isMaintenanceOrder = isMaintenanceOrderType(activeGroup?.orderType || activeGroup?.items?.[0]?.orderType);
+    if (isMaintenanceOrder) {
+      markReceivedByOperations(activeGroup, null);
+      return;
+    }
     openReceiptModal();
   });
   arrivedBtn?.addEventListener("click", () => markArrived(activeGroup));

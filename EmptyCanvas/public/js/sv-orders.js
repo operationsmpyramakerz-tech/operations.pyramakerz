@@ -666,10 +666,6 @@
             ? `<span class="sv-qty-diff"><span class="sv-qty-old">${escapeHTML(fmtQty(qtyReq))}</span><strong class="sv-qty-new" data-role="qty-val">${escapeHTML(fmtQty(qtyEdited))}</strong></span>`
             : `<strong data-role="qty-val">${escapeHTML(fmtQty(qtyReq))}</strong>`;
 
-          const pillVars = notionColorVars(it.approvalColor);
-          const statusLabel = normalizeApproval(it.approval);
-          const statusStyle = `--tag-bg:${pillVars.bg};--tag-fg:${pillVars.fg};--tag-border:${pillVars.bd};`;
-
           const actionButtons = canAct && !isMaintenanceOrder ? `
             <div class="btn-group" style="justify-content:flex-end; margin-top:8px;">
               <button class="btn btn-warning btn-xs sv-edit" data-id="${escapeHTML(it.id)}" title="Edit qty">
@@ -682,7 +678,7 @@
           `.trim() : "";
 
           const subLine = isMaintenanceOrder
-            ? escapeHTML(String(it.issueDescription || it.reason || 'Issue Description: —').trim() || 'Issue Description: —')
+            ? ""
             : `Unit: ${escapeHTML(fmtMoney(unit))} · Total: ${escapeHTML(fmtMoney(lineTotal))}`;
 
           return `
@@ -691,12 +687,11 @@
                 <div class="co-item-title">
                   <div class="co-item-name">${escapeHTML(it.productName || "Unknown Product")}</div>
                 </div>
-                <div class="co-item-sub">${subLine}</div>
+                ${subLine ? `<div class="co-item-sub">${subLine}</div>` : ""}
               </div>
 
               <div class="co-item-right">
                 <div class="co-item-total">Qty: ${qtyHTML}</div>
-                <div class="co-item-status" style="${statusStyle}">${escapeHTML(statusLabel)}</div>
                 ${actionButtons}
               </div>
             </div>

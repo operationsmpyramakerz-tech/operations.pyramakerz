@@ -161,6 +161,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hasAllowedPage(allowedPages, ['Requested Orders', 'Schools Requested Orders', '/orders/requested'])) {
       urls.push('/api/orders/requested');
     }
+    if (hasAllowedPage(allowedPages, ['Maintenance Orders', '/orders/maintenance-orders'])) {
+      urls.push('/api/orders/requested');
+    }
     if (hasAllowedPage(allowedPages, ['Assigned Schools Requested Orders', 'Assigned Orders', 'Storage', '/orders/assigned'])) {
       urls.push('/api/orders/assigned');
     }
@@ -777,6 +780,7 @@ if (document.querySelector('.sidebar')) {
 
     'requested orders': 'a[href="/orders/requested"]',
     'schools requested orders': 'a[href="/orders/requested"]',
+    'maintenance orders': 'a[href="/orders/maintenance-orders"]',
 
     'assigned schools requested orders': 'a[href="/orders/assigned"]',
     'storage': 'a[href="/orders/assigned"]',
@@ -1192,6 +1196,7 @@ if (document.querySelector('.sidebar')) {
     // Home should appear for everyone (not tied to permissions)
   ensureLink({ href: '/home', label: 'Home', icon: 'home', prepend: true });
 ensureLink({ href: '/orders/sv-orders', label: 'Orders Review', icon: 'award' });
+  ensureLink({ href: '/orders/maintenance-orders', label: 'Maintenance Orders', icon: 'tool' });
   ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
   ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
   ensureLink({ href: '/tasks', label: 'Tasks', icon: 'check-square' });
