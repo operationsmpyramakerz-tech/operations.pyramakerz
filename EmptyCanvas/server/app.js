@@ -487,6 +487,7 @@ function extractProfilePhotoUrlFromProps(props) {
 const ALL_PAGES = [
   "Current Orders",
   "Requested Orders",
+  "Maintenance Orders",
   "Assigned Schools Requested Orders",
   "Create New Order",
   "Stocktaking",
@@ -511,6 +512,12 @@ function normalizePages(names = []) {
   if (set.has("current orders")) out.push("Current Orders");
   if (set.has("requested orders") || set.has("schools requested orders")) {
     out.push("Requested Orders");
+  }
+  if (
+    set.has("maintenance orders") ||
+    set.has("maintenance order")
+  ) {
+    out.push("Maintenance Orders");
   }
   if (
     set.has("assigned schools requested orders") ||
@@ -558,6 +565,9 @@ function expandAllowedForUI(list = []) {
   if (set.has("Requested Orders") || set.has("Schools Requested Orders")) {
     set.add("Requested Orders");
     set.add("Schools Requested Orders");
+  }
+  if (set.has("Maintenance Orders")) {
+    set.add("Maintenance Orders");
   }
   if (set.has("Assigned Schools Requested Orders")) {
     set.add("Assigned Schools Requested Orders");
@@ -615,6 +625,7 @@ function firstAllowedPath(allowed = []) {
   // Prefer a deterministic order for the best UX
   if (list.includes("Current Orders")) return "/orders";
   if (list.includes("Requested Orders")) return "/orders/requested";
+  if (list.includes("Maintenance Orders")) return "/orders/maintenance-orders";
   if (list.includes("Assigned Schools Requested Orders")) return "/orders/assigned";
   if (list.includes("Orders Review")) return "/orders/sv-orders";
   if (list.includes("Create New Order")) return "/orders/new";
@@ -1178,16 +1189,23 @@ function requireAuth(req, res, next) {
 }
 
 // Page-Access middleware
-function requirePage(pageName) {
+function requirePage(pageNameOrNames) {
   return (req, res, next) => {
     const allowed = req.session?.allowedPages || ALL_PAGES;
+    const requiredPages = Array.isArray(pageNameOrNames)
+      ? pageNameOrNames.filter(Boolean)
+      : [pageNameOrNames].filter(Boolean);
+
     // Temporary admin unlock (used for editing orders from Current Orders)
     // Allows opening "Create New Order" page and its APIs for a short time.
     const adminUnlockUntil = Number(req.session?.adminCreateOrderUnlockUntil || 0);
     const adminUnlocked =
-      pageName === "Create New Order" && adminUnlockUntil && Date.now() < adminUnlockUntil;
+      requiredPages.includes("Create New Order") &&
+      adminUnlockUntil &&
+      Date.now() < adminUnlockUntil;
 
-    if (allowed.includes(pageName) || adminUnlocked) return next();
+    const isAllowed = requiredPages.some((pageName) => allowed.includes(pageName));
+    if (isAllowed || adminUnlocked) return next();
     return res.redirect(firstAllowedPath(allowed));
   };
 }
@@ -1230,6 +1248,15 @@ app.get(
   requirePage("Requested Orders"),
   (req, res) => {
     res.sendFile(path.join(__dirname, "..", "public", "requested-orders.html"));
+  },
+);
+
+app.get(
+  "/orders/maintenance-orders",
+  requireAuth,
+  requirePage("Maintenance Orders"),
+  (req, res) => {
+    res.sendFile(path.join(__dirname, "..", "public", "maintenance-orders.html"));
   },
 );
 
@@ -5199,7 +5226,7 @@ app.get(
 app.get(
   "/api/orders/requested",
   requireAuth,
-  requirePage("Requested Orders"),
+  requirePage(["Requested Orders", "Maintenance Orders"]),
   async (req, res) => {
     if (!ordersDatabaseId)
       return res.status(500).json({ error: "Orders DB not configured" });
@@ -6157,7 +6184,7 @@ app.post(
 app.post(
   "/api/orders/requested/mark-arrived",
   requireAuth,
-  requirePage("Requested Orders"),
+  requirePage(["Requested Orders", "Maintenance Orders"]),
   async (req, res) => {
     try {
       const { orderIds } = req.body || {};
