@@ -81,17 +81,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ===== Render =====
-  function accRow(meta) {
+  function profileFieldCard(meta) {
+    const isPassword = meta.key === 'password';
     return `
-      <div class="acc-row" data-field="${escapeHTML(meta.key)}">
-        <div class="acc-left">
-          <span class="acc-ico"><i data-feather="${escapeHTML(meta.icon)}"></i></span>
-          <span class="acc-label">${escapeHTML(meta.label)}</span>
-        </div>
-
-        <div class="acc-right">
-          <span class="acc-value">${escapeHTML(displayValue(meta.key))}</span>
-          <button class="acc-action acc-edit" type="button" aria-label="Edit ${escapeHTML(meta.label)}" title="Edit">
+      <div class="profile-field-card" data-field="${escapeHTML(meta.key)}">
+        <div class="profile-field-label">${escapeHTML(meta.label)}</div>
+        <div class="profile-field-box ${isPassword ? 'profile-field-box--password' : ''}">
+          <span class="profile-field-value">${escapeHTML(displayValue(meta.key))}</span>
+          <button class="profile-field-edit acc-edit" type="button" aria-label="Edit ${escapeHTML(meta.label)}" title="Edit ${escapeHTML(meta.label)}">
             <i data-feather="edit-2"></i>
           </button>
         </div>
@@ -99,27 +96,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     `;
   }
 
-  function profilePictureRow() {
+  function profileAvatarSection() {
     const photoUrl = String(state?.photoUrl || '').trim();
     const displayName = String(state?.name || 'User').trim() || 'User';
     const preview = photoUrl
-      ? `<img class="acc-media-img" src="${escapeHTML(photoUrl)}" width="56" height="56" decoding="async" alt="${escapeHTML(displayName)} profile picture" />`
-      : `<span class="acc-media-fallback" aria-hidden="true">${escapeHTML(initialsFromName(displayName))}</span>`;
+      ? `<img class="profile-avatar-image" src="${escapeHTML(photoUrl)}" width="132" height="132" decoding="async" alt="${escapeHTML(displayName)} profile picture" />`
+      : `<span class="profile-avatar-fallback" aria-hidden="true">${escapeHTML(initialsFromName(displayName))}</span>`;
 
     return `
-      <div class="acc-row acc-row--media" data-field="profilePicture">
-        <div class="acc-left">
-          <span class="acc-ico"><i data-feather="image"></i></span>
-          <span class="acc-label">Profile picture</span>
-        </div>
-
-        <div class="acc-right acc-right--media">
-          <div class="acc-media-preview">${preview}</div>
-          <div class="acc-media-copy">
-            <span class="acc-value acc-value--media">${photoUrl ? 'Image uploaded' : 'No image uploaded'}</span>
-            <span class="acc-subvalue">Images only</span>
-          </div>
-          <button class="acc-upload-btn" type="button" aria-label="Upload profile picture">Upload image</button>
+      <div class="profile-avatar-section" data-field="profilePicture">
+        <div class="profile-avatar-shell">
+          <div class="profile-avatar-display">${preview}</div>
+          <button class="profile-avatar-edit" type="button" aria-label="Edit profile picture" title="Edit profile picture">
+            <i data-feather="camera"></i>
+          </button>
           <input class="acc-file-input" type="file" accept="image/*" hidden />
         </div>
       </div>
@@ -128,10 +118,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function render() {
     container.innerHTML = `
-      <div class="account-panel">
-        <div class="account-grid">
-          ${profilePictureRow()}
-          ${FIELD_META.map(accRow).join('')}
+      <div class="account-panel account-panel--profile">
+        ${profileAvatarSection()}
+        <div class="profile-fields-list">
+          ${FIELD_META.map(profileFieldCard).join('')}
         </div>
       </div>
     `;
@@ -174,10 +164,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const selected = file || null;
     if (!selected) return false;
 
-    const originalLabel = buttonEl ? buttonEl.textContent : '';
     if (buttonEl) {
       buttonEl.disabled = true;
-      buttonEl.textContent = 'Uploading...';
+      buttonEl.classList.add('is-uploading');
+      buttonEl.setAttribute('aria-busy', 'true');
+      buttonEl.setAttribute('title', 'Uploading...');
     }
 
     try {
@@ -210,7 +201,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (inputEl) inputEl.value = '';
       if (buttonEl) {
         buttonEl.disabled = false;
-        buttonEl.textContent = originalLabel || 'Upload image';
+        buttonEl.classList.remove('is-uploading');
+        buttonEl.removeAttribute('aria-busy');
+        buttonEl.setAttribute('title', 'Edit profile picture');
       }
       pendingProfilePicture = null;
       if (window.feather) feather.replace();
@@ -544,12 +537,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         state[field] = newVal;
       }
 
-      // Update UI row
-      const row = container.querySelector(`.acc-row[data-field="${field}"]`);
-      if (row) {
-        const valEl = row.querySelector('.acc-value');
-        if (valEl) valEl.textContent = displayValue(field);
-      }
+      render();
 
       // Keep greeting / sidebar profile in sync
       if (field === 'name') {
@@ -610,10 +598,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Event delegation for edit button
   container.addEventListener('click', (e) => {
-    const uploadBtn = e.target.closest('.acc-upload-btn');
-    if (uploadBtn) {
-      const row = uploadBtn.closest('.acc-row--media');
-      const fileInput = row?.querySelector('.acc-file-input');
+    const avatarEditBtn = e.target.closest('.profile-avatar-edit, .profile-avatar-display');
+    if (avatarEditBtn) {
+      const avatarSection = avatarEditBtn.closest('.profile-avatar-section');
+      const fileInput = avatarSection?.querySelector('.acc-file-input');
       fileInput?.click?.();
       return;
     }
@@ -621,7 +609,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const editBtn = e.target.closest('.acc-edit');
     if (!editBtn) return;
 
-    const row = editBtn.closest('.acc-row');
+    const row = editBtn.closest('.profile-field-card');
     if (!row) return;
 
     const field = row.dataset.field;
@@ -632,8 +620,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const input = e.target.closest('.acc-file-input');
     if (!input) return;
     const file = input.files && input.files[0] ? input.files[0] : null;
-    const row = input.closest('.acc-row--media');
-    const buttonEl = row?.querySelector('.acc-upload-btn') || null;
+    const avatarSection = input.closest('.profile-avatar-section');
+    const buttonEl = avatarSection?.querySelector('.profile-avatar-edit') || null;
 
     if (!validateProfilePictureFile(file, input)) return;
 
