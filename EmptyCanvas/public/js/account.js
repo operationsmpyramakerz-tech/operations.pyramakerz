@@ -36,6 +36,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     return s ? s : '—';
   }
 
+  function initialsFromName(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return 'U';
+    const first = parts[0]?.[0] || '';
+    const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] || '') : '';
+    return (String(first) + String(last)).toUpperCase() || 'U';
+  }
+
   function escapeHTML(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -79,16 +87,111 @@ document.addEventListener('DOMContentLoaded', async () => {
     `;
   }
 
+  function profilePictureRow() {
+    const photoUrl = String(state?.photoUrl || '').trim();
+    const displayName = String(state?.name || 'User').trim() || 'User';
+    const preview = photoUrl
+      ? `<img class="acc-media-img" src="${escapeHTML(photoUrl)}" alt="${escapeHTML(displayName)} profile picture" />`
+      : `<span class="acc-media-fallback" aria-hidden="true">${escapeHTML(initialsFromName(displayName))}</span>`;
+
+    return `
+      <div class="acc-row acc-row--media" data-field="profilePicture">
+        <div class="acc-left">
+          <span class="acc-ico"><i data-feather="image"></i></span>
+          <span class="acc-label">Profile picture</span>
+        </div>
+
+        <div class="acc-right acc-right--media">
+          <span class="acc-media-preview">${preview}</span>
+          <div class="acc-media-copy">
+            <span class="acc-value acc-value--media">${photoUrl ? 'Image uploaded' : 'No image uploaded'}</span>
+            <span class="acc-subvalue">Images only</span>
+          </div>
+          <button class="acc-upload-btn" type="button" aria-label="Upload profile picture">Upload image</button>
+          <input class="acc-file-input" type="file" accept="image/*" hidden />
+        </div>
+      </div>
+    `;
+  }
+
   function render() {
     container.innerHTML = `
       <div class="account-panel">
         <div class="account-grid">
+          ${profilePictureRow()}
           ${FIELD_META.map(accRow).join('')}
         </div>
       </div>
     `;
 
     if (window.feather) feather.replace();
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Failed to read image file.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleProfilePictureUpload(file, inputEl, buttonEl) {
+    const selected = file || null;
+    if (!selected) return;
+
+    const mime = String(selected.type || '').toLowerCase();
+    const isImage = mime.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(String(selected.name || ''));
+
+    if (!isImage) {
+      toast('warning', 'Invalid file', 'Only image files are allowed for Profile picture.');
+      if (inputEl) inputEl.value = '';
+      return;
+    }
+
+    if (selected.size > 10 * 1024 * 1024) {
+      toast('warning', 'Image too large', 'Please choose an image up to 10MB.');
+      if (inputEl) inputEl.value = '';
+      return;
+    }
+
+    const originalLabel = buttonEl ? buttonEl.textContent : '';
+    if (buttonEl) {
+      buttonEl.disabled = true;
+      buttonEl.textContent = 'Uploading...';
+    }
+
+    try {
+      const dataUrl = await fileToDataUrl(selected);
+      const res = await fetch('/api/account/profile-picture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          filename: selected.name || 'profile-picture.png',
+          dataUrl,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error || `Request failed (${res.status})`);
+      }
+
+      state.photoUrl = String(json.photoUrl || '').trim();
+      render();
+      try { window.dispatchEvent(new Event('user:updated')); } catch {}
+      toast('success', 'Saved', 'Profile picture updated successfully.');
+    } catch (e) {
+      toast('error', 'Upload failed', e.message || 'Failed to update profile picture.');
+    } finally {
+      if (inputEl) inputEl.value = '';
+      if (buttonEl) {
+        buttonEl.disabled = false;
+        buttonEl.textContent = originalLabel || 'Upload image';
+      }
+      if (window.feather) feather.replace();
+    }
   }
 
   // ===== Modal (markup lives in account.html) =====
@@ -420,6 +523,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         employeeCode: (typeof data.employeeCode === 'number' || typeof data.employeeCode === 'string')
           ? String(data.employeeCode ?? '').trim()
           : '',
+        photoUrl: data.photoUrl || '',
         passwordSet: !!data.passwordSet,
       };
 
@@ -437,6 +541,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Event delegation for edit button
   container.addEventListener('click', (e) => {
+    const uploadBtn = e.target.closest('.acc-upload-btn');
+    if (uploadBtn) {
+      const row = uploadBtn.closest('.acc-row--media');
+      const fileInput = row?.querySelector('.acc-file-input');
+      fileInput?.click?.();
+      return;
+    }
+
     const editBtn = e.target.closest('.acc-edit');
     if (!editBtn) return;
 
@@ -445,6 +557,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const field = row.dataset.field;
     openModalForField(field);
+  });
+
+  container.addEventListener('change', async (e) => {
+    const input = e.target.closest('.acc-file-input');
+    if (!input) return;
+    const file = input.files && input.files[0] ? input.files[0] : null;
+    const row = input.closest('.acc-row--media');
+    const buttonEl = row?.querySelector('.acc-upload-btn') || null;
+    await handleProfilePictureUpload(file, input, buttonEl);
   });
 
   // Init

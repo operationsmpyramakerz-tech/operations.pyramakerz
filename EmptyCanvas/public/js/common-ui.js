@@ -2005,6 +2005,11 @@ function initUserMenuWidget() {
           <span class="umi-label">How it works</span>
         </button>
 
+        <button type="button" class="user-menu-item user-menu-item--refresh" data-user-menu-action="hard-refresh">
+          <span class="umi-ico"><i data-feather="rotate-cw"></i></span>
+          <span class="umi-label">Hard Refresh</span>
+        </button>
+
         <div class="user-menu-sep" role="separator"></div>
 
         <button type="button" class="user-menu-item user-menu-item--danger" data-user-menu-action="logout">
@@ -2160,6 +2165,44 @@ function initUserMenuWidget() {
       window.location.href = '/login';
     }
 
+    async function doHardRefresh() {
+      try {
+        if (window.OpsAppCache && typeof window.OpsAppCache.clear === 'function') {
+          window.OpsAppCache.clear();
+        }
+      } catch {}
+
+      try { sessionStorage.clear(); } catch {}
+      try { localStorage.removeItem('username'); } catch {}
+
+      try {
+        if (window.caches && typeof caches.keys === 'function') {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((key) => caches.delete(key)));
+        }
+      } catch {}
+
+      try {
+        if ('serviceWorker' in navigator && typeof navigator.serviceWorker.getRegistrations === 'function') {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((reg) => reg.update().catch(() => {})));
+        }
+      } catch {}
+
+      try {
+        await fetch('/api/hard-refresh', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store',
+        });
+      } catch {}
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('_refresh', String(Date.now()));
+      window.location.replace(url.toString());
+    }
+
     panel.addEventListener("click", async (e) => {
       const btn = e.target && e.target.closest ? e.target.closest("[data-user-menu-action]") : null;
       if (!btn) return;
@@ -2176,6 +2219,13 @@ function initUserMenuWidget() {
 
       if (action === "how") {
         window.location.href = "/how-it-works";
+        return;
+      }
+
+      if (action === "hard-refresh") {
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+        await doHardRefresh();
         return;
       }
 
