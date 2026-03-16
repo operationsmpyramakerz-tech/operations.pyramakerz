@@ -1621,7 +1621,12 @@ app.post("/api/account/profile-picture", requireAuth, async (req, res) => {
   }
 
   try {
-    const { dataUrl, filename } = req.body || {};
+    const { dataUrl, filename, currentPassword } = req.body || {};
+    const providedPassword = String(currentPassword ?? "").trim();
+
+    if (!providedPassword) {
+      return res.status(400).json({ error: "Current password is required." });
+    }
 
     if (!dataUrl) {
       return res.status(400).json({ error: "Image data is required." });
@@ -1641,6 +1646,16 @@ app.post("/api/account/profile-picture", requireAuth, async (req, res) => {
 
     const userPage = await notion.pages.retrieve({ page_id: userId });
     const props = userPage?.properties || {};
+    const storedPassword = _extractPropText(props?.Password);
+
+    if (storedPassword === null || typeof storedPassword === "undefined") {
+      return res.status(400).json({ error: "No password set for this account." });
+    }
+
+    if (String(storedPassword) !== providedPassword) {
+      return res.status(401).json({ error: "invalid password" });
+    }
+
     const profilePropName = findProfilePhotoPropName(props) || "Profile picture";
     const profileProp = props?.[profilePropName];
 
