@@ -259,62 +259,134 @@ function pipeDeliveryReceiptPDF(
   const metaX = mL;
   const metaY = doc.y;
   const metaW = contentW;
-  const metaRowH = 30;
-  const metaH = metaRowH * 2;
   const metaColW = metaW / 2;
+  const META = {
+    padX: 10,
+    padTop: 6,
+    padBottom: 8,
+    gapY: 3,
+    labelFont: "Helvetica",
+    labelSize: 9,
+    valueFont: "Helvetica-Bold",
+    valueSize: 11,
+    minRowH: 30,
+  };
+
+  const metaRows = String(metaLayout || "").toLowerCase() === "teamreasonfirst"
+    ? [
+        [
+          { label: "Team member", value: String(teamMember || "—") },
+          { label: "Reason", value: String(preparedBy || "—") },
+        ],
+        [
+          { label: "Order ID", value: String(orderId || "—") },
+          { label: "Date", value: formatDateTime(createdAt) },
+        ],
+      ]
+    : [
+        [
+          { label: "Order ID", value: String(orderId || "—") },
+          { label: "Date", value: formatDateTime(createdAt) },
+        ],
+        [
+          { label: "Team member", value: String(teamMember || "—") },
+          { label: "Prepared by (Operations)", value: String(preparedBy || "—") },
+        ],
+      ];
+
+  function measureMetaCellHeight(label, value, w) {
+    const innerW = Math.max(1, w - META.padX * 2);
+    const safeLabel = String(label || "—");
+    const safeValue = String(value || "—");
+
+    doc.font(META.labelFont).fontSize(META.labelSize);
+    const labelH = doc.heightOfString(safeLabel, {
+      width: innerW,
+      align: "left",
+      lineGap: 0,
+    });
+
+    doc.font(META.valueFont).fontSize(META.valueSize);
+    const valueH = doc.heightOfString(safeValue, {
+      width: innerW,
+      align: "left",
+      lineGap: 1,
+    });
+
+    return Math.max(
+      META.minRowH,
+      META.padTop + labelH + META.gapY + valueH + META.padBottom,
+    );
+  }
+
+  function drawMetaCell(label, value, x, y, w) {
+    const innerW = Math.max(1, w - META.padX * 2);
+    const safeLabel = String(label || "—");
+    const safeValue = String(value || "—");
+
+    doc
+      .fillColor(COLORS.muted)
+      .font(META.labelFont)
+      .fontSize(META.labelSize)
+      .text(safeLabel, x + META.padX, y + META.padTop, {
+        width: innerW,
+        align: "left",
+        lineGap: 0,
+      });
+
+    const labelH = doc
+      .font(META.labelFont)
+      .fontSize(META.labelSize)
+      .heightOfString(safeLabel, {
+        width: innerW,
+        align: "left",
+        lineGap: 0,
+      });
+
+    doc
+      .fillColor(COLORS.text)
+      .font(META.valueFont)
+      .fontSize(META.valueSize)
+      .text(safeValue, x + META.padX, y + META.padTop + labelH + META.gapY, {
+        width: innerW,
+        align: "left",
+        lineGap: 1,
+      });
+  }
+
+  const metaRowHeights = metaRows.map((row) =>
+    Math.max(...row.map((cell) => measureMetaCellHeight(cell.label, cell.value, metaColW))),
+  );
+  const metaH = metaRowHeights.reduce((sum, h) => sum + h, 0);
 
   doc
     .roundedRect(metaX, metaY, metaW, metaH, 8)
     .lineWidth(1)
     .strokeColor(COLORS.border)
     .stroke();
-  // inner lines
+
   doc
     .moveTo(metaX + metaColW, metaY)
     .lineTo(metaX + metaColW, metaY + metaH)
     .strokeColor(COLORS.border)
     .stroke();
-  doc
-    .moveTo(metaX, metaY + metaRowH)
-    .lineTo(metaX + metaW, metaY + metaRowH)
-    .strokeColor(COLORS.border)
-    .stroke();
 
-  function drawMetaCell(label, value, x, y, w) {
-    const padX = 10;
+  let metaDividerY = metaY;
+  metaRowHeights.slice(0, -1).forEach((rowH) => {
+    metaDividerY += rowH;
     doc
-      .fillColor(COLORS.muted)
-      .font("Helvetica")
-      .fontSize(9)
-      .text(label, x + padX, y + 6, { width: w - padX * 2, align: "left" });
-    doc
-      .fillColor(COLORS.text)
-      .font("Helvetica-Bold")
-      .fontSize(11)
-      .text(value || "—", x + padX, y + 16, { width: w - padX * 2, align: "left" });
-  }
+      .moveTo(metaX, metaDividerY)
+      .lineTo(metaX + metaW, metaDividerY)
+      .strokeColor(COLORS.border)
+      .stroke();
+  });
 
-  if (String(metaLayout || "").toLowerCase() === "teamreasonfirst") {
-    // Requested for Current Orders:
-    // Team member | Reason
-    // Order ID     | Date
-    drawMetaCell("Team member", String(teamMember || "—"), metaX, metaY, metaColW);
-    drawMetaCell("Reason", String(preparedBy || "—"), metaX + metaColW, metaY, metaColW);
-    drawMetaCell("Order ID", String(orderId || "—"), metaX, metaY + metaRowH, metaColW);
-    drawMetaCell("Date", formatDateTime(createdAt), metaX + metaColW, metaY + metaRowH, metaColW);
-  } else {
-    // Default (Operations Orders)
-    drawMetaCell("Order ID", String(orderId || "—"), metaX, metaY, metaColW);
-    drawMetaCell("Date", formatDateTime(createdAt), metaX + metaColW, metaY, metaColW);
-    drawMetaCell("Team member", String(teamMember || "—"), metaX, metaY + metaRowH, metaColW);
-    drawMetaCell(
-      "Prepared by (Operations)",
-      String(preparedBy || "—"),
-      metaX + metaColW,
-      metaY + metaRowH,
-      metaColW,
-    );
-  }
+  let metaRowY = metaY;
+  metaRows.forEach((row, rowIndex) => {
+    drawMetaCell(row[0].label, row[0].value, metaX, metaRowY, metaColW);
+    drawMetaCell(row[1].label, row[1].value, metaX + metaColW, metaRowY, metaColW);
+    metaRowY += metaRowHeights[rowIndex];
+  });
 
   doc.y = metaY + metaH + 18;
 
