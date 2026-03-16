@@ -17,6 +17,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     { key: 'password',     label: 'Password',      icon: 'lock',       inputType: 'password', required: true,  placeholder: 'New password', autocomplete: 'new-password' },
   ];
 
+  const PROFILE_PICTURE_META = {
+    key: 'profilePicture',
+    label: 'Profile picture',
+    icon: 'image',
+    inputType: 'text',
+    required: false,
+    isFileUpload: true,
+    placeholder: 'Selected image',
+  };
+
+  let pendingProfilePicture = null;
+
   // ===== Helpers =====
   function toast(type, title, message) {
     if (window.UI && typeof window.UI.toast === 'function') {
@@ -91,7 +103,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const photoUrl = String(state?.photoUrl || '').trim();
     const displayName = String(state?.name || 'User').trim() || 'User';
     const preview = photoUrl
-      ? `<img class="acc-media-img" src="${escapeHTML(photoUrl)}" alt="${escapeHTML(displayName)} profile picture" />`
+      ? `<img class="acc-media-img" src="${escapeHTML(photoUrl)}" width="56" height="56" decoding="async" alt="${escapeHTML(displayName)} profile picture" />`
       : `<span class="acc-media-fallback" aria-hidden="true">${escapeHTML(initialsFromName(displayName))}</span>`;
 
     return `
@@ -102,7 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
 
         <div class="acc-right acc-right--media">
-          <span class="acc-media-preview">${preview}</span>
+          <div class="acc-media-preview">${preview}</div>
           <div class="acc-media-copy">
             <span class="acc-value acc-value--media">${photoUrl ? 'Image uploaded' : 'No image uploaded'}</span>
             <span class="acc-subvalue">Images only</span>
@@ -136,9 +148,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  async function handleProfilePictureUpload(file, inputEl, buttonEl) {
+  function validateProfilePictureFile(file, inputEl) {
     const selected = file || null;
-    if (!selected) return;
+    if (!selected) return false;
 
     const mime = String(selected.type || '').toLowerCase();
     const isImage = mime.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(String(selected.name || ''));
@@ -146,14 +158,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!isImage) {
       toast('warning', 'Invalid file', 'Only image files are allowed for Profile picture.');
       if (inputEl) inputEl.value = '';
-      return;
+      return false;
     }
 
     if (selected.size > 10 * 1024 * 1024) {
       toast('warning', 'Image too large', 'Please choose an image up to 10MB.');
       if (inputEl) inputEl.value = '';
-      return;
+      return false;
     }
+
+    return true;
+  }
+
+  async function handleProfilePictureUpload(file, inputEl, buttonEl, currentPassword) {
+    const selected = file || null;
+    if (!selected) return false;
 
     const originalLabel = buttonEl ? buttonEl.textContent : '';
     if (buttonEl) {
@@ -170,6 +189,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         body: JSON.stringify({
           filename: selected.name || 'profile-picture.png',
           dataUrl,
+          currentPassword: String(currentPassword || '').trim(),
         }),
       });
 
@@ -182,14 +202,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       render();
       try { window.dispatchEvent(new Event('user:updated')); } catch {}
       toast('success', 'Saved', 'Profile picture updated successfully.');
+      return true;
     } catch (e) {
       toast('error', 'Upload failed', e.message || 'Failed to update profile picture.');
+      return false;
     } finally {
       if (inputEl) inputEl.value = '';
       if (buttonEl) {
         buttonEl.disabled = false;
         buttonEl.textContent = originalLabel || 'Upload image';
       }
+      pendingProfilePicture = null;
       if (window.feather) feather.replace();
     }
   }
@@ -281,33 +304,46 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindToggle(toggleValueBtn);
   bindToggle(togglePassBtn);
 
-  function openModalForField(fieldKey) {
-    const meta = FIELD_META.find((m) => m.key === fieldKey);
+  function openModalForField(fieldKey, options = {}) {
+    const meta = fieldKey === PROFILE_PICTURE_META.key
+      ? PROFILE_PICTURE_META
+      : FIELD_META.find((m) => m.key === fieldKey);
     if (!meta || !modalEl) return;
 
+    const isProfilePicture = !!meta.isFileUpload;
     activeField = meta;
 
-    if (titleEl) titleEl.textContent = `Edit ${meta.label}`;
-    if (valueLabelEl) valueLabelEl.innerHTML = `<i data-feather="${escapeHTML(meta.icon)}"></i> ${escapeHTML(meta.label)}`;
+    if (titleEl) titleEl.textContent = isProfilePicture ? `Change ${meta.label}` : `Edit ${meta.label}`;
+    if (valueLabelEl) valueLabelEl.innerHTML = `<i data-feather="${escapeHTML(meta.icon)}"></i> ${escapeHTML(isProfilePicture ? 'Selected image' : meta.label)}`;
     if (passLabelEl) passLabelEl.innerHTML = `<i data-feather="lock"></i> Current password`;
+    if (confirmBtn) confirmBtn.textContent = isProfilePicture ? 'Upload' : 'Submit';
 
     // Configure input type per field
     if (valueInput) {
-      valueInput.type = meta.inputType || 'text';
+      valueInput.removeAttribute('readonly');
+      valueInput.type = isProfilePicture ? 'text' : (meta.inputType || 'text');
 
-      if (meta.inputMode) valueInput.setAttribute('inputmode', meta.inputMode);
+      if (!isProfilePicture && meta.inputMode) valueInput.setAttribute('inputmode', meta.inputMode);
       else valueInput.removeAttribute('inputmode');
 
-      if (meta.autocomplete) valueInput.setAttribute('autocomplete', meta.autocomplete);
+      if (!isProfilePicture && meta.autocomplete) valueInput.setAttribute('autocomplete', meta.autocomplete);
       else valueInput.removeAttribute('autocomplete');
 
-      if (meta.placeholder) valueInput.setAttribute('placeholder', meta.placeholder);
+      const placeholder = isProfilePicture
+        ? (options.placeholder || meta.placeholder || 'Selected image')
+        : (meta.placeholder || '');
+      if (placeholder) valueInput.setAttribute('placeholder', placeholder);
       else valueInput.removeAttribute('placeholder');
 
-      // Prefill current value (except password)
-      valueInput.value = (fieldKey === 'password')
-        ? ''
-        : ((state && state[fieldKey] != null) ? String(state[fieldKey]) : '');
+      if (isProfilePicture) {
+        valueInput.value = String(options.fileName || '').trim();
+        valueInput.setAttribute('readonly', 'readonly');
+      } else {
+        // Prefill current value (except password)
+        valueInput.value = (fieldKey === 'password')
+          ? ''
+          : ((state && state[fieldKey] != null) ? String(state[fieldKey]) : '');
+      }
     }
 
     // Ensure the "Current password" input is always hidden by default
@@ -318,7 +354,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Only show toggle for the value input when editing password
     if (valueWrapEl) {
-      valueWrapEl.classList.toggle('has-toggle', fieldKey === 'password');
+      valueWrapEl.classList.toggle('has-toggle', !isProfilePicture && fieldKey === 'password');
     }
 
     // Reset toggle icons/state on every open
@@ -332,15 +368,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Focus
     setTimeout(() => {
-      valueInput?.focus();
-      valueInput?.select?.();
+      if (isProfilePicture) {
+        passInput?.focus();
+        passInput?.select?.();
+      } else {
+        valueInput?.focus();
+        valueInput?.select?.();
+      }
     }, 0);
 
     if (window.feather) feather.replace();
   }
 
-  function closeModal() {
+  function closeModal(options = {}) {
     if (!modalEl) return;
+    const preservePendingProfilePicture = !!options.preservePendingProfilePicture;
+    const closingProfilePicture = !!(activeField && activeField.key === PROFILE_PICTURE_META.key);
+
     modalEl.style.display = 'none';
     modalEl.setAttribute('aria-hidden', 'true');
     activeField = null;
@@ -350,6 +394,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       passInput.value = '';
     }
     if (valueInput) {
+      valueInput.removeAttribute('readonly');
+      valueInput.value = '';
       // When closing, always revert the value input back to password if it was shown
       // (will be re-configured correctly on next open anyway)
       if (String(valueInput.getAttribute('type') || '').toLowerCase() === 'text') {
@@ -357,10 +403,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
+    if (confirmBtn) confirmBtn.textContent = 'Submit';
     if (valueWrapEl) valueWrapEl.classList.remove('has-toggle');
     if (toggleValueBtn && valueInput) syncToggleVisual(toggleValueBtn, valueInput);
     if (togglePassBtn && passInput) syncToggleVisual(togglePassBtn, passInput);
     setModalError('');
+
+    if (closingProfilePicture && !preservePendingProfilePicture) {
+      try { pendingProfilePicture?.inputEl && (pendingProfilePicture.inputEl.value = ''); } catch {}
+      pendingProfilePicture = null;
+    }
   }
 
   // Close when clicking on the backdrop (outside the box)
@@ -399,17 +451,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const field = activeField.key;
     const meta = activeField;
+    const isProfilePicture = !!meta.isFileUpload;
 
     const newValRaw = String(valueInput?.value ?? '');
-    const newVal = normalizeValueForApi(field, newValRaw);
+    const newVal = isProfilePicture ? null : normalizeValueForApi(field, newValRaw);
 
     const currentPassword = String(passInput?.value || '').trim();
 
     // Reset error message on every submit
     setModalError('');
 
+    if (isProfilePicture && !(pendingProfilePicture && pendingProfilePicture.file)) {
+      toast('warning', 'Image required', 'Please choose an image first.');
+      closeModal();
+      return;
+    }
+
     // Client-side validation
-    if (meta.required && (!newVal || String(newVal).trim() === '')) {
+    if (!isProfilePicture && meta.required && (!newVal || String(newVal).trim() === '')) {
       toast('warning', 'Required', `${meta.label} cannot be empty.`);
       return;
     }
@@ -420,7 +479,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Build payload
     const payload = { currentPassword };
-    payload[field] = newVal;
+    if (!isProfilePicture) payload[field] = newVal;
 
     // UI lock
     if (confirmBtn) confirmBtn.disabled = true;
@@ -448,8 +507,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       // Password OK → close modal + show saving loader until Notion update completes
-      closeModal();
+      closeModal({ preservePendingProfilePicture: isProfilePicture });
       showSavingOverlay();
+
+      if (isProfilePicture) {
+        await handleProfilePictureUpload(
+          pendingProfilePicture?.file || null,
+          pendingProfilePicture?.inputEl || null,
+          pendingProfilePicture?.buttonEl || null,
+          currentPassword,
+        );
+        return;
+      }
 
       // 2) Save changes
       const res = await fetch('/api/account', {
@@ -565,7 +634,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const file = input.files && input.files[0] ? input.files[0] : null;
     const row = input.closest('.acc-row--media');
     const buttonEl = row?.querySelector('.acc-upload-btn') || null;
-    await handleProfilePictureUpload(file, input, buttonEl);
+
+    if (!validateProfilePictureFile(file, input)) return;
+
+    pendingProfilePicture = { file, inputEl: input, buttonEl };
+    openModalForField(PROFILE_PICTURE_META.key, { fileName: file?.name || '' });
   });
 
   // Init
