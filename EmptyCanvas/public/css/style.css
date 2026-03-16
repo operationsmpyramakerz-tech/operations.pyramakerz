@@ -4432,6 +4432,224 @@ body.sidebar-mini .sidebar-footer .account-mini .label{
 }
 .account-hint svg{ width: 16px; height: 16px; }
 
+
+/* =========================================
+   Account page redesign (profile form)
+   ========================================= */
+.page-account .account-page-shell{
+  padding: clamp(1rem, 2.5vw, 2rem) !important;
+}
+
+.page-account .account-panel--profile{
+  width: min(100%, 620px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.page-account .profile-avatar-section{
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.page-account .profile-avatar-shell{
+  position: relative;
+  width: 132px;
+  height: 132px;
+}
+
+.page-account .profile-avatar-display{
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 6px solid #ffffff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.10), 0 0 0 1px rgba(226, 232, 240, 0.95);
+  cursor: pointer;
+}
+
+.page-account .profile-avatar-image{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+
+.page-account .profile-avatar-fallback{
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #FDBA74 0%, #EA580C 100%);
+  color: #ffffff;
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.page-account .profile-avatar-edit{
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 50%;
+  background: #ffffff;
+  color: #111827;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+
+.page-account .profile-avatar-edit:hover{
+  transform: translateY(-1px);
+  color: #C2410C;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.20);
+}
+
+.page-account .profile-avatar-edit.is-uploading{
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.page-account .profile-avatar-edit svg{
+  width: 18px;
+  height: 18px;
+}
+
+.page-account .profile-fields-list{
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.page-account .profile-field-card{
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.page-account .profile-field-label{
+  font-size: 1.05rem;
+  line-height: 1.25;
+  font-weight: 800;
+  color: #111827;
+  padding-inline: 0.15rem;
+}
+
+.page-account .profile-field-box{
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.95rem 1rem 0.95rem 1.15rem;
+  border-radius: 18px;
+  background: #F8FAFC;
+  border: 1px solid #E5EAF2;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9);
+}
+
+.page-account .profile-field-box--password{
+  letter-spacing: 0.08em;
+}
+
+.page-account .profile-field-value{
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #475569;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.page-account .profile-field-edit{
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  padding: 0;
+  border: 1px solid rgba(226, 232, 240, 0.96);
+  border-radius: 12px;
+  background: #ffffff;
+  color: #111827;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.page-account .profile-field-edit:hover{
+  transform: translateY(-1px);
+  color: #C2410C;
+  border-color: rgba(251, 146, 60, 0.35);
+}
+
+.page-account .profile-field-edit svg{
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 768px){
+  .page-account .account-page-shell{
+    padding: 1rem !important;
+  }
+
+  .page-account .account-panel--profile{
+    width: 100%;
+  }
+
+  .page-account .profile-avatar-section{
+    margin-bottom: 1.15rem;
+  }
+
+  .page-account .profile-avatar-shell,
+  .page-account .profile-avatar-display{
+    width: 108px;
+    height: 108px;
+  }
+
+  .page-account .profile-avatar-edit{
+    width: 34px;
+    height: 34px;
+    right: 2px;
+    bottom: 2px;
+  }
+
+  .page-account .profile-field-label{
+    font-size: 0.98rem;
+  }
+
+  .page-account .profile-field-box{
+    min-height: 60px;
+    padding: 0.85rem 0.85rem 0.85rem 1rem;
+    border-radius: 16px;
+    gap: 0.75rem;
+  }
+
+  .page-account .profile-field-value{
+    font-size: 0.96rem;
+  }
+
+  .page-account .profile-field-edit{
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    border-radius: 11px;
+  }
+}
+
 @media (max-width: 520px){
   .acc-row{ flex-wrap: wrap; }
   .acc-right{ width: 100%; justify-content: flex-end; }
