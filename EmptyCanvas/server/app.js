@@ -211,6 +211,62 @@ function cacheKeySafe(value) {
   return encodeURIComponent(String(value ?? "").trim() || "-");
 }
 
+
+async function clearUserServerCaches(req, opts = {}) {
+  const options = opts && typeof opts === "object" ? opts : {};
+  const tasks = [];
+
+  const userId = options.userId || (await getSessionUserNotionId(req)) || "";
+  const username = String(options.username || req.session?.username || "").trim();
+  const usernameKey = cacheKeySafe(username || "");
+  const normalizedUserId = normalizeNotionId(userId);
+  const department = String(options.department || req.session?.accountCache?.department || "").trim();
+
+  if (normalizedUserId) {
+    tasks.push(cacheDel(`cache:api:account:${normalizedUserId}:v2`));
+    tasks.push(cacheDel(`cache:api:expenses:user:${normalizedUserId}:v1`));
+  }
+
+  if (userId) {
+    tasks.push(cacheDel(`cache:api:orders:list:${userId}:v7`));
+    tasks.push(cacheDel(`cache:api:orders:assigned:${userId}:v3`));
+  }
+
+  if (usernameKey) {
+    tasks.push(cacheDel(`cache:api:stock:${usernameKey}:v1`));
+    tasks.push(cacheDel(`cache:api:expenses:${usernameKey}:v1`));
+    for (const tab of ["all", "not-started", "approved", "rejected"]) {
+      tasks.push(cacheDel(`cache:api:sv-orders:${usernameKey}:${tab}:v2`));
+    }
+  }
+
+  tasks.push(
+    cacheDel("cache:api:orders:requested:v6"),
+    cacheDel("cache:api:expenses:users:v1"),
+    cacheDel("cache:api:expenses:types:v1"),
+    cacheDel("cache:api:expenses:cash-in-from:v1"),
+    cacheDel("cache:notion:teamMembersAll:v1"),
+    cacheDel("cache:api:order-types:v1"),
+    cacheDel("cache:api:components:v1")
+  );
+
+  if (department) {
+    tasks.push(cacheDel(`cache:notion:teamMembersByDept:${department}:v1`));
+  }
+
+  if (b2bDatabaseId) {
+    tasks.push(cacheDel(`cache:api:b2b:schools:list:${b2bDatabaseId}:v1`));
+  }
+
+  await Promise.allSettled(tasks);
+
+  try {
+    delete req.session.accountCache;
+    delete req.session.accountCacheTs;
+    delete req.session.recentOrders;
+  } catch {}
+}
+
 function cachedJsonRoute(ttlSeconds, keyFactory) {
   return async function cachedJsonRouteMiddleware(req, res, next) {
     try {
@@ -453,34 +509,38 @@ function _firstNotionFileUrl(prop) {
   return "";
 }
 
-function extractProfilePhotoUrlFromProps(props) {
+function findProfilePhotoPropName(props) {
   const preferred = [
+    "Profile picture",
+    "Profile Picture",
+    "Profile Photo",
     "Photo",
     "Personal Photo",
     "Avatar",
-    "Profile Photo",
     "Profile",
     "Image",
   ];
+
   for (const key of preferred) {
     const prop = props?.[key];
-    if (prop?.type === "files") {
-      const url = _firstNotionFileUrl(prop);
-      if (url) return url;
-    }
+    if (prop?.type === "files") return key;
   }
 
-  // Fallback: scan any files properties that look like photo/avatar
   try {
     for (const [key, prop] of Object.entries(props || {})) {
       if (prop?.type !== "files") continue;
       if (!/photo|avatar|profile|image/i.test(key)) continue;
-      const url = _firstNotionFileUrl(prop);
-      if (url) return url;
+      return key;
     }
   } catch {}
 
   return "";
+}
+
+function extractProfilePhotoUrlFromProps(props) {
+  const propName = findProfilePhotoPropName(props);
+  if (!propName) return "";
+  return _firstNotionFileUrl(props?.[propName]) || "";
 }
 
 // Helpers: Allowed pages control
@@ -1542,6 +1602,74 @@ app.get("/api/account", requireAuth, async (req, res) => {
 
 
 
+
+app.post("/api/hard-refresh", requireAuth, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+
+  try {
+    await clearUserServerCaches(req);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Error during hard refresh:", error?.body || error);
+    return res.status(500).json({ error: "Failed to refresh cached data." });
+  }
+});
+
+app.post("/api/account/profile-picture", requireAuth, async (req, res) => {
+  if (!teamMembersDatabaseId) {
+    return res.status(500).json({ error: "Team_Members database ID is not configured." });
+  }
+
+  try {
+    const { dataUrl, filename } = req.body || {};
+
+    if (!dataUrl) {
+      return res.status(400).json({ error: "Image data is required." });
+    }
+
+    const { mime, buf } = parseDataUrlToBuffer(dataUrl);
+    if (!/^image\//i.test(String(mime || ""))) {
+      return res.status(400).json({ error: "Only image uploads are allowed." });
+    }
+
+    if (buf.length > 10 * 1024 * 1024) {
+      return res.status(413).json({ error: "Image is too large. Maximum size is 10MB." });
+    }
+
+    const userId = await getSessionUserNotionId(req);
+    if (!userId) return res.status(404).json({ error: "User not found." });
+
+    const userPage = await notion.pages.retrieve({ page_id: userId });
+    const props = userPage?.properties || {};
+    const profilePropName = findProfilePhotoPropName(props) || "Profile picture";
+    const profileProp = props?.[profilePropName];
+
+    if (profileProp?.type !== "files") {
+      return res.status(400).json({ error: `The "${profilePropName}" property must be Files & media.` });
+    }
+
+    const safeOriginalName = String(filename || "profile-picture.png").trim() || "profile-picture.png";
+    const cleanName = safeOriginalName.replace(/[^a-z0-9._-]/gi, "_");
+    const blobName = `profile-${Date.now()}-${Math.random().toString(16).slice(2)}-${cleanName}`;
+    const publicUrl = await uploadToBlobFromBase64(dataUrl, blobName);
+
+    await notion.pages.update({
+      page_id: userId,
+      properties: {
+        [profilePropName]: {
+          files: [makeExternalFile(safeOriginalName, publicUrl)],
+        },
+      },
+    });
+
+    await clearUserServerCaches(req, { userId });
+
+    return res.json({ success: true, photoUrl: publicUrl });
+  } catch (error) {
+    console.error("Error updating profile picture:", error?.body || error);
+    return res.status(500).json({ error: error?.message || "Failed to update profile picture." });
+  }
+});
 
 // ===== Tasks APIs =====
 // Uses Notion database ID from process.env.TASKS
@@ -11502,12 +11630,7 @@ app.patch("/api/account", requireAuth, async (req, res) => {
       properties: updateProps,
     });
 
-    await cacheDel(`cache:api:account:${normalizeNotionId(userPageId)}:v2`);
-
-    try {
-      delete req.session.accountCache;
-      delete req.session.accountCacheTs;
-    } catch {}
+    await clearUserServerCaches(req, { userId: userPageId, username: String(name || req.session?.username || "").trim() || req.session?.username || "" });
 
     // Keep session username in sync if Name changed
     if (updateProps["Name"]) {
