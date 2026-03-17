@@ -84,7 +84,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function profileFieldCard(meta) {
     const isPassword = meta.key === 'password';
     return `
-      <div class="profile-field-card" data-field="${escapeHTML(meta.key)}">
+      <section class="profile-field-card" data-field="${escapeHTML(meta.key)}">
         <div class="profile-field-label">${escapeHTML(meta.label)}</div>
         <div class="profile-field-box ${isPassword ? 'profile-field-box--password' : ''}">
           <span class="profile-field-value">${escapeHTML(displayValue(meta.key))}</span>
@@ -92,7 +92,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             <i data-feather="edit-2"></i>
           </button>
         </div>
-      </div>
+      </section>
     `;
   }
 
@@ -100,13 +100,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const photoUrl = String(state?.photoUrl || '').trim();
     const displayName = String(state?.name || 'User').trim() || 'User';
     const preview = photoUrl
-      ? `<img class="profile-avatar-image" src="${escapeHTML(photoUrl)}" width="132" height="132" decoding="async" alt="${escapeHTML(displayName)} profile picture" />`
+      ? `<img class="profile-avatar-image" src="${escapeHTML(photoUrl)}" width="156" height="156" decoding="async" alt="${escapeHTML(displayName)} profile picture" />`
       : `<span class="profile-avatar-fallback" aria-hidden="true">${escapeHTML(initialsFromName(displayName))}</span>`;
 
     return `
       <div class="profile-avatar-section" data-field="profilePicture">
         <div class="profile-avatar-shell">
-          <div class="profile-avatar-display">${preview}</div>
+          <button class="profile-avatar-display" type="button" aria-label="Change profile picture" title="Change profile picture">
+            ${preview}
+          </button>
           <button class="profile-avatar-edit" type="button" aria-label="Edit profile picture" title="Edit profile picture">
             <i data-feather="camera"></i>
           </button>
@@ -118,7 +120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function render() {
     container.innerHTML = `
-      <div class="account-panel account-panel--profile">
+      <div class="account-panel account-panel--profile account-profile-modern">
         ${profileAvatarSection()}
         <div class="profile-fields-list">
           ${FIELD_META.map(profileFieldCard).join('')}
