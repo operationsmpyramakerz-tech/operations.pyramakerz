@@ -1191,6 +1191,7 @@ if (document.querySelector('.sidebar')) {
   menuToggle = ensureMenuToggle() || menuToggle;
   wireMenuToggleOnce();
   ensureDashboardHeaderLayout();
+  initMobileHeaderAutoHide();
 
   // لو عندك لينكات بتتعمل inject في صفحات معينة:
     // Home should appear for everyone (not tied to permissions)
@@ -1219,6 +1220,115 @@ ensureLink({ href: '/orders/sv-orders', label: 'Orders Review', icon: 'award' })
 
   if (window.feather) feather.replace();
 });
+
+
+function initMobileHeaderAutoHide() {
+  const mainContent = document.querySelector('.main-content');
+  const header = mainContent?.querySelector('.main-header');
+  const scroller = mainContent?.querySelector(':scope > main') || mainContent?.querySelector('main');
+  if (!mainContent || !header || !scroller) return;
+
+  const media = window.matchMedia('(max-width: 768px)');
+  let lastTop = 0;
+  let hidden = false;
+  let ticking = false;
+
+  function syncHeaderHeight() {
+    const wasHidden = mainContent.classList.contains('mobile-header-hidden');
+    if (wasHidden) mainContent.classList.remove('mobile-header-hidden');
+
+    const applyHeight = () => {
+      const height = Math.ceil(header.scrollHeight || header.offsetHeight || 0);
+      if (height > 0) {
+        mainContent.style.setProperty('--mobile-header-height', `${height}px`);
+      }
+      if (wasHidden && hidden && media.matches) {
+        mainContent.classList.add('mobile-header-hidden');
+      }
+    };
+
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(applyHeight);
+    } else {
+      window.setTimeout(applyHeight, 0);
+    }
+  }
+
+  function showHeader(force = false) {
+    hidden = false;
+    mainContent.classList.remove('mobile-header-hidden');
+    if (force) lastTop = Number(scroller.scrollTop || 0);
+  }
+
+  function hideHeader() {
+    if (hidden) return;
+    hidden = true;
+    mainContent.classList.add('mobile-header-hidden');
+  }
+
+  function handleScroll() {
+    if (!media.matches) {
+      showHeader(true);
+      return;
+    }
+
+    const currentTop = Math.max(0, Number(scroller.scrollTop || 0));
+    const delta = currentTop - lastTop;
+
+    if (currentTop <= 8) {
+      showHeader(true);
+      return;
+    }
+
+    if (Math.abs(delta) < 6) return;
+
+    if (delta > 0 && currentTop > 72) {
+      hideHeader();
+    } else if (delta < 0) {
+      showHeader();
+    }
+
+    lastTop = currentTop;
+  }
+
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    const flush = () => {
+      ticking = false;
+      handleScroll();
+    };
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(flush);
+    } else {
+      window.setTimeout(flush, 16);
+    }
+  }
+
+  function onViewportChange() {
+    syncHeaderHeight();
+    if (!media.matches) {
+      showHeader(true);
+      return;
+    }
+    if ((scroller.scrollTop || 0) <= 8) {
+      showHeader(true);
+    }
+  }
+
+  scroller.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('orientationchange', onViewportChange);
+
+  if (typeof media.addEventListener === 'function') {
+    media.addEventListener('change', onViewportChange);
+  } else if (typeof media.addListener === 'function') {
+    media.addListener(onViewportChange);
+  }
+
+  syncHeaderHeight();
+  showHeader(true);
+}
 
 
 // UI Toast — modern notifications
