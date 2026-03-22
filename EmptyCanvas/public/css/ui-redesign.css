@@ -1549,14 +1549,14 @@ body.has-floating-search .main-header .searchbar{
     position: relative !important;
     z-index: 1 !important;
     width: max-content !important;
-    min-width: 50% !important;
+    min-width: 100% !important;
     min-height: 80px !important;
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
     align-items: center !important;
     justify-content: flex-start !important;
-    gap: 10px !important;
+    gap: 15px !important;
     margin: 0 !important;
     padding: 4px 14px 4px 0 !important;
   }
