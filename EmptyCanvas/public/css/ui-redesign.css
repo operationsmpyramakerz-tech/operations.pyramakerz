@@ -1472,6 +1472,7 @@ body.has-floating-search .main-header .searchbar{
     opacity: 1 !important;
     overflow: visible !important;
     z-index: 240 !important;
+    isolation: isolate !important;
   }
 
   .sidebar-header,
@@ -1507,7 +1508,7 @@ body.has-floating-search .main-header .searchbar{
     border-radius: 999px;
   }
 
-  .sidebar-nav::before{
+  .sidebar::before{
     content: "";
     position: absolute;
     top: 0;
@@ -1518,6 +1519,11 @@ body.has-floating-search .main-header .searchbar{
     border-radius: var(--mobile-pages-block-radius);
     box-shadow: var(--mobile-dock-shadow);
     z-index: 0;
+    pointer-events: none;
+  }
+
+  .sidebar-nav::before{
+    content: none !important;
   }
 
   .sidebar-nav .nav-list{
