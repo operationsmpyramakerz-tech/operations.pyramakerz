@@ -81,11 +81,17 @@ body{
 
 @media (max-width: 900px){
   .app-container{
+    /*
+      Android browsers sometimes report a taller visual viewport while
+      the bottom browser controls are visible, which makes the black shell
+      look cut from the bottom. Keep a small reserved space so the bottom
+      frame stays visible like the top frame.
+    */
     margin: 0;
     min-height: 0 !important;
-    height: 100vh;
-    max-height: 100vh;
-    border-radius: 0;
+    height: calc(100vh - 14px);
+    max-height: calc(100vh - 14px);
+    border-radius: var(--ui-radius-shell);
     padding: 14px;
   }
 
@@ -103,8 +109,17 @@ body{
 @supports (height: 100dvh){
   @media (max-width: 900px){
     .app-container{
-      height: 100dvh;
-      max-height: 100dvh;
+      height: calc(100dvh - 14px);
+      max-height: calc(100dvh - 14px);
+    }
+  }
+}
+
+@supports (height: 100svh){
+  @media (max-width: 900px){
+    .app-container{
+      height: calc(100svh - 14px);
+      max-height: calc(100svh - 14px);
     }
   }
 }
@@ -567,6 +582,11 @@ body.sidebar-collapsed .main-content{
 
   /* main content should fill under the shell padding */
   .main-content{ border-radius: 26px; margin-left: 0 !important; }
+
+  /* Keep a little breathing room at the bottom when the inner page scrolls. */
+  .main-content > main{
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  }
 
   .gh-wave{
     width: 100%;
