@@ -1548,7 +1548,7 @@ body.has-floating-search .main-header .searchbar{
   .sidebar-nav .nav-list{
     position: relative !important;
     z-index: 1 !important;
-    width: 50% !important;
+    width: max-content !important;
     min-width: 100% !important;
     min-height: 80px !important;
     display: flex !important;
