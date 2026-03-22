@@ -1384,3 +1384,177 @@ body.has-floating-search .main-header .searchbar{
 .group-table a.component-link:hover{
   color: #1E40AF;
 }
+
+
+/* =========================================================
+   Android mobile dock navigation + white chrome
+   - remove the black outer frame on phones
+   - keep navigation visible at the bottom
+   - keep Home visually separated like the reference
+   ========================================================= */
+@media (max-width: 768px){
+  html,
+  body{
+    background: #FFFFFF !important;
+  }
+
+  .app-container{
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+    min-height: 100vh !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    background: #FFFFFF !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+  }
+
+  .main-content{
+    margin-left: 0 !important;
+    min-height: 100% !important;
+    background: #FFFFFF !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .main-header{
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px !important;
+  }
+
+  .main-content > main{
+    padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  #menu-toggle,
+  .sidebar-backdrop{
+    display: none !important;
+  }
+
+  .sidebar,
+  body.sidebar-collapsed .sidebar{
+    position: fixed !important;
+    top: auto !important;
+    left: 12px !important;
+    right: 12px !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
+    width: auto !important;
+    min-height: 78px !important;
+    height: auto !important;
+    max-height: none !important;
+    border-radius: 28px !important;
+    background: #0B0C10 !important;
+    box-shadow: 0 18px 40px rgba(15,23,42,0.18) !important;
+    transform: none !important;
+    opacity: 1 !important;
+    overflow: hidden !important;
+    z-index: 240 !important;
+  }
+
+  .sidebar-header,
+  .sidebar-footer{
+    display: none !important;
+  }
+
+  .sidebar-nav{
+    flex: none !important;
+    display: block !important;
+    align-items: stretch !important;
+    padding: 10px 12px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    white-space: nowrap;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .sidebar-nav::-webkit-scrollbar{
+    display: none;
+  }
+
+  .sidebar-nav .nav-list{
+    width: max-content !important;
+    min-width: 100% !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .sidebar-nav .nav-list > li{
+    width: auto !important;
+    flex: 0 0 auto !important;
+    display: block !important;
+  }
+
+  .sidebar-nav .nav-list > li:first-child{
+    position: sticky !important;
+    left: 0 !important;
+    z-index: 2 !important;
+    padding-right: 6px !important;
+    margin-right: 2px !important;
+    background: linear-gradient(90deg, #0B0C10 0%, #0B0C10 80%, rgba(11,12,16,0) 100%) !important;
+  }
+
+  .nav-label{
+    display: none !important;
+  }
+
+  .sidebar-nav .nav-list > li:first-child .nav-label{
+    display: inline !important;
+  }
+
+  .sidebar-nav .nav-link{
+    width: 48px !important;
+    min-width: 48px !important;
+    height: 48px !important;
+    border-radius: 18px !important;
+  }
+
+  .sidebar-nav .nav-link svg{
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .sidebar-nav .nav-list > li:first-child .nav-link{
+    width: auto !important;
+    min-width: 96px !important;
+    padding: 0 16px !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .sidebar-nav .nav-list > li:first-child .nav-link:not(.active){
+    background: rgba(255,255,255,0.08) !important;
+    color: rgba(255,255,255,0.92) !important;
+  }
+
+  .sidebar-nav .nav-link.active{
+    background: #FFFFFF !important;
+    color: #0B0C10 !important;
+    box-shadow: 0 12px 26px rgba(255,255,255,0.14), 0 12px 24px rgba(0,0,0,0.18) !important;
+  }
+}
+
+@supports (height: 100dvh){
+  @media (max-width: 768px){
+    .app-container{
+      min-height: 100dvh !important;
+      height: 100dvh !important;
+      max-height: 100dvh !important;
+    }
+  }
+}
+
+@supports (height: 100svh){
+  @media (max-width: 768px){
+    .app-container{
+      min-height: 100svh !important;
+      height: 100svh !important;
+      max-height: 100svh !important;
+    }
+  }
+}
