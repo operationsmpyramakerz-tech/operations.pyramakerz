@@ -1481,7 +1481,7 @@ body.has-floating-search .main-header .searchbar{
     right: 12px !important;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
     width: auto !important;
-    min-height: 80px !important;
+    min-height: 50px !important;
     height: 50px !important;
     max-height: 50px !important;
     border-radius: 0 !important;
