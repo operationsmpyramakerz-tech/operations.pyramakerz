@@ -1391,6 +1391,7 @@ body.has-floating-search .main-header .searchbar{
    - remove the black outer frame on phones
    - keep navigation visible at the bottom
    - keep Home visually separated like the reference
+   - keep the pages dock background fixed while icons scroll inside it
    ========================================================= */
 @media (max-width: 768px){
   :root{
@@ -1399,6 +1400,10 @@ body.has-floating-search .main-header .searchbar{
     --mobile-home-block-w: 88px;
     --mobile-home-gap: 10px;
     --mobile-home-bridge-w: 16px;
+    --mobile-dock-h: 80px;
+    --mobile-dock-inner-inset: 8px;
+    --mobile-dock-radius: 24px;
+    --mobile-dock-scrollbar-h: 4px;
   }
 
   html,
@@ -1460,9 +1465,9 @@ body.has-floating-search .main-header .searchbar{
     right: 12px !important;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
     width: auto !important;
-    min-height: 80px !important;
-    height: 80px !important;
-    max-height: 80px !important;
+    min-height: var(--mobile-dock-h) !important;
+    height: var(--mobile-dock-h) !important;
+    max-height: var(--mobile-dock-h) !important;
     border-radius: 0 !important;
     background: transparent !important;
     box-shadow: none !important;
@@ -1481,28 +1486,22 @@ body.has-floating-search .main-header .searchbar{
     position: relative !important;
     flex: none !important;
     display: block !important;
-    min-height: 80px !important;
+    min-height: var(--mobile-dock-h) !important;
+    height: var(--mobile-dock-h) !important;
     padding: 0 !important;
-    overflow-x: auto !important;
-    overflow-y: visible !important;
+    overflow: hidden !important;
     white-space: nowrap;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-
-  .sidebar-nav::-webkit-scrollbar{
-    display: none;
   }
 
   .sidebar-nav::before{
     content: "";
     position: absolute;
-    top: 0;
+    top: var(--mobile-dock-inner-inset);
     right: 0;
-    bottom: 0;
+    bottom: var(--mobile-dock-inner-inset);
     left: calc(var(--mobile-home-block-w) + var(--mobile-home-gap) - 8px);
     background: var(--mobile-dock-bg);
-    border-radius: 28px;
+    border-radius: var(--mobile-dock-radius);
     box-shadow: var(--mobile-dock-shadow);
     z-index: 0;
   }
@@ -1510,9 +1509,11 @@ body.has-floating-search .main-header .searchbar{
   .sidebar-nav .nav-list{
     position: relative !important;
     z-index: 1 !important;
-    width: max-content !important;
+    width: 100% !important;
     min-width: 100% !important;
-    min-height: 80px !important;
+    max-width: 100% !important;
+    min-height: var(--mobile-dock-h) !important;
+    height: var(--mobile-dock-h) !important;
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
@@ -1520,7 +1521,27 @@ body.has-floating-search .main-header .searchbar{
     justify-content: flex-start !important;
     gap: 10px !important;
     margin: 0 !important;
-    padding: 8px 10px 8px 0 !important;
+    padding: 8px 12px 12px 0 !important;
+    overflow-x: scroll !important;
+    overflow-y: hidden !important;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.28) transparent;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+
+  .sidebar-nav .nav-list::-webkit-scrollbar{
+    height: var(--mobile-dock-scrollbar-h);
+  }
+
+  .sidebar-nav .nav-list::-webkit-scrollbar-track{
+    background: transparent;
+  }
+
+  .sidebar-nav .nav-list::-webkit-scrollbar-thumb{
+    background: rgba(255,255,255,0.28);
+    border-radius: 999px;
   }
 
   .sidebar-nav .nav-list > li{
@@ -1543,9 +1564,9 @@ body.has-floating-search .main-header .searchbar{
   .sidebar-nav .nav-list > li:first-child::before{
     content: "";
     position: absolute;
-    inset: 0 8px 0 0;
+    inset: var(--mobile-dock-inner-inset) 8px var(--mobile-dock-inner-inset) 0;
     background: var(--mobile-dock-bg);
-    border-radius: 28px;
+    border-radius: var(--mobile-dock-radius);
     box-shadow: var(--mobile-dock-shadow);
     z-index: -1;
   }
@@ -1556,7 +1577,7 @@ body.has-floating-search .main-header .searchbar{
     top: 50%;
     right: 0;
     width: var(--mobile-home-bridge-w);
-    height: 28px;
+    height: 22px;
     transform: translateY(-50%);
     border-radius: 999px;
     background: var(--mobile-dock-bg);
@@ -1565,10 +1586,6 @@ body.has-floating-search .main-header .searchbar{
   }
 
   .nav-label{
-    display: none !important;
-  }
-
-  .sidebar-nav .nav-list > li:first-child .nav-label{
     display: none !important;
   }
 
@@ -1587,11 +1604,11 @@ body.has-floating-search .main-header .searchbar{
   .sidebar-nav .nav-list > li:first-child .nav-link{
     width: var(--mobile-home-block-w) !important;
     min-width: var(--mobile-home-block-w) !important;
-    height: 64px !important;
+    height: calc(var(--mobile-dock-h) - (var(--mobile-dock-inner-inset) * 2)) !important;
     padding: 0 !important;
     justify-content: center !important;
     gap: 0 !important;
-    border-radius: 24px !important;
+    border-radius: var(--mobile-dock-radius) !important;
     background: transparent !important;
     color: rgba(255,255,255,0.94) !important;
     box-shadow: none !important;
