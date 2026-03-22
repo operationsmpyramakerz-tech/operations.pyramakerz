@@ -1482,8 +1482,8 @@ body.has-floating-search .main-header .searchbar{
     bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
     width: auto !important;
     min-height: 80px !important;
-    height: 50px !important;
-    max-height: 100px !important;
+    height: 80px !important;
+    max-height: 80px !important;
     border-radius: 0 !important;
     background: transparent !important;
     box-shadow: none !important;
@@ -1558,7 +1558,7 @@ body.has-floating-search .main-header .searchbar{
     justify-content: flex-start !important;
     gap: 10px !important;
     margin: 0 !important;
-    padding: 12px 18px 12px 0 !important;
+    padding: 4px 14px 4px 0 !important;
   }
 
   .sidebar-nav .nav-list > li{
