@@ -473,6 +473,31 @@ document.addEventListener("DOMContentLoaded", () => {
     return orderTypeKey(type) === "requestmaintenance";
   }
 
+  function getDeliveredRepeatActionConfig(group, fallbackItem = null) {
+    const typeKey = orderTypeKey(group?.orderType || fallbackItem?.orderType);
+    if (typeKey === "requestproducts") {
+      return {
+        key: "withdrawal",
+        label: "Create Withdrawal",
+        icon: "repeat",
+        endpoint: "/api/orders/requested/create-withdrawal",
+        successMessage: "Withdrawal order created in Not Started.",
+        errorMessage: "Failed to create withdrawal order.",
+      };
+    }
+    if (typeKey === "withdrawproducts") {
+      return {
+        key: "delivery",
+        label: "Create Delivery",
+        icon: "repeat",
+        endpoint: "/api/orders/requested/create-delivery",
+        successMessage: "Delivery order created in Not Started.",
+        errorMessage: "Failed to create delivery order.",
+      };
+    }
+    return null;
+  }
+
   function summarizeMaintenanceReasons(items) {
     const unique = [];
     const seen = new Set();
@@ -1122,12 +1147,20 @@ document.addEventListener("DOMContentLoaded", () => {
       arrivedBtn.style.display = currentTab === "received" && stage.idx === 4 ? "inline-flex" : "none";
     }
     if (createWithdrawalBtn) {
-      const canCreateWithdrawal =
+      const repeatAction = getDeliveredRepeatActionConfig(g, all[0]);
+      const canCreateRepeatOrder =
         !isMaintenanceOrder &&
         currentTab === "delivered" &&
         (stage?.idx || 1) >= 5 &&
-        orderTypeKey(g.orderType || all[0]?.orderType) === "requestproducts";
-      createWithdrawalBtn.style.display = canCreateWithdrawal ? "inline-flex" : "none";
+        !!repeatAction;
+      createWithdrawalBtn.style.display = canCreateRepeatOrder ? "inline-flex" : "none";
+      if (canCreateRepeatOrder && repeatAction) {
+        createWithdrawalBtn.dataset.repeatAction = repeatAction.key;
+        createWithdrawalBtn.innerHTML = `<i data-feather="${repeatAction.icon}"></i> ${repeatAction.label}`;
+      } else {
+        createWithdrawalBtn.dataset.repeatAction = "";
+        createWithdrawalBtn.innerHTML = '<i data-feather="repeat"></i> Create Withdrawal';
+      }
     }
     if (logMaintenanceBtn) {
       const canLogMaintenance =
@@ -2125,8 +2158,8 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     }
   }
 
-  async function createWithdrawalFromDelivered(g) {
-    if (!g || !g.orderIds?.length) return;
+  async function createRepeatOrderFromDelivered(g, config) {
+    if (!g || !g.orderIds?.length || !config?.endpoint) return;
 
     if (createWithdrawalBtn) {
       createWithdrawalBtn.disabled = true;
@@ -2135,7 +2168,7 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     }
 
     try {
-      const data = await postJson("/api/orders/requested/create-withdrawal", {
+      const data = await postJson(config.endpoint, {
         orderIds: g.orderIds,
       });
 
@@ -2148,20 +2181,38 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
       toast(
         "success",
         "Created",
-        data?.message || "Withdrawal order created in Not Started.",
+        data?.message || config.successMessage || "Order created in Not Started.",
       );
     } catch (e) {
       console.error(e);
-      toast("error", "Failed", e.message || "Failed to create withdrawal order.");
+      toast("error", "Failed", e.message || config.errorMessage || "Failed to create order.");
     } finally {
       if (createWithdrawalBtn) {
         createWithdrawalBtn.disabled = false;
         const prev = createWithdrawalBtn.dataset.prevHtml;
         if (prev) createWithdrawalBtn.innerHTML = prev;
-        else createWithdrawalBtn.textContent = "Create Withdrawal";
+        else createWithdrawalBtn.innerHTML = `<i data-feather="repeat"></i> ${config?.label || "Create Order"}`;
       }
       if (window.feather) window.feather.replace();
     }
+  }
+
+  async function createWithdrawalFromDelivered(g) {
+    await createRepeatOrderFromDelivered(g, {
+      label: "Create Withdrawal",
+      endpoint: "/api/orders/requested/create-withdrawal",
+      successMessage: "Withdrawal order created in Not Started.",
+      errorMessage: "Failed to create withdrawal order.",
+    });
+  }
+
+  async function createDeliveryFromDelivered(g) {
+    await createRepeatOrderFromDelivered(g, {
+      label: "Create Delivery",
+      endpoint: "/api/orders/requested/create-delivery",
+      successMessage: "Delivery order created in Not Started.",
+      errorMessage: "Failed to create delivery order.",
+    });
   }
 
 
@@ -2357,6 +2408,12 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
   createWithdrawalBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     closeDownloadMenu();
+    const repeatAction = getDeliveredRepeatActionConfig(activeGroup, activeGroup?.items?.[0]);
+    if (!repeatAction) return;
+    if (repeatAction.key === "delivery") {
+      createDeliveryFromDelivered(activeGroup);
+      return;
+    }
     createWithdrawalFromDelivered(activeGroup);
   });
 
