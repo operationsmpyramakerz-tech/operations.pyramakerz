@@ -1003,6 +1003,52 @@ body.co-modal-open{ overflow: hidden; }
   box-shadow: 0 0 0 3px rgba(17,24,39,.10);
 }
 
+.co-submodal-fields{
+  display: grid;
+  gap: 14px;
+}
+
+.co-submodal-field{
+  min-width: 0;
+}
+
+.co-submodal-select,
+.co-submodal-textarea{
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid #E5E7EB;
+  background: #F9FAFB;
+  padding: .85rem 1rem;
+  font-weight: 700;
+  font-size: 15px;
+  color: #111827;
+}
+
+.co-submodal-select{
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #6B7280 50%), linear-gradient(135deg, #6B7280 50%, transparent 50%);
+  background-position: calc(100% - 18px) calc(50% - 3px), calc(100% - 12px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 2.6rem;
+}
+
+.co-submodal-textarea{
+  min-height: 112px;
+  resize: vertical;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.co-submodal-select:focus,
+.co-submodal-textarea:focus{
+  outline: none;
+  background: #fff;
+  border-color: rgba(17,24,39,.55);
+  box-shadow: 0 0 0 3px rgba(17,24,39,.10);
+}
+
 .co-submodal-error{
   min-height: 18px;
   margin-top: 10px;
