@@ -52,6 +52,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("reqReceivedShippedBtn") ||
     document.getElementById("reqMarkArrivedBtn");
   const createWithdrawalBtn = document.getElementById("reqCreateWithdrawalBtn");
+  const logMaintenanceBtn = document.getElementById("reqLogMaintenanceBtn");
   // Tracker steps
   const stepEls = {
     1: document.getElementById("reqStep1"),
@@ -76,6 +77,25 @@ document.addEventListener("DOMContentLoaded", () => {
   const addReceiptBtn = document.getElementById("reqAddReceiptBtn");
   const receiptInput = document.getElementById("reqReceiptInput");
   const receiptError = document.getElementById("reqReceiptError");
+
+  // Request technical visit sub-modal
+  const techVisitModal = document.getElementById("reqTechVisitModal");
+  const techVisitCloseBtn = document.getElementById("reqTechVisitClose");
+  const techVisitCancelBtn = document.getElementById("reqTechVisitCancel");
+  const techVisitConfirmBtn = document.getElementById("reqTechVisitConfirm");
+  const techVisitIssueInput = document.getElementById("reqTechVisitIssueInput");
+  const techVisitError = document.getElementById("reqTechVisitError");
+
+  // Log maintenance sub-modal
+  const maintenanceLogModal = document.getElementById("reqMaintenanceLogModal");
+  const maintenanceLogCloseBtn = document.getElementById("reqMaintenanceLogClose");
+  const maintenanceLogCancelBtn = document.getElementById("reqMaintenanceLogCancel");
+  const maintenanceLogConfirmBtn = document.getElementById("reqMaintenanceLogConfirm");
+  const maintenanceResolutionSelect = document.getElementById("reqMaintenanceResolutionSelect");
+  const maintenanceActualIssueInput = document.getElementById("reqMaintenanceActualIssueInput");
+  const maintenanceRepairActionInput = document.getElementById("reqMaintenanceRepairActionInput");
+  const maintenanceSparePartSelect = document.getElementById("reqMaintenanceSparePartSelect");
+  const maintenanceLogError = document.getElementById("reqMaintenanceLogError");
 
   // ---------- Utils ----------
   const norm = (s) => String(s || "").trim().toLowerCase();
@@ -174,11 +194,118 @@ document.addEventListener("DOMContentLoaded", () => {
     return { error: "", values: normalizeReceiptNumbers(values) };
   }
 
+  function setTechVisitError(message) {
+    if (!techVisitError) return;
+    techVisitError.textContent = String(message || "");
+  }
+
+  function isTechVisitOpen() {
+    return !!techVisitModal && techVisitModal.classList.contains("is-open");
+  }
+
+  function setMaintenanceLogError(message) {
+    if (!maintenanceLogError) return;
+    maintenanceLogError.textContent = String(message || "");
+  }
+
+  function isMaintenanceLogOpen() {
+    return !!maintenanceLogModal && maintenanceLogModal.classList.contains("is-open");
+  }
+
+  function getPrimaryMaintenanceItem(group = activeGroup) {
+    const items = Array.isArray(group?.items) ? group.items : [];
+    return items[0] || null;
+  }
+
+  function getCurrentIssueDescription(group = activeGroup) {
+    const item = getPrimaryMaintenanceItem(group);
+    return String(item?.issueDescription || item?.reason || modalReason?.textContent || "").trim();
+  }
+
+  function fillSelectOptions(selectEl, options, {
+    placeholder = "Select an option",
+    allowEmpty = true,
+    selectedValue = "",
+  } = {}) {
+    if (!selectEl) return;
+
+    const items = Array.isArray(options) ? options : [];
+    const current = String(selectedValue || "").trim();
+    const frag = document.createDocumentFragment();
+
+    if (allowEmpty) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = placeholder;
+      frag.appendChild(opt);
+    }
+
+    items.forEach((item) => {
+      const value = String(item?.value ?? item?.id ?? item?.name ?? "").trim();
+      const label = String(item?.label ?? item?.name ?? value).trim();
+      if (!value || !label) return;
+
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = label;
+      frag.appendChild(opt);
+    });
+
+    if (current && !items.some((item) => String(item?.value ?? item?.id ?? item?.name ?? "").trim() === current)) {
+      const opt = document.createElement("option");
+      opt.value = current;
+      opt.textContent = current;
+      frag.appendChild(opt);
+    }
+
+    selectEl.innerHTML = "";
+    selectEl.appendChild(frag);
+    selectEl.value = current;
+  }
+
+  let maintenanceOptionsCache = null;
+  let maintenanceOptionsPromise = null;
+
+  async function loadMaintenanceFormOptions(force = false) {
+    if (!force && maintenanceOptionsCache) return maintenanceOptionsCache;
+    if (!force && maintenanceOptionsPromise) return maintenanceOptionsPromise;
+
+    maintenanceOptionsPromise = (async () => {
+      const res = await fetch("/api/orders/requested/maintenance-form-options", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
+      if (res.status === 401) {
+        window.location.href = "/login";
+        throw new Error("Unauthorized");
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to load maintenance form options.");
+      }
+
+      maintenanceOptionsCache = {
+        resolutionMethods: Array.isArray(data?.resolutionMethods) ? data.resolutionMethods : [],
+        spareParts: Array.isArray(data?.spareParts) ? data.spareParts : [],
+      };
+
+      return maintenanceOptionsCache;
+    })();
+
+    try {
+      return await maintenanceOptionsPromise;
+    } finally {
+      maintenanceOptionsPromise = null;
+    }
+  }
+
 
   // ---------- Page cache (speed) ----------
   // Cache the requested orders list in sessionStorage to avoid re-fetching / re-rendering
   // on quick navigation. This speeds up Operations Orders noticeably on Vercel cold starts.
-  const REQ_CACHE_KEY = "cache:ops:requestedOrders:v2";
+  const REQ_CACHE_KEY = "cache:ops:requestedOrders:v3";
   const REQ_CACHE_TTL_MS = 45 * 1000; // 45s (server cache is 60s)
 
   function readRequestedCache() {
@@ -753,6 +880,11 @@ document.addEventListener("DOMContentLoaded", () => {
       g.operationsByName,
       ...(g.items || []).map((x) => x.productName),
       ...(g.items || []).map((x) => x.reason),
+      ...(g.items || []).map((x) => x.issueDescription),
+      ...(g.items || []).map((x) => x.actualIssueDescription),
+      ...(g.items || []).map((x) => x.repairAction),
+      ...(g.items || []).map((x) => x.resolutionMethod),
+      ...(g.items || []).map((x) => x.sparePartsReplacedName),
     ]
       .filter(Boolean)
       .join(" ");
@@ -897,6 +1029,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Reset any open UI inside the modal
     closeDownloadMenu();
     closeReceiptModal({ restoreFocus: false });
+    closeTechVisitModal({ restoreFocus: false });
+    closeMaintenanceLogModal({ restoreFocus: false });
 
     const all = (g.items || []).slice().sort(compareItemsByProductName);
     const stage = g.stage || computeStage(all);
@@ -994,6 +1128,13 @@ document.addEventListener("DOMContentLoaded", () => {
         (stage?.idx || 1) >= 5 &&
         orderTypeKey(g.orderType || all[0]?.orderType) === "requestproducts";
       createWithdrawalBtn.style.display = canCreateWithdrawal ? "inline-flex" : "none";
+    }
+    if (logMaintenanceBtn) {
+      const canLogMaintenance =
+        isMaintenancePage &&
+        isMaintenanceOrder &&
+        (stage?.idx || 1) >= 4;
+      logMaintenanceBtn.style.display = canLogMaintenance ? "inline-flex" : "none";
     }
 
     // Items list
@@ -1127,6 +1268,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Close any open dropdown/sub-modals first
     closeReceiptModal({ restoreFocus: false });
+    closeTechVisitModal({ restoreFocus: false });
+    closeMaintenanceLogModal({ restoreFocus: false });
     closeDownloadMenu();
 
     orderModal.classList.remove("is-open");
@@ -1234,6 +1377,162 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch {}
     }
     receiptLastFocus = null;
+  }
+
+  let techVisitLastFocus = null;
+
+  function openTechVisitModal() {
+    if (!techVisitModal || !techVisitIssueInput) return;
+
+    setTechVisitError("");
+    techVisitIssueInput.value = getCurrentIssueDescription(activeGroup);
+
+    if (techVisitConfirmBtn) techVisitConfirmBtn.disabled = false;
+    if (techVisitCancelBtn) techVisitCancelBtn.disabled = false;
+    if (techVisitCloseBtn) techVisitCloseBtn.disabled = false;
+
+    techVisitLastFocus = document.activeElement;
+    techVisitModal.hidden = false;
+    techVisitModal.classList.add("is-open");
+    techVisitModal.setAttribute("aria-hidden", "false");
+
+    if (window.feather) window.feather.replace();
+
+    window.requestAnimationFrame(() => {
+      try {
+        techVisitIssueInput.focus();
+        techVisitIssueInput.select();
+      } catch {}
+    });
+  }
+
+  function closeTechVisitModal({ restoreFocus = true } = {}) {
+    if (!techVisitModal) return;
+    if (!isTechVisitOpen() && techVisitModal.hidden) return;
+    techVisitModal.classList.remove("is-open");
+    techVisitModal.setAttribute("aria-hidden", "true");
+    techVisitModal.hidden = true;
+    setTechVisitError("");
+
+    if (restoreFocus) {
+      try {
+        if (techVisitLastFocus && typeof techVisitLastFocus.focus === "function") techVisitLastFocus.focus();
+      } catch {}
+    }
+    techVisitLastFocus = null;
+  }
+
+  let maintenanceLogLastFocus = null;
+
+  async function openMaintenanceLogModal() {
+    if (
+      !maintenanceLogModal ||
+      !maintenanceResolutionSelect ||
+      !maintenanceActualIssueInput ||
+      !maintenanceRepairActionInput ||
+      !maintenanceSparePartSelect
+    ) {
+      return;
+    }
+
+    setMaintenanceLogError("");
+
+    if (maintenanceLogConfirmBtn) maintenanceLogConfirmBtn.disabled = true;
+    if (maintenanceLogCancelBtn) maintenanceLogCancelBtn.disabled = false;
+    if (maintenanceLogCloseBtn) maintenanceLogCloseBtn.disabled = false;
+
+    try {
+      const options = await loadMaintenanceFormOptions();
+      const item = getPrimaryMaintenanceItem(activeGroup);
+      const currentResolution = String(item?.resolutionMethod || "").trim();
+      const currentSparePartId = String(item?.sparePartsReplacedId || "").trim();
+      const currentSparePartName = String(item?.sparePartsReplacedName || "").trim();
+
+      fillSelectOptions(
+        maintenanceResolutionSelect,
+        (options?.resolutionMethods || []).map((entry) => ({
+          value: entry?.name,
+          label: entry?.name,
+        })),
+        {
+          placeholder: "Select resolution method",
+          allowEmpty: true,
+          selectedValue: currentResolution,
+        },
+      );
+
+      const sparePartOptions = (options?.spareParts || []).map((entry) => ({
+        value: entry?.id,
+        label: entry?.name,
+      }));
+
+      fillSelectOptions(
+        maintenanceSparePartSelect,
+        sparePartOptions,
+        {
+          placeholder: "No spare part selected",
+          allowEmpty: true,
+          selectedValue: currentSparePartId,
+        },
+      );
+
+      if (currentSparePartName && !currentSparePartId) {
+        fillSelectOptions(
+          maintenanceSparePartSelect,
+          [
+            ...sparePartOptions,
+            { value: currentSparePartName, label: currentSparePartName },
+          ],
+          {
+            placeholder: "No spare part selected",
+            allowEmpty: true,
+            selectedValue: currentSparePartName,
+          },
+        );
+      }
+
+      maintenanceActualIssueInput.value = String(item?.actualIssueDescription || "");
+      maintenanceRepairActionInput.value = String(item?.repairAction || "");
+
+      maintenanceLogLastFocus = document.activeElement;
+      maintenanceLogModal.hidden = false;
+      maintenanceLogModal.classList.add("is-open");
+      maintenanceLogModal.setAttribute("aria-hidden", "false");
+
+      if (window.feather) window.feather.replace();
+      if (maintenanceLogConfirmBtn) maintenanceLogConfirmBtn.disabled = false;
+
+      window.requestAnimationFrame(() => {
+        try {
+          maintenanceResolutionSelect.focus();
+        } catch {}
+      });
+    } catch (e) {
+      console.error(e);
+      setMaintenanceLogError(e.message || "Failed to load maintenance form.");
+      if (maintenanceLogConfirmBtn) maintenanceLogConfirmBtn.disabled = false;
+      if (maintenanceLogCancelBtn) maintenanceLogCancelBtn.disabled = false;
+      if (maintenanceLogCloseBtn) maintenanceLogCloseBtn.disabled = false;
+      toast("error", "Failed", e.message || "Failed to load maintenance form.");
+    }
+  }
+
+  function closeMaintenanceLogModal({ restoreFocus = true } = {}) {
+    if (!maintenanceLogModal) return;
+    if (!isMaintenanceLogOpen() && maintenanceLogModal.hidden) return;
+    maintenanceLogModal.classList.remove("is-open");
+    maintenanceLogModal.setAttribute("aria-hidden", "true");
+    maintenanceLogModal.hidden = true;
+    setMaintenanceLogError("");
+
+    if (restoreFocus) {
+      try {
+        if (maintenanceLogLastFocus && typeof maintenanceLogLastFocus.focus === "function") {
+          maintenanceLogLastFocus.focus();
+        }
+      } catch {}
+    }
+    maintenanceLogLastFocus = null;
   }
 
   // ---------- Actions ----------
@@ -1537,10 +1836,11 @@ async function postJson(url, body) {
     }, 0);
   }
 
-async function markReceivedByOperations(g, receiptNumber) {
+async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     if (!g || !g.orderIds?.length) return;
 
     const isMaintenanceOrder = isMaintenanceOrderType(g.orderType || g.items?.[0]?.orderType);
+    const issueDescriptionText = String(extra?.issueDescription || "").trim();
 
     // Receipt number can be text now (Notion column is rich_text) so we keep it as string.
     // If missing, we still allow the action.
@@ -1598,6 +1898,7 @@ async function markReceivedByOperations(g, receiptNumber) {
         orderIds: g.orderIds,
         receiptNumber: rnVal,
         quantities,
+        issueDescription: issueDescriptionText || null,
       });
 
       // Update local state (set status = Shipped + operationsByName)
@@ -1616,6 +1917,9 @@ async function markReceivedByOperations(g, receiptNumber) {
         if (username) it.operationsByName = username;
         if (data.receiptNumber !== null && data.receiptNumber !== undefined) {
           it.receiptNumber = data.receiptNumber;
+        }
+        if (issueDescriptionText) {
+          it.issueDescription = data?.issueDescription || issueDescriptionText;
         }
 
         const base = baseQty(it);
@@ -1689,7 +1993,12 @@ async function markReceivedByOperations(g, receiptNumber) {
       closeReceiptModal({ restoreFocus: false });
     } catch (e) {
       console.error(e);
-      alert(e.message || (isMaintenanceOrder ? "Failed to request technical visit." : "Failed to mark as received."));
+      const message = e.message || (isMaintenanceOrder ? "Failed to request technical visit." : "Failed to mark as received.");
+      if (isMaintenanceOrder && isTechVisitOpen()) {
+        setTechVisitError(message);
+      } else {
+        alert(message);
+      }
     } finally {
       if (shippedBtn) {
         shippedBtn.disabled = false;
@@ -1697,6 +2006,79 @@ async function markReceivedByOperations(g, receiptNumber) {
         if (prev) shippedBtn.innerHTML = prev;
         else shippedBtn.textContent = isMaintenanceOrder ? "Request Technical Visit" : "Received by operations";
       }
+    }
+  }
+
+  async function saveMaintenanceLog(g, payload = {}) {
+    if (!g || !g.orderIds?.length) return;
+
+    const resolutionMethod = String(payload?.resolutionMethod || "").trim();
+    const actualIssueDescription = String(payload?.actualIssueDescription || "").trim();
+    const repairAction = String(payload?.repairAction || "").trim();
+    const sparePartId = String(payload?.sparePartId || "").trim();
+
+    if (maintenanceLogConfirmBtn) {
+      maintenanceLogConfirmBtn.disabled = true;
+      maintenanceLogConfirmBtn.dataset.prevHtml = maintenanceLogConfirmBtn.innerHTML;
+      maintenanceLogConfirmBtn.textContent = "Saving...";
+    }
+    if (maintenanceLogCancelBtn) maintenanceLogCancelBtn.disabled = true;
+    if (maintenanceLogCloseBtn) maintenanceLogCloseBtn.disabled = true;
+
+    try {
+      const data = await postJson("/api/orders/requested/log-maintenance", {
+        orderIds: g.orderIds,
+        resolutionMethod,
+        actualIssueDescription,
+        repairAction,
+        sparePartId,
+      });
+
+      const selectedSparePartOption = maintenanceSparePartSelect?.selectedOptions?.[0] || null;
+      const selectedSparePartLabel = String(
+        data?.sparePartsReplacedName ||
+        selectedSparePartOption?.textContent ||
+        "",
+      ).trim();
+      const idSet = new Set(g.orderIds);
+
+      allItems.forEach((it) => {
+        if (!idSet.has(it.id)) return;
+        it.resolutionMethod = data?.resolutionMethod || resolutionMethod || null;
+        it.actualIssueDescription = data?.actualIssueDescription || actualIssueDescription || null;
+        it.repairAction = data?.repairAction || repairAction || null;
+        it.sparePartsReplacedId = data?.sparePartsReplacedId || sparePartId || null;
+        it.sparePartsReplacedName =
+          data?.sparePartsReplacedName ||
+          selectedSparePartLabel ||
+          null;
+      });
+
+      writeRequestedCache(allItems);
+      groups = buildGroups(allItems);
+      render();
+
+      const updated = groups.find((x) => x.groupId === g.groupId);
+      if (updated && orderModal?.classList.contains("is-open")) {
+        openOrderModal(updated);
+      }
+
+      closeMaintenanceLogModal({ restoreFocus: false });
+      toast("success", "Saved", "Maintenance log saved.");
+    } catch (e) {
+      console.error(e);
+      setMaintenanceLogError(e.message || "Failed to save maintenance log.");
+      toast("error", "Failed", e.message || "Failed to save maintenance log.");
+    } finally {
+      if (maintenanceLogConfirmBtn) {
+        maintenanceLogConfirmBtn.disabled = false;
+        const prev = maintenanceLogConfirmBtn.dataset.prevHtml;
+        if (prev) maintenanceLogConfirmBtn.innerHTML = prev;
+        else maintenanceLogConfirmBtn.textContent = "Confirm";
+      }
+      if (maintenanceLogCancelBtn) maintenanceLogCancelBtn.disabled = false;
+      if (maintenanceLogCloseBtn) maintenanceLogCloseBtn.disabled = false;
+      if (window.feather) window.feather.replace();
     }
   }
 
@@ -1787,6 +2169,7 @@ async function markReceivedByOperations(g, receiptNumber) {
     async function loadRequested() {
     const cached = readRequestedCache();
     const hasCache = !!(cached && Array.isArray(cached.data));
+    const loadingLabel = isMaintenancePage ? "Loading maintenance orders" : "Loading requested orders";
 
     // Render cached data immediately (if available)
     if (hasCache) {
@@ -1802,7 +2185,7 @@ async function markReceivedByOperations(g, receiptNumber) {
         <div class="modern-loading" role="status" aria-live="polite">
           <div class="modern-loading__spinner" aria-hidden="true"></div>
           <div class="modern-loading__text">
-            Loading requested orders
+            ${loadingLabel}
             <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span>
           </div>
         </div>
@@ -1893,10 +2276,28 @@ async function markReceivedByOperations(g, receiptNumber) {
   receiptModal?.addEventListener("click", (e) => {
     if (e.target === receiptModal) closeReceiptModal();
   });
+  techVisitModal?.addEventListener("click", (e) => {
+    if (e.target === techVisitModal) closeTechVisitModal();
+  });
+  maintenanceLogModal?.addEventListener("click", (e) => {
+    if (e.target === maintenanceLogModal) closeMaintenanceLogModal();
+  });
 
   // Global Esc handling (close sub-modal -> dropdown -> main modal)
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+
+    if (isMaintenanceLogOpen()) {
+      e.preventDefault();
+      closeMaintenanceLogModal();
+      return;
+    }
+
+    if (isTechVisitOpen()) {
+      e.preventDefault();
+      closeTechVisitModal();
+      return;
+    }
 
     if (isReceiptOpen()) {
       e.preventDefault();
@@ -1942,16 +2343,89 @@ async function markReceivedByOperations(g, receiptNumber) {
     closeDownloadMenu();
     const isMaintenanceOrder = isMaintenanceOrderType(activeGroup?.orderType || activeGroup?.items?.[0]?.orderType);
     if (isMaintenanceOrder) {
-      markReceivedByOperations(activeGroup, null);
+      openTechVisitModal();
       return;
     }
     openReceiptModal();
   });
   arrivedBtn?.addEventListener("click", () => markArrived(activeGroup));
+  logMaintenanceBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    setMaintenanceLogError("");
+    await openMaintenanceLogModal();
+  });
   createWithdrawalBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     closeDownloadMenu();
     createWithdrawalFromDelivered(activeGroup);
+  });
+
+  techVisitCloseBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeTechVisitModal();
+  });
+  techVisitCancelBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeTechVisitModal();
+  });
+  techVisitIssueInput?.addEventListener("input", () => {
+    if (techVisitError?.textContent) setTechVisitError("");
+  });
+  techVisitConfirmBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+
+    const issueDescription = String(techVisitIssueInput?.value || "").trim();
+    if (!issueDescription) {
+      setTechVisitError("Issue description is required.");
+      return;
+    }
+
+    setTechVisitError("");
+
+    if (techVisitConfirmBtn) techVisitConfirmBtn.disabled = true;
+    if (techVisitCancelBtn) techVisitCancelBtn.disabled = true;
+    if (techVisitCloseBtn) techVisitCloseBtn.disabled = true;
+
+    try {
+      await markReceivedByOperations(activeGroup, null, { issueDescription });
+      closeTechVisitModal({ restoreFocus: false });
+    } finally {
+      if (techVisitConfirmBtn) techVisitConfirmBtn.disabled = false;
+      if (techVisitCancelBtn) techVisitCancelBtn.disabled = false;
+      if (techVisitCloseBtn) techVisitCloseBtn.disabled = false;
+    }
+  });
+
+  maintenanceLogCloseBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeMaintenanceLogModal();
+  });
+  maintenanceLogCancelBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeMaintenanceLogModal();
+  });
+  maintenanceResolutionSelect?.addEventListener("change", () => {
+    if (maintenanceLogError?.textContent) setMaintenanceLogError("");
+  });
+  maintenanceActualIssueInput?.addEventListener("input", () => {
+    if (maintenanceLogError?.textContent) setMaintenanceLogError("");
+  });
+  maintenanceRepairActionInput?.addEventListener("input", () => {
+    if (maintenanceLogError?.textContent) setMaintenanceLogError("");
+  });
+  maintenanceSparePartSelect?.addEventListener("change", () => {
+    if (maintenanceLogError?.textContent) setMaintenanceLogError("");
+  });
+  maintenanceLogConfirmBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    setMaintenanceLogError("");
+
+    await saveMaintenanceLog(activeGroup, {
+      resolutionMethod: maintenanceResolutionSelect?.value || "",
+      actualIssueDescription: maintenanceActualIssueInput?.value || "",
+      repairAction: maintenanceRepairActionInput?.value || "",
+      sparePartId: maintenanceSparePartSelect?.value || "",
+    });
   });
 
   receiptCloseBtn?.addEventListener("click", (e) => {
