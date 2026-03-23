@@ -157,6 +157,11 @@
       </div>
 
       <div class="co-modal-actions ro-actions ro-actions--right" id="reqModalActions">
+        <button type="button" class="ro-action-btn ro-action-btn--light" id="reqLogMaintenanceBtn" style="display:none;">
+          <i data-feather="clipboard"></i>
+          Log Maintenance
+        </button>
+
         <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqReceivedShippedBtn" style="display:none;">
           <i data-feather="check-circle"></i>
           Mark as Delivered
@@ -164,6 +169,65 @@
       </div>
 
       <div class="co-modal-items" id="reqModalItems"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== LOG MAINTENANCE (SUB-MODAL) ===================== -->
+<div id="reqMaintenanceLogModal" class="co-submodal-overlay" aria-hidden="true" hidden>
+  <div class="co-submodal-dialog" role="dialog" aria-modal="true" aria-labelledby="reqMaintenanceLogTitle" aria-describedby="reqMaintenanceLogSub">
+    <button type="button" class="co-submodal-close" id="reqMaintenanceLogClose" aria-label="Close">
+      <i data-feather="x"></i>
+    </button>
+
+    <div class="co-submodal-header">
+      <div class="co-submodal-title" id="reqMaintenanceLogTitle">Log Maintenance</div>
+      <div class="co-submodal-sub" id="reqMaintenanceLogSub">Save the maintenance work details for this order.</div>
+    </div>
+
+    <div class="co-submodal-body">
+      <div class="co-submodal-fields">
+        <div class="co-submodal-field">
+          <label class="co-submodal-label" for="reqMaintenanceResolutionSelect">Resolution Method</label>
+          <select class="co-submodal-select" id="reqMaintenanceResolutionSelect">
+            <option value="">Select resolution method</option>
+          </select>
+        </div>
+
+        <div class="co-submodal-field">
+          <label class="co-submodal-label" for="reqMaintenanceActualIssueInput">The Actual Issue Description</label>
+          <textarea
+            class="co-submodal-textarea"
+            id="reqMaintenanceActualIssueInput"
+            rows="5"
+            placeholder="Write the actual issue description"
+          ></textarea>
+        </div>
+
+        <div class="co-submodal-field">
+          <label class="co-submodal-label" for="reqMaintenanceRepairActionInput">Repair Action</label>
+          <textarea
+            class="co-submodal-textarea"
+            id="reqMaintenanceRepairActionInput"
+            rows="5"
+            placeholder="Write the repair action"
+          ></textarea>
+        </div>
+
+        <div class="co-submodal-field">
+          <label class="co-submodal-label" for="reqMaintenanceSparePartSelect">Spare parts replaced</label>
+          <select class="co-submodal-select" id="reqMaintenanceSparePartSelect">
+            <option value="">No spare part selected</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="co-submodal-error" id="reqMaintenanceLogError" role="alert" aria-live="polite"></div>
+    </div>
+
+    <div class="co-submodal-actions">
+      <button type="button" class="ro-action-btn ro-action-btn--light" id="reqMaintenanceLogCancel">Cancel</button>
+      <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqMaintenanceLogConfirm">Confirm</button>
     </div>
   </div>
 </div>

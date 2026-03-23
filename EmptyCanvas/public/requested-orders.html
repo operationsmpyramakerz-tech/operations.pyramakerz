@@ -239,6 +239,40 @@
     </div>
   </div>
 </div>
+
+<!-- ===================== REQUEST TECHNICAL VISIT (SUB-MODAL) ===================== -->
+<div id="reqTechVisitModal" class="co-submodal-overlay" aria-hidden="true" hidden>
+  <div class="co-submodal-dialog" role="dialog" aria-modal="true" aria-labelledby="reqTechVisitTitle" aria-describedby="reqTechVisitSub">
+    <button type="button" class="co-submodal-close" id="reqTechVisitClose" aria-label="Close">
+      <i data-feather="x"></i>
+    </button>
+
+    <div class="co-submodal-header">
+      <div class="co-submodal-title" id="reqTechVisitTitle">Request Technical Visit</div>
+      <div class="co-submodal-sub" id="reqTechVisitSub">Review and edit the issue description before sending the maintenance order.</div>
+    </div>
+
+    <div class="co-submodal-body">
+      <div class="co-submodal-fields">
+        <div class="co-submodal-field">
+          <label class="co-submodal-label" for="reqTechVisitIssueInput">Issue Description</label>
+          <textarea
+            class="co-submodal-textarea"
+            id="reqTechVisitIssueInput"
+            rows="5"
+            placeholder="Describe the issue"
+          ></textarea>
+        </div>
+      </div>
+      <div class="co-submodal-error" id="reqTechVisitError" role="alert" aria-live="polite"></div>
+    </div>
+
+    <div class="co-submodal-actions">
+      <button type="button" class="ro-action-btn ro-action-btn--light" id="reqTechVisitCancel">Cancel</button>
+      <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqTechVisitConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
 </div>
 </div>
 <script>feather.replace();</script>
