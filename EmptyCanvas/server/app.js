@@ -7086,6 +7086,189 @@ app.post(
   },
 );
 
+
+app.post(
+  "/api/orders/requested/create-delivery",
+  requireAuth,
+  requirePage("Requested Orders"),
+  async (req, res) => {
+    try {
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const dbProps = await getOrdersDBProps();
+      const statusProp = await detectStatusPropName();
+      const orderTypeProp = await detectOrderTypePropName();
+      const approvalProp = await detectSVApprovalPropName();
+      const reqQtyProp = await detectRequestedQtyPropName();
+      const editedQtyProp = await detectSupervisorEditedQtyPropName();
+      const teamsProp = await detectOrderTeamsMembersPropName();
+      const orderGroupIdProp = await detectOrderGroupIdPropName();
+      const receivedProp = await (async () => {
+        if (dbProps?.[REC_PROP_HARDBIND]?.type === "number") return REC_PROP_HARDBIND;
+        return await detectReceivedQtyPropName();
+      })();
+
+      const normLabel = (s) => String(s || "").trim().toLowerCase();
+      const exactOptionName = (propName, desired) => {
+        const meta = propName ? dbProps?.[propName] : null;
+        const options = meta?.type === "status" ? meta?.status?.options : meta?.select?.options;
+        if (Array.isArray(options) && options.length) {
+          const exact = options.find((o) => normLabel(o?.name) === normLabel(desired));
+          const partial = options.find((o) => normLabel(o?.name).includes(normLabel(desired)));
+          return exact?.name || partial?.name || desired;
+        }
+        return desired;
+      };
+      const makeOptionValue = (propName, desired, fallbackType = "select") => {
+        if (!propName) return null;
+        const meta = dbProps?.[propName] || null;
+        const type = meta?.type || fallbackType;
+        const name = exactOptionName(propName, desired);
+        return type === "status" ? { status: { name } } : { select: { name } };
+      };
+      const getPropInsensitive = (props, name) => {
+        const want = String(name || "").trim().toLowerCase();
+        for (const [k, v] of Object.entries(props || {})) {
+          if (String(k || "").trim().toLowerCase() === want) return v;
+        }
+        return null;
+      };
+
+      const pages = (await Promise.all(
+        ids.map(async (id) => {
+          try {
+            return await notion.pages.retrieve({ page_id: id });
+          } catch {
+            return null;
+          }
+        }),
+      )).filter(Boolean);
+
+      if (!pages.length) return res.status(404).json({ error: "Orders not found" });
+
+      const firstProps = pages[0]?.properties || {};
+      const sourceOrderType = _extractOrderTypeInfo(firstProps).orderType;
+      if (_normKeyOrderType(sourceOrderType) !== _normKeyOrderType("Withdraw Products")) {
+        return res.status(400).json({ error: "Only delivered Withdraw Products orders can create a delivery." });
+      }
+
+      const sourceStatusProp = firstProps?.[statusProp] || getPropInsensitive(firstProps, statusProp);
+      const sourceStatusName =
+        sourceStatusProp?.status?.name ||
+        sourceStatusProp?.select?.name ||
+        "";
+      if (!/(arrived|delivered|received)/i.test(String(sourceStatusName || ""))) {
+        return res.status(400).json({ error: "Order must be in Delivered before creating a delivery." });
+      }
+
+      let orderGroupIdNumber = null;
+      if (orderGroupIdProp) {
+        orderGroupIdNumber = await allocateNextOrderGroupIdNumber(orderGroupIdProp);
+      }
+
+      const statusPlacedValue = makeOptionValue(statusProp, "Order Placed", "select");
+      const deliveryOrderTypeValue = makeOptionValue(orderTypeProp, "Request Products", "select");
+      const approvalApprovedValue = makeOptionValue(approvalProp, "Approved", "select");
+
+      const ownerIdsToInvalidate = new Set();
+      const creations = [];
+
+      for (const page of pages) {
+        const props = page.properties || {};
+        const productRel = Array.isArray(props?.Product?.relation) ? props.Product.relation : [];
+        const productPageId = productRel[0]?.id || null;
+        if (!productPageId) continue;
+
+        const teamsRelation = Array.isArray(props?.[teamsProp]?.relation) ? props[teamsProp].relation : [];
+        teamsRelation.forEach((r) => {
+          const id = String(r?.id || "").trim();
+          if (id) ownerIdsToInvalidate.add(id);
+        });
+
+        const qtyProgressRaw =
+          _extractPropNumber(getPropInsensitive(props, "Quantity Progress")) ??
+          _extractPropNumber(getPropInsensitive(props, "Quantity progress"));
+        const qtyRequestedRaw =
+          _extractPropNumber(props?.[reqQtyProp]) ??
+          _extractPropNumber(getPropInsensitive(props, "Quantity Requested")) ??
+          _extractPropNumber(getPropInsensitive(props, "Quantity requested"));
+        const baseQty =
+          qtyProgressRaw !== null && qtyProgressRaw !== undefined && Number.isFinite(Number(qtyProgressRaw))
+            ? Number(qtyProgressRaw)
+            : qtyRequestedRaw !== null && qtyRequestedRaw !== undefined && Number.isFinite(Number(qtyRequestedRaw))
+              ? Number(qtyRequestedRaw)
+              : 0;
+        const receivedQtyRaw = receivedProp ? _extractPropNumber(props?.[receivedProp]) : null;
+        const effectiveQty =
+          receivedQtyRaw !== null && receivedQtyRaw !== undefined && Number.isFinite(Number(receivedQtyRaw))
+            ? Number(receivedQtyRaw)
+            : baseQty;
+        const deliveryQty = Math.abs(roundOrderQty(effectiveQty));
+        if (!hasNonZeroOrderQty(deliveryQty)) continue;
+
+        const reasonText =
+          props?.Reason?.title?.map((x) => x?.plain_text || "").join("").trim() ||
+          "Request Products";
+
+        const createProps = {
+          Reason: { title: [{ text: { content: reasonText } }] },
+          Product: { relation: [{ id: productPageId }] },
+          [reqQtyProp]: { number: deliveryQty },
+          [teamsProp]: { relation: teamsRelation.map((r) => ({ id: r.id })) },
+          ...(statusProp && statusPlacedValue ? { [statusProp]: statusPlacedValue } : {}),
+          ...(orderTypeProp && deliveryOrderTypeValue ? { [orderTypeProp]: deliveryOrderTypeValue } : {}),
+          ...(approvalProp && approvalApprovedValue ? { [approvalProp]: approvalApprovedValue } : {}),
+          ...(orderGroupIdProp && Number.isFinite(Number(orderGroupIdNumber))
+            ? { [orderGroupIdProp]: { number: Number(orderGroupIdNumber) } }
+            : {}),
+        };
+
+        if (receivedProp && dbProps?.[receivedProp]?.type === "number") {
+          createProps[receivedProp] = { number: null };
+        }
+        if (editedQtyProp && dbProps?.[editedQtyProp]?.type === "number") {
+          createProps[editedQtyProp] = { number: null };
+        }
+
+        const created = await notion.pages.create({
+          parent: { database_id: ordersDatabaseId },
+          properties: createProps,
+        });
+        creations.push(created.id);
+      }
+
+      if (!creations.length) {
+        return res.status(400).json({ error: "No delivered quantities were found to create a delivery." });
+      }
+
+      await cacheDel("cache:api:orders:requested:v7");
+      await Promise.all(
+        Array.from(ownerIdsToInvalidate).map((mid) => cacheDel(`cache:api:orders:list:${mid}:v7`)),
+      );
+
+      return res.json({
+        success: true,
+        createdCount: creations.length,
+        orderIdNumber: Number.isFinite(Number(orderGroupIdNumber)) ? Number(orderGroupIdNumber) : null,
+        message: "Delivery order created in Not Started.",
+      });
+    } catch (e) {
+      console.error("create-delivery error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to create delivery order" });
+    }
+  },
+);
+
 // Update "Quantity Received by operations" for a single order item (Operations edit Qty)
 // Body: { value: number }
 app.post(
