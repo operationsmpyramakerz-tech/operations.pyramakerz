@@ -241,7 +241,7 @@ async function clearUserServerCaches(req, opts = {}) {
   }
 
   tasks.push(
-    cacheDel("cache:api:orders:requested:v6"),
+    cacheDel("cache:api:orders:requested:v7"),
     cacheDel("cache:api:expenses:users:v1"),
     cacheDel("cache:api:expenses:types:v1"),
     cacheDel("cache:api:expenses:cash-in-from:v1"),
@@ -1095,6 +1095,223 @@ async function detectIssueDescriptionPropName() {
       "Issue_Description",
     ]) || null
   );
+}
+
+async function detectActualIssueDescriptionPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "The Actual Issue Description",
+      "Actual Issue Description",
+      "Actual issue description",
+      "The actual issue description",
+      "Actual Issue",
+    ]) || null
+  );
+}
+
+async function detectRepairActionPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "Repair Action",
+      "Repair action",
+      "Repair_Action",
+      "Action Taken",
+      "Repair",
+    ]) || null
+  );
+}
+
+async function detectResolutionMethodPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "Resolution Method",
+      "Resolution method",
+      "Method of Resolution",
+      "Resolution",
+    ]) || null
+  );
+}
+
+async function detectSparePartsReplacedPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      "Spare parts replaced",
+      "Spare Parts Replaced",
+      "Spare part replaced",
+      "Spare Part Replaced",
+      "Spare parts used",
+      "Spare Parts Used",
+    ]) || null
+  );
+}
+
+function notionTextFragmentsFromString(value, chunkSize = 1800) {
+  const text = String(value || "").replace(/\r\n/g, "\n").trim();
+  if (!text) return [];
+
+  const out = [];
+  for (let i = 0; i < text.length; i += chunkSize) {
+    out.push({ text: { content: text.slice(i, i + chunkSize) } });
+  }
+  return out;
+}
+
+function buildWritableTextPropValue(propName, propType, value) {
+  if (!propName) return null;
+  const type = String(propType || "").trim();
+  const fragments = notionTextFragmentsFromString(value);
+
+  if (type === "title") return { [propName]: { title: fragments } };
+  if (type === "rich_text") return { [propName]: { rich_text: fragments } };
+  if (type === "select") {
+    const clean = String(value || "").trim();
+    return { [propName]: { select: clean ? { name: clean } : null } };
+  }
+  if (type === "status") {
+    const clean = String(value || "").trim();
+    return { [propName]: { status: clean ? { name: clean } : null } };
+  }
+  return null;
+}
+
+function notionPropPlainText(prop) {
+  try {
+    if (!prop) return "";
+    if (prop.type === "rich_text") {
+      return (prop.rich_text || []).map((x) => x?.plain_text || "").join("").trim();
+    }
+    if (prop.type === "title") {
+      return (prop.title || []).map((x) => x?.plain_text || "").join("").trim();
+    }
+    if (prop.type === "select") return String(prop.select?.name || "").trim();
+    if (prop.type === "status") return String(prop.status?.name || "").trim();
+    if (prop.type === "number" && (prop.number === 0 || typeof prop.number === "number")) {
+      return String(prop.number);
+    }
+    if (prop.type === "multi_select") {
+      return (prop.multi_select || [])
+        .map((x) => String(x?.name || "").trim())
+        .filter(Boolean)
+        .join(", ");
+    }
+  } catch {}
+  return "";
+}
+
+function notionPropRelationIds(prop) {
+  try {
+    if (!prop || prop.type !== "relation") return [];
+    return (prop.relation || []).map((x) => x?.id).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function notionSelectOrStatusOptions(propMeta) {
+  try {
+    if (!propMeta) return [];
+    if (propMeta.type === "status") return Array.isArray(propMeta.status?.options) ? propMeta.status.options : [];
+    if (propMeta.type === "select") return Array.isArray(propMeta.select?.options) ? propMeta.select.options : [];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function notionExactOptionName(propMeta, desired, fallback = "") {
+  const wanted = String(desired || "").trim();
+  if (!wanted) return String(fallback || "").trim();
+  const options = notionSelectOrStatusOptions(propMeta);
+  if (!options.length) return wanted;
+
+  const normalized = normKey(wanted);
+  const exact = options.find((opt) => normKey(opt?.name) === normalized);
+  if (exact?.name) return exact.name;
+
+  const partial = options.find((opt) => normKey(opt?.name).includes(normalized));
+  if (partial?.name) return partial.name;
+
+  return String(fallback || wanted).trim();
+}
+
+function isSparePartsTagName(value) {
+  const key = normKey(value);
+  return key === normKey("Spare Parts") || key === normKey("Spare Part") || key === "spareparts";
+}
+
+async function listSparePartsComponents() {
+  if (!componentsDatabaseId) return [];
+
+  const out = [];
+  let hasMore = true;
+  let startCursor = undefined;
+
+  const getPropInsensitive = (props, name) => {
+    if (!props) return null;
+    if (props[name]) return props[name];
+    const target = normKey(name);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (normKey(k) === target) return v;
+    }
+    return null;
+  };
+
+  while (hasMore) {
+    const response = await notion.databases.query({
+      database_id: componentsDatabaseId,
+      start_cursor: startCursor,
+      page_size: 100,
+      sorts: [{ timestamp: "created_time", direction: "descending" }],
+    });
+
+    for (const page of response.results || []) {
+      const props = page.properties || {};
+      const tagsProp =
+        getPropInsensitive(props, "Tags") ||
+        getPropInsensitive(props, "Tag");
+
+      const tags = [];
+      try {
+        if (tagsProp?.type === "multi_select") {
+          for (const item of tagsProp.multi_select || []) {
+            const name = String(item?.name || "").trim();
+            if (name) tags.push(name);
+          }
+        } else if (tagsProp?.type === "select") {
+          const name = String(tagsProp.select?.name || "").trim();
+          if (name) tags.push(name);
+        }
+      } catch {}
+
+      if (!tags.some(isSparePartsTagName)) continue;
+
+      const titlePropName = firstTitlePropName(props);
+      const name = titlePropName
+        ? (props[titlePropName]?.title || []).map((x) => x?.plain_text || "").join("").trim()
+        : "";
+
+      if (!name) continue;
+
+      out.push({
+        id: page.id,
+        name,
+        tags,
+      });
+    }
+
+    hasMore = !!response.has_more;
+    startCursor = response.next_cursor || undefined;
+  }
+
+  out.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+    sensitivity: "base",
+    numeric: true,
+  }));
+  return out;
 }
 
 async function detectMaintenanceSchoolPropName() {
@@ -5377,7 +5594,7 @@ app.get(
     res.set("Cache-Control", "no-store");
     try {
       // Cache version is bumped when response logic/shape changes.
-      const cacheKey = "cache:api:orders:requested:v6";
+      const cacheKey = "cache:api:orders:requested:v7";
       const data = await cacheGetOrSet(cacheKey, 60, async () => {
       const all = [];
       let hasMore = true,
@@ -5626,6 +5843,11 @@ app.get(
       }
 
       const receivedQtyPropName = await detectReceivedQtyPropName();
+      const issueDescPropName = await detectIssueDescriptionPropName();
+      const actualIssueDescPropName = await detectActualIssueDescriptionPropName();
+      const repairActionPropName = await detectRepairActionPropName();
+      const resolutionMethodPropName = await detectResolutionMethodPropName();
+      const sparePartsReplacedPropName = await detectSparePartsReplacedPropName();
 
       while (hasMore) {
         const resp = await notion.databases.query({
@@ -5678,6 +5900,57 @@ app.get(
           const productUrl = prod?.url || null;
 
           const reason = props.Reason?.title?.[0]?.plain_text || "No Reason";
+
+          const issueDescription =
+            (issueDescPropName ? parseTextProp(props[issueDescPropName]) : null) ||
+            null;
+
+          const actualIssueDescription =
+            (actualIssueDescPropName ? parseTextProp(props[actualIssueDescPropName]) : null) ||
+            null;
+
+          const repairAction =
+            (repairActionPropName ? parseTextProp(props[repairActionPropName]) : null) ||
+            null;
+
+          const resolutionMethodProp = resolutionMethodPropName
+            ? props[resolutionMethodPropName]
+            : null;
+          const resolutionMethod = parseTextProp(resolutionMethodProp) || null;
+          const resolutionMethodColor =
+            resolutionMethodProp?.select?.color ||
+            resolutionMethodProp?.status?.color ||
+            null;
+
+          const sparePartsProp = sparePartsReplacedPropName
+            ? props[sparePartsReplacedPropName]
+            : null;
+          const sparePartsReplacedIds = notionPropRelationIds(sparePartsProp);
+          const sparePartsReplacedId = sparePartsReplacedIds[0] || null;
+          let sparePartsReplacedName = null;
+
+          if (sparePartsReplacedId) {
+            try {
+              const spareInfo = await getProductInfo(sparePartsReplacedId);
+              sparePartsReplacedName =
+                String(spareInfo?.name || "").trim() ||
+                String(await pageTitleById(sparePartsReplacedId) || "").trim() ||
+                null;
+            } catch {
+              sparePartsReplacedName = String(await pageTitleById(sparePartsReplacedId) || "").trim() || null;
+            }
+          }
+
+          if (!sparePartsReplacedName && sparePartsProp?.type === "multi_select") {
+            sparePartsReplacedName = (sparePartsProp.multi_select || [])
+              .map((x) => String(x?.name || "").trim())
+              .filter(Boolean)
+              .join(", ") || null;
+          }
+
+          if (!sparePartsReplacedName) {
+            sparePartsReplacedName = parseTextProp(sparePartsProp) || null;
+          }
 
 // Qty in the UI should come from "Quantity Progress" (fallback to "Quantity Requested" if missing)
 const qtyProgress =
@@ -5844,6 +6117,13 @@ if (svApproval !== "Approved") continue;
     statusColor,
     orderType,
     orderTypeColor,
+    issueDescription,
+    actualIssueDescription,
+    repairAction,
+    resolutionMethod,
+    resolutionMethodColor,
+    sparePartsReplacedId,
+    sparePartsReplacedName,
     operationsByIds,
     operationsByNames,
     operationsById,
@@ -5918,7 +6198,7 @@ app.post(
       );
 
       // Invalidate caches so lists reflect the assignment immediately.
-      await cacheDel("cache:api:orders:requested:v6");
+      await cacheDel("cache:api:orders:requested:v7");
       const memberIdsNorm = (memberIds || [])
         .map((x) => String(x || "").trim())
         .filter(Boolean)
@@ -5940,10 +6220,10 @@ app.post(
 app.post(
   "/api/orders/requested/mark-shipped",
   requireAuth,
-  requirePage("Requested Orders"),
+  requirePage(["Requested Orders", "Maintenance Orders"]),
   async (req, res) => {
     try {
-      const { orderIds, receiptNumber, quantities } = req.body || {};
+      const { orderIds, receiptNumber, quantities, issueDescription } = req.body || {};
       if (!Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "orderIds required" });
       }
@@ -6087,6 +6367,10 @@ app.post(
 
       const propsToUpdate = { [statusProp]: value };
 
+      const issueDescriptionText = String(issueDescription || "").replace(/\r\n/g, "\n").trim();
+      const issueDescPropName = issueDescriptionText ? await detectIssueDescriptionPropName() : null;
+      const issueDescMeta = issueDescPropName ? dbProps?.[issueDescPropName] || null : null;
+
       if (operationsProp && currentUserPageId && operationsMeta?.type === "relation") {
         propsToUpdate[operationsProp] = { relation: [{ id: currentUserPageId }] };
       } else if (operationsProp && req.session.username && operationsMeta?.type === "rich_text") {
@@ -6181,6 +6465,16 @@ app.post(
           }
 
           const updateProps = { ...propsToUpdate };
+
+          if (issueDescriptionText && issueDescPropName) {
+            const actualIssueType = pageProps?.[issueDescPropName]?.type || issueDescMeta?.type || "rich_text";
+            const issuePropValue = buildWritableTextPropValue(
+              issueDescPropName,
+              actualIssueType,
+              issueDescriptionText,
+            );
+            if (issuePropValue) Object.assign(updateProps, issuePropValue);
+          }
 
           // Receipt Number handling
           // IMPORTANT:
@@ -6301,13 +6595,14 @@ app.post(
       );
 
       // Invalidate cached lists (Operations view).
-      await cacheDel("cache:api:orders:requested:v6");
+      await cacheDel("cache:api:orders:requested:v7");
 
       res.json({
         success: true,
         status: shippedName,
         statusColor: shippedColor,
         operationsByName: req.session.username || "",
+        issueDescription: issueDescriptionText || null,
         receiptNumber:
           receiptToReturn !== null && receiptToReturn !== undefined
             ? receiptToReturn
@@ -6318,6 +6613,211 @@ app.post(
     } catch (e) {
       console.error("mark-shipped error:", e.body || e);
       res.status(500).json({ error: "Failed to update status" });
+    }
+  },
+);
+
+app.get(
+  "/api/orders/requested/maintenance-form-options",
+  requireAuth,
+  requirePage(["Requested Orders", "Maintenance Orders"]),
+  async (req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const dbProps = await getOrdersDBProps();
+      const resolutionMethodPropName = await detectResolutionMethodPropName();
+      const resolutionMethodMeta = resolutionMethodPropName
+        ? dbProps?.[resolutionMethodPropName] || null
+        : null;
+
+      let resolutionMethods = notionSelectOrStatusOptions(resolutionMethodMeta)
+        .map((opt) => ({
+          name: String(opt?.name || "").trim(),
+          color: opt?.color || null,
+        }))
+        .filter((opt) => opt.name);
+
+      if (!resolutionMethods.length) {
+        resolutionMethods = [
+          { name: "In-facility", color: "green" },
+          { name: "Not Applicable", color: "purple" },
+          { name: "On-site", color: "brown" },
+          { name: "Remote", color: "yellow" },
+        ];
+      }
+
+      const spareParts = await listSparePartsComponents();
+
+      return res.json({
+        resolutionMethods,
+        spareParts,
+      });
+    } catch (e) {
+      console.error("maintenance-form-options error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to load maintenance form options" });
+    }
+  },
+);
+
+app.post(
+  "/api/orders/requested/log-maintenance",
+  requireAuth,
+  requirePage(["Requested Orders", "Maintenance Orders"]),
+  async (req, res) => {
+    try {
+      const {
+        orderIds,
+        resolutionMethod,
+        actualIssueDescription,
+        repairAction,
+        sparePartId,
+      } = req.body || {};
+
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const dbProps = await getOrdersDBProps();
+
+      const resolutionMethodPropName = await detectResolutionMethodPropName();
+      const actualIssueDescPropName = await detectActualIssueDescriptionPropName();
+      const repairActionPropName = await detectRepairActionPropName();
+      const sparePartsReplacedPropName = await detectSparePartsReplacedPropName();
+
+      const resolutionMethodMeta = resolutionMethodPropName
+        ? dbProps?.[resolutionMethodPropName] || null
+        : null;
+      const actualIssueDescMeta = actualIssueDescPropName
+        ? dbProps?.[actualIssueDescPropName] || null
+        : null;
+      const repairActionMeta = repairActionPropName
+        ? dbProps?.[repairActionPropName] || null
+        : null;
+      const sparePartsReplacedMeta = sparePartsReplacedPropName
+        ? dbProps?.[sparePartsReplacedPropName] || null
+        : null;
+
+      const resolutionMethodText = String(resolutionMethod || "").trim();
+      const actualIssueDescriptionText = String(actualIssueDescription || "")
+        .replace(/\r\n/g, "\n")
+        .trim();
+      const repairActionText = String(repairAction || "")
+        .replace(/\r\n/g, "\n")
+        .trim();
+      const sparePartPageIdRaw = String(sparePartId || "").trim();
+      const sparePartPageId = sparePartPageIdRaw
+        ? (looksLikeNotionId(sparePartPageIdRaw) ? toHyphenatedUUID(sparePartPageIdRaw) : sparePartPageIdRaw)
+        : "";
+
+      let sparePartName = "";
+      if (sparePartPageId) {
+        try {
+          const spareInfo = await getProductInfoCached(sparePartPageId);
+          sparePartName = String(spareInfo?.name || "").trim();
+        } catch {
+          sparePartName = "";
+        }
+        if (!sparePartName) {
+          sparePartName = String(await pageTitleById(sparePartPageId) || "").trim();
+        }
+      }
+
+      const resolutionMethodValue = resolutionMethodPropName && resolutionMethodMeta
+        ? buildWritableTextPropValue(
+            resolutionMethodPropName,
+            resolutionMethodMeta.type === "status" || resolutionMethodMeta.type === "select"
+              ? resolutionMethodMeta.type
+              : "rich_text",
+            resolutionMethodMeta.type === "status" || resolutionMethodMeta.type === "select"
+              ? notionExactOptionName(resolutionMethodMeta, resolutionMethodText, resolutionMethodText)
+              : resolutionMethodText,
+          )
+        : null;
+
+      const actualIssueValue = actualIssueDescPropName
+        ? buildWritableTextPropValue(
+            actualIssueDescPropName,
+            actualIssueDescMeta?.type || "rich_text",
+            actualIssueDescriptionText,
+          )
+        : null;
+
+      const repairActionValue = repairActionPropName
+        ? buildWritableTextPropValue(
+            repairActionPropName,
+            repairActionMeta?.type || "rich_text",
+            repairActionText,
+          )
+        : null;
+
+      let sparePartValue = null;
+      if (sparePartsReplacedPropName && sparePartsReplacedMeta) {
+        const propType = String(sparePartsReplacedMeta.type || "").trim();
+        if (propType === "relation") {
+          sparePartValue = {
+            [sparePartsReplacedPropName]: {
+              relation: sparePartPageId ? [{ id: sparePartPageId }] : [],
+            },
+          };
+        } else if (propType === "multi_select") {
+          sparePartValue = {
+            [sparePartsReplacedPropName]: {
+              multi_select: sparePartName ? [{ name: sparePartName }] : [],
+            },
+          };
+        } else if (propType === "select" || propType === "status") {
+          sparePartValue = buildWritableTextPropValue(
+            sparePartsReplacedPropName,
+            propType,
+            sparePartName,
+          );
+        } else {
+          sparePartValue = buildWritableTextPropValue(
+            sparePartsReplacedPropName,
+            propType || "rich_text",
+            sparePartName,
+          );
+        }
+      }
+
+      await Promise.all(
+        ids.map(async (pageId) => {
+          const updateProps = {};
+          if (resolutionMethodValue) Object.assign(updateProps, resolutionMethodValue);
+          if (actualIssueValue) Object.assign(updateProps, actualIssueValue);
+          if (repairActionValue) Object.assign(updateProps, repairActionValue);
+          if (sparePartValue) Object.assign(updateProps, sparePartValue);
+
+          if (!Object.keys(updateProps).length) return null;
+
+          return notion.pages.update({
+            page_id: pageId,
+            properties: updateProps,
+          });
+        }),
+      );
+
+      await cacheDel("cache:api:orders:requested:v7");
+
+      return res.json({
+        success: true,
+        resolutionMethod: resolutionMethodText || null,
+        actualIssueDescription: actualIssueDescriptionText || null,
+        repairAction: repairActionText || null,
+        sparePartsReplacedId: sparePartPageId || null,
+        sparePartsReplacedName: sparePartName || null,
+      });
+    } catch (e) {
+      console.error("log-maintenance error:", e?.body || e);
+      return res.status(500).json({ error: "Failed to log maintenance" });
     }
   },
 );
@@ -6394,7 +6894,7 @@ app.post(
         ),
       );
 
-      await cacheDel("cache:api:orders:requested:v6");
+      await cacheDel("cache:api:orders:requested:v7");
 
       res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
     } catch (e) {
@@ -6568,7 +7068,7 @@ app.post(
         return res.status(400).json({ error: "No delivered quantities were found to withdraw." });
       }
 
-      await cacheDel("cache:api:orders:requested:v6");
+      await cacheDel("cache:api:orders:requested:v7");
       await Promise.all(
         Array.from(ownerIdsToInvalidate).map((mid) => cacheDel(`cache:api:orders:list:${mid}:v7`)),
       );
@@ -6708,7 +7208,7 @@ app.post(
       });
 
       // Invalidate caches so quantities update immediately.
-      await cacheDel("cache:api:orders:requested:v6");
+      await cacheDel("cache:api:orders:requested:v7");
       try {
         const page = await notion.pages.retrieve({ page_id: id });
         const rel = page?.properties?.["Teams Members"]?.relation || [];
