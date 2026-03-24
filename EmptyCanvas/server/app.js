@@ -12990,6 +12990,105 @@ app.get(
   },
 );
 
+async function fetchLocationServiceJson(url, req) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch(String(url), {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+        "Accept-Language": req.get("accept-language") || "en",
+        "User-Agent": "Pyramakerz-Operations/1.0",
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Location service returned ${response.status}`);
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+app.get(
+  "/api/location/search",
+  requireAuth,
+  requirePage("Expenses"),
+  async (req, res) => {
+    try {
+      const query = String(req.query.q || "").trim();
+      if (!query) {
+        return res.status(400).json({ success: false, error: "Missing query" });
+      }
+
+      const url = new URL("https://nominatim.openstreetmap.org/search");
+      url.searchParams.set("format", "jsonv2");
+      url.searchParams.set("limit", "6");
+      url.searchParams.set("addressdetails", "1");
+      url.searchParams.set("q", query);
+
+      const raw = await fetchLocationServiceJson(url, req);
+      const results = (Array.isArray(raw) ? raw : [])
+        .map((item) => ({
+          display_name: String(item?.display_name || "").trim(),
+          lat: Number(item?.lat),
+          lon: Number(item?.lon),
+        }))
+        .filter((item) => item.display_name && Number.isFinite(item.lat) && Number.isFinite(item.lon));
+
+      res.set("Cache-Control", "no-store");
+      return res.json({ success: true, results });
+    } catch (err) {
+      console.error("Location search error:", err?.body || err);
+      return res.status(500).json({ success: false, error: "Failed to search locations" });
+    }
+  },
+);
+
+app.get(
+  "/api/location/reverse",
+  requireAuth,
+  requirePage("Expenses"),
+  async (req, res) => {
+    try {
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({ success: false, error: "Invalid coordinates" });
+      }
+
+      const url = new URL("https://nominatim.openstreetmap.org/reverse");
+      url.searchParams.set("format", "jsonv2");
+      url.searchParams.set("lat", String(lat));
+      url.searchParams.set("lon", String(lng));
+      url.searchParams.set("zoom", "18");
+      url.searchParams.set("addressdetails", "1");
+
+      const raw = await fetchLocationServiceJson(url, req);
+      const label = String(raw?.display_name || "").trim() || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+      res.set("Cache-Control", "no-store");
+      return res.json({
+        success: true,
+        result: {
+          label,
+          lat,
+          lng,
+        },
+      });
+    } catch (err) {
+      console.error("Location reverse geocode error:", err?.body || err);
+      return res.status(500).json({ success: false, error: "Failed to resolve location" });
+    }
+  },
+);
+
 app.post("/api/expenses/cash-out", async (req, res) => {
   const {
     fundsType,
