@@ -509,6 +509,20 @@ function _firstNotionFileUrl(prop) {
   return "";
 }
 
+function _firstNotionFileMeta(prop) {
+  const files = Array.isArray(prop?.files) ? prop.files : [];
+  if (!files.length) return { name: "", url: "" };
+  const f = files[0] || {};
+  const url =
+    (f?.type === "external" ? f?.external?.url : "") ||
+    (f?.type === "file" ? f?.file?.url : "") ||
+    "";
+  return {
+    name: String(f?.name || "").trim(),
+    url: String(url || "").trim(),
+  };
+}
+
 function findProfilePhotoPropName(props) {
   const preferred = [
     "Profile picture",
@@ -1147,6 +1161,26 @@ async function detectSparePartsReplacedPropName() {
       "Spare Parts Used",
     ]) || null
   );
+}
+
+async function detectMaintenanceReceiptPropName() {
+  const props = await getOrdersDBProps();
+  const preferred = pickPropName(props, [
+    "Maintenance receipt",
+    "Maintenance Receipt",
+    "Maintenance report",
+    "Maintenance Report",
+    "Receipt Image",
+    "Receipt image",
+  ]);
+  if (preferred && props?.[preferred]?.type === "files") return preferred;
+
+  for (const [key, prop] of Object.entries(props || {})) {
+    if (prop?.type !== "files") continue;
+    if (/maintenance|receipt|report/i.test(String(key || ""))) return key;
+  }
+
+  return null;
 }
 
 function notionTextFragmentsFromString(value, chunkSize = 1800) {
@@ -5848,6 +5882,7 @@ app.get(
       const repairActionPropName = await detectRepairActionPropName();
       const resolutionMethodPropName = await detectResolutionMethodPropName();
       const sparePartsReplacedPropName = await detectSparePartsReplacedPropName();
+      const maintenanceReceiptPropName = await detectMaintenanceReceiptPropName();
 
       while (hasMore) {
         const resp = await notion.databases.query({
@@ -5951,6 +5986,13 @@ app.get(
           if (!sparePartsReplacedName) {
             sparePartsReplacedName = parseTextProp(sparePartsProp) || null;
           }
+
+          const maintenanceReceiptProp = maintenanceReceiptPropName
+            ? props[maintenanceReceiptPropName]
+            : null;
+          const maintenanceReceiptMeta = _firstNotionFileMeta(maintenanceReceiptProp);
+          const maintenanceReceiptName = maintenanceReceiptMeta.name || null;
+          const maintenanceReceiptUrl = maintenanceReceiptMeta.url || null;
 
 // Qty in the UI should come from "Quantity Progress" (fallback to "Quantity Requested" if missing)
 const qtyProgress =
@@ -6124,6 +6166,8 @@ if (svApproval !== "Approved") continue;
     resolutionMethodColor,
     sparePartsReplacedId,
     sparePartsReplacedName,
+    maintenanceReceiptName,
+    maintenanceReceiptUrl,
     operationsByIds,
     operationsByNames,
     operationsById,
@@ -6830,7 +6874,11 @@ app.post(
   requirePage(["Requested Orders", "Maintenance Orders"]),
   async (req, res) => {
     try {
-      const { orderIds } = req.body || {};
+      const {
+        orderIds,
+        maintenanceReceiptDataUrl,
+        maintenanceReceiptFilename,
+      } = req.body || {};
       if (!Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "orderIds required" });
       }
@@ -6848,10 +6896,14 @@ app.post(
       const dbProps = await getOrdersDBProps();
       const dbPropMeta = dbProps?.[statusProp];
       let statusType = dbPropMeta?.type;
+      const samplePage = await notion.pages.retrieve({ page_id: ids[0] });
       if (!statusType) {
-        const sample = await notion.pages.retrieve({ page_id: ids[0] });
-        statusType = sample.properties?.[statusProp]?.type;
+        statusType = samplePage.properties?.[statusProp]?.type;
       }
+
+      const orderTypeInfo = _extractOrderTypeInfo(samplePage?.properties || {});
+      const isMaintenanceOrder =
+        _normKeyOrderType(orderTypeInfo?.orderType) === _normKeyOrderType("Request Maintenance");
 
       const desiredCandidates = ["Arrived", "Delivered", "Received"]; // try these in order
       let arrivedName = desiredCandidates[0];
@@ -6883,20 +6935,67 @@ app.post(
           ? { status: { name: arrivedName } }
           : { select: { name: arrivedName } };
 
+      let maintenanceReceiptName = null;
+      let maintenanceReceiptUrl = null;
+      let maintenanceReceiptPropName = null;
+
+      if (isMaintenanceOrder) {
+        const receiptDataUrl = String(maintenanceReceiptDataUrl || "").trim();
+        if (!receiptDataUrl) {
+          return res.status(400).json({ error: "Maintenance receipt image is required." });
+        }
+
+        maintenanceReceiptPropName = await detectMaintenanceReceiptPropName();
+        if (!maintenanceReceiptPropName || dbProps?.[maintenanceReceiptPropName]?.type !== "files") {
+          return res.status(400).json({ error: "Maintenance receipt property is missing in Notion." });
+        }
+
+        const rawFileName = String(maintenanceReceiptFilename || "maintenance-receipt.jpg").trim() || "maintenance-receipt.jpg";
+        const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "maintenance-receipt.jpg";
+        const extMatch = cleanFileName.match(/\.([a-zA-Z0-9]+)$/);
+        const safeExt = extMatch?.[1] ? extMatch[1].toLowerCase() : "jpg";
+        const blobName = `maintenance-receipts/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
+
+        try {
+          maintenanceReceiptUrl = await uploadToBlobFromBase64(receiptDataUrl, blobName);
+        } catch (uploadErr) {
+          const uploadMessage =
+            String(uploadErr?.message || "").trim() === "BLOB_TOKEN_MISSING"
+              ? "Maintenance receipt upload is not configured."
+              : "Failed to upload maintenance receipt.";
+          return res.status(500).json({ error: uploadMessage });
+        }
+        maintenanceReceiptName = cleanFileName;
+      }
+
       await Promise.all(
-        ids.map((id) =>
-          notion.pages.update({
+        ids.map((id) => {
+          const properties = {
+            [statusProp]: value,
+          };
+
+          if (isMaintenanceOrder && maintenanceReceiptPropName && maintenanceReceiptUrl) {
+            properties[maintenanceReceiptPropName] = {
+              files: [makeExternalFile(maintenanceReceiptName || "maintenance-receipt.jpg", maintenanceReceiptUrl)],
+            };
+          }
+
+          return notion.pages.update({
             page_id: id,
-            properties: {
-              [statusProp]: value,
-            },
-          }),
-        ),
+            properties,
+          });
+        }),
       );
 
       await cacheDel("cache:api:orders:requested:v7");
 
-      res.json({ success: true, status: arrivedName, statusColor: arrivedColor });
+      res.json({
+        success: true,
+        status: arrivedName,
+        statusColor: arrivedColor,
+        maintenanceReceiptName,
+        maintenanceReceiptUrl,
+      });
     } catch (e) {
       console.error("mark-arrived error:", e.body || e);
       res.status(500).json({ error: "Failed to update status" });
@@ -7724,6 +7823,249 @@ app.post(
       console.error("export requested pdf error:", e.body || e);
       try {
         if (!res.headersSent) res.status(500).json({ error: "Failed to export PDF" });
+      } catch {}
+    }
+  },
+);
+
+// Export maintenance order to PDF (Maintenance receipt)
+// Body: { orderIds: [notionPageId, ...] }
+app.post(
+  "/api/orders/requested/export/maintenance-pdf",
+  requireAuth,
+  requirePage(["Requested Orders", "Maintenance Orders"]),
+  async (req, res) => {
+    try {
+      const { orderIds } = req.body || {};
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "orderIds required" });
+      }
+
+      const ids = orderIds
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .map((x) => (looksLikeNotionId(x) ? toHyphenatedUUID(x) : x));
+
+      if (!ids.length) return res.status(400).json({ error: "orderIds required" });
+
+      const pages = (await Promise.all(
+        ids.map(async (id) => {
+          try {
+            return await notion.pages.retrieve({ page_id: id });
+          } catch {
+            return null;
+          }
+        }),
+      )).filter(Boolean);
+
+      if (!pages.length) return res.status(404).json({ error: "Orders not found" });
+
+      const firstProps = pages[0].properties || {};
+      const firstOrderType = _extractOrderTypeInfo(firstProps).orderType;
+      if (_normKeyOrderType(firstOrderType) !== _normKeyOrderType("Request Maintenance")) {
+        return res.status(400).json({ error: "This export is only available for maintenance orders." });
+      }
+
+      const issueDescPropName = await detectIssueDescriptionPropName();
+      const actualIssueDescPropName = await detectActualIssueDescriptionPropName();
+      const repairActionPropName = await detectRepairActionPropName();
+      const resolutionMethodPropName = await detectResolutionMethodPropName();
+      const sparePartsReplacedPropName = await detectSparePartsReplacedPropName();
+      const maintenanceReceiptPropName = await detectMaintenanceReceiptPropName();
+      const receivedPropName = await detectReceivedQtyPropName();
+
+      const titleFromPage = (page) => {
+        const props = page?.properties || {};
+        const n = _extractPropNumber(
+          _propInsensitive(props, "Order - ID") ||
+          _propInsensitive(props, "Order ID") ||
+          _propInsensitive(props, "Order-ID") ||
+          _propInsensitive(props, "Order Id"),
+        );
+        if (Number.isFinite(Number(n))) return `ORD-${Number(n)}`;
+        return (
+          _extractPropText(_propInsensitive(props, "ID")) ||
+          _extractPropText(_propInsensitive(props, "Order")) ||
+          "Order"
+        );
+      };
+
+      const uniqueOrderIds = Array.from(new Set(pages.map((page) => titleFromPage(page)).filter(Boolean)));
+      const orderIdRange =
+        uniqueOrderIds.length <= 1
+          ? uniqueOrderIds[0] || "Order"
+          : `${uniqueOrderIds[0]} : ${uniqueOrderIds[uniqueOrderIds.length - 1]}`;
+
+      const createdAt = new Date(Math.min(...pages.map((page) => new Date(page.created_time).getTime())));
+
+      const nameCache = new Map();
+      async function memberName(id) {
+        if (!id) return "";
+        if (nameCache.has(id)) return nameCache.get(id);
+        try {
+          const value = String(await getTeamMemberNameCached(id) || "").trim();
+          nameCache.set(id, value);
+          return value;
+        } catch {
+          nameCache.set(id, "");
+          return "";
+        }
+      }
+
+      const productCache = new Map();
+      async function productInfo(productPageId) {
+        if (!productPageId) return { name: "Unknown", idCode: null, unitPrice: null, url: null };
+        if (productCache.has(productPageId)) return productCache.get(productPageId);
+        const info = await getProductInfoCached(productPageId);
+        const out = {
+          name: info?.name || "Unknown",
+          idCode: info?.idCode || null,
+          unitPrice: typeof info?.unitPrice === "number" ? info.unitPrice : null,
+          url: info?.url || null,
+        };
+        productCache.set(productPageId, out);
+        return out;
+      }
+
+      let requestedBy = "";
+      const teamRel = firstProps["Teams Members"]?.relation;
+      if (Array.isArray(teamRel) && teamRel.length) {
+        requestedBy = await memberName(teamRel[0].id);
+      }
+
+      const extractOperationsName = async (props = {}) => {
+        const opsProp =
+          _propInsensitive(props, "Person Received by Operations") ||
+          _propInsensitive(props, "Received by operations") ||
+          _propInsensitive(props, "Operations");
+
+        if (opsProp?.type === "relation") {
+          const rel = Array.isArray(opsProp.relation) ? opsProp.relation : [];
+          if (rel.length) return await memberName(rel[0].id);
+        }
+        if (opsProp?.type === "people") {
+          const person = (opsProp.people || []).find((item) => item?.name || item?.id);
+          return String(person?.name || "").trim();
+        }
+        if (opsProp?.type === "rich_text") {
+          return (opsProp.rich_text || []).map((item) => item?.plain_text || "").join("").trim();
+        }
+        return "";
+      };
+
+      const pickFirstText = (propName) => {
+        if (!propName) return "";
+        for (const page of pages) {
+          const text = String(_extractPropText(page?.properties?.[propName]) || "").trim();
+          if (text) return text;
+        }
+        return "";
+      };
+
+      let operationsBy = "";
+      for (const page of pages) {
+        operationsBy = String(await extractOperationsName(page.properties || {})).trim();
+        if (operationsBy) break;
+      }
+
+      const issueDescription = pickFirstText(issueDescPropName) || pages[0]?.properties?.Reason?.title?.[0]?.plain_text || "";
+      const actualIssueDescription = pickFirstText(actualIssueDescPropName);
+      const repairAction = pickFirstText(repairActionPropName);
+      const resolutionMethod = pickFirstText(resolutionMethodPropName);
+
+      let sparePartsReplaced = "";
+      if (sparePartsReplacedPropName) {
+        for (const page of pages) {
+          const prop = page?.properties?.[sparePartsReplacedPropName];
+          const relationIds = notionPropRelationIds(prop);
+          if (relationIds.length) {
+            const info = await productInfo(relationIds[0]);
+            sparePartsReplaced = String(info?.name || "").trim() || String(await pageTitleById(relationIds[0]) || "").trim();
+          }
+          if (!sparePartsReplaced && prop?.type === "multi_select") {
+            sparePartsReplaced = (prop.multi_select || []).map((item) => String(item?.name || "").trim()).filter(Boolean).join(", ");
+          }
+          if (!sparePartsReplaced) {
+            sparePartsReplaced = String(_extractPropText(prop) || "").trim();
+          }
+          if (sparePartsReplaced) break;
+        }
+      }
+
+      let maintenanceReceiptName = "";
+      let maintenanceReceiptUrl = "";
+      if (maintenanceReceiptPropName) {
+        for (const page of pages) {
+          const meta = _firstNotionFileMeta(page?.properties?.[maintenanceReceiptPropName]);
+          maintenanceReceiptName = maintenanceReceiptName || String(meta?.name || "").trim();
+          maintenanceReceiptUrl = maintenanceReceiptUrl || String(meta?.url || "").trim();
+          if (maintenanceReceiptUrl) break;
+        }
+      }
+
+      const rows = [];
+      for (const page of pages) {
+        const props = page.properties || {};
+        const productRel = props.Product?.relation;
+        const productPageId = Array.isArray(productRel) && productRel.length ? productRel[0].id : null;
+        const product = await productInfo(productPageId);
+
+        const qtyProgress =
+          _extractPropNumber(_propInsensitive(props, "Quantity Progress")) ??
+          _extractPropNumber(_propInsensitive(props, "Quantity progress"));
+        const qtyRequested =
+          _extractPropNumber(_propInsensitive(props, "Quantity Requested")) ??
+          props["Quantity Requested"]?.number ??
+          0;
+        const qtyReceived = receivedPropName ? _extractPropNumber(props[receivedPropName]) : null;
+        const qty =
+          qtyReceived === null || qtyReceived === undefined
+            ? (qtyProgress !== null && qtyProgress !== undefined ? qtyProgress : qtyRequested)
+            : qtyReceived;
+
+        rows.push({
+          idCode: product?.idCode || "",
+          component: product?.name || "Unknown",
+          qty: Number(qty) || 0,
+          link: product?.url || null,
+        });
+      }
+
+      const safeName = String(orderIdRange || "maintenance")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "_")
+        .slice(0, 60);
+      const fileName = `maintenance_receipt_${safeName}.pdf`;
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      );
+      res.setHeader("Cache-Control", "no-store");
+
+      const { pipeMaintenanceReceiptPDF } = require("./maintenanceReceiptPdf");
+      await pipeMaintenanceReceiptPDF(
+        {
+          orderId: orderIdRange,
+          createdAt,
+          requestedBy,
+          operationsBy,
+          issueDescription,
+          actualIssueDescription,
+          repairAction,
+          resolutionMethod,
+          sparePartsReplaced,
+          rows,
+          maintenanceReceiptName,
+          maintenanceReceiptUrl,
+        },
+        res,
+      );
+    } catch (e) {
+      console.error("export maintenance pdf error:", e?.body || e);
+      try {
+        if (!res.headersSent) res.status(500).json({ error: "Failed to export maintenance PDF" });
       } catch {}
     }
   },
