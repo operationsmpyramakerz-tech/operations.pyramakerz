@@ -527,240 +527,6 @@
       font-weight: 600;
     }
 
-    /* =============================
-       Cash out location picker
-       ============================= */
-    .location-field{
-      margin-bottom: 1rem;
-    }
-    .location-trigger{
-      width: 100%;
-      border: 1.5px solid #d1d5db;
-      border-radius: 14px;
-      background: #fff;
-      text-align: left;
-      padding: 0.95rem 1rem;
-      cursor: pointer;
-      transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
-      display: flex;
-      flex-direction: column;
-      gap: 0.32rem;
-    }
-    .location-trigger:hover{
-      border-color: #94a3b8;
-      box-shadow: 0 10px 24px rgba(15,23,42,0.08);
-    }
-    .location-trigger:active{
-      transform: scale(0.995);
-    }
-    .location-trigger__label{
-      font-size: 0.82rem;
-      font-weight: 700;
-      color: #475569;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .location-trigger__value{
-      font-size: 0.97rem;
-      font-weight: 600;
-      color: #0f172a;
-      line-height: 1.45;
-      word-break: break-word;
-    }
-    .location-trigger__value.is-empty{
-      color: #94a3b8;
-    }
-    .location-field__actions{
-      display: flex;
-      justify-content: flex-end;
-      margin-top: 0.45rem;
-    }
-    .location-clear{
-      border: none;
-      background: transparent;
-      color: #ef4444;
-      font-size: 0.88rem;
-      font-weight: 700;
-      cursor: pointer;
-      padding: 0;
-    }
-    .location-clear[hidden]{
-      display: none !important;
-    }
-    .location-modal{
-      position: fixed;
-      inset: 0;
-      background: rgba(15,23,42,0.52);
-      display: none;
-      justify-content: center;
-      align-items: center;
-      padding: 1rem;
-      z-index: 10050;
-    }
-    .location-modal-box{
-      width: min(100%, 520px);
-      background: #fff;
-      border-radius: 22px;
-      padding: 1.1rem;
-      box-shadow: 0 24px 60px rgba(15,23,42,0.28);
-      max-height: calc(100vh - 32px);
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    .location-modal-head{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.75rem;
-      margin-bottom: 0.55rem;
-    }
-    .location-modal-title{
-      margin: 0;
-      font-size: 1.2rem;
-      font-weight: 800;
-      color: #0f172a;
-    }
-    .location-modal-close{
-      width: 40px;
-      height: 40px;
-      border-radius: 999px;
-      border: 1px solid #e2e8f0;
-      background: #f8fafc;
-      color: #0f172a;
-      font-size: 1.2rem;
-      font-weight: 700;
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-    .location-modal-note{
-      margin: 0 0 0.9rem;
-      color: #64748b;
-      font-size: 0.92rem;
-      line-height: 1.5;
-    }
-    .location-search-row{
-      display: flex;
-      gap: 0.65rem;
-      align-items: stretch;
-      margin-bottom: 0.75rem;
-    }
-    .location-search-row .ex-input{
-      margin-bottom: 0;
-    }
-    .location-search-input{
-      flex: 1;
-    }
-    .location-search-btn,
-    .location-current-btn{
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-    .location-tools-row{
-      display: flex;
-      justify-content: flex-start;
-      margin-bottom: 0.8rem;
-    }
-    .location-search-results{
-      display: none;
-      border: 1px solid #e2e8f0;
-      border-radius: 16px;
-      background: #fff;
-      max-height: 190px;
-      overflow-y: auto;
-      margin-bottom: 0.9rem;
-    }
-    .location-search-results.is-open{
-      display: block;
-    }
-    .location-search-item{
-      width: 100%;
-      border: none;
-      background: #fff;
-      text-align: left;
-      padding: 0.8rem 0.95rem;
-      cursor: pointer;
-      border-bottom: 1px solid #f1f5f9;
-    }
-    .location-search-item:last-child{
-      border-bottom: none;
-    }
-    .location-search-item:hover{
-      background: #f8fafc;
-    }
-    .location-search-item__title{
-      display: block;
-      font-weight: 700;
-      color: #0f172a;
-      margin-bottom: 0.18rem;
-      line-height: 1.35;
-    }
-    .location-search-item__meta{
-      display: block;
-      font-size: 0.86rem;
-      color: #64748b;
-      line-height: 1.4;
-    }
-    .location-search-empty{
-      padding: 0.95rem;
-      color: #64748b;
-      font-weight: 600;
-    }
-    .location-map{
-      width: 100%;
-      height: 280px;
-      border-radius: 18px;
-      overflow: hidden;
-      border: 1px solid #e2e8f0;
-      background: #f8fafc;
-      margin-bottom: 0.9rem;
-      position: relative;
-    }
-    .location-picked-card{
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 16px;
-      padding: 0.9rem 1rem;
-      margin-bottom: 1rem;
-    }
-    .location-picked-card__label{
-      font-size: 0.82rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #64748b;
-      margin-bottom: 0.35rem;
-    }
-    .location-picked-card__value{
-      color: #0f172a;
-      font-size: 0.95rem;
-      font-weight: 600;
-      line-height: 1.5;
-      word-break: break-word;
-    }
-    .location-picked-card__value.is-empty{
-      color: #94a3b8;
-    }
-    .location-modal-actions{
-      display: flex;
-      justify-content: space-between;
-      gap: 0.75rem;
-    }
-    .location-modal-actions .ex-btn{
-      flex: 1;
-      padding: 0.8rem 1rem;
-    }
-
-    @media (max-width: 560px) {
-      .location-search-row,
-      .location-modal-actions {
-        flex-direction: column;
-      }
-
-      .location-map{
-        height: 250px;
-      }
-    }
-
     .ex-modal-actions {
       display: flex;
       justify-content: space-between;
@@ -1154,28 +920,10 @@
     <input id="co_date" type="date" class="ex-input"/>
 
     <label class="field-label"><i data-feather="log-out"></i> From <span class="opt-tag">(Optional)</span></label>
-    <input id="co_from" type="hidden"/>
-    <div class="location-field">
-      <button id="co_from_btn" type="button" class="location-trigger" data-location-target="from" aria-haspopup="dialog">
-        <span class="location-trigger__label">Pick location on map</span>
-        <span id="co_from_text" class="location-trigger__value is-empty">No location selected</span>
-      </button>
-      <div class="location-field__actions">
-        <button id="co_from_clear" type="button" class="location-clear" data-location-clear="from" hidden>Clear</button>
-      </div>
-    </div>
+    <input id="co_from" type="text" class="ex-input"/>
 
     <label class="field-label"><i data-feather="log-in"></i> To <span class="opt-tag">(Optional)</span></label>
-    <input id="co_to" type="hidden"/>
-    <div class="location-field">
-      <button id="co_to_btn" type="button" class="location-trigger" data-location-target="to" aria-haspopup="dialog">
-        <span class="location-trigger__label">Pick location on map</span>
-        <span id="co_to_text" class="location-trigger__value is-empty">No location selected</span>
-      </button>
-      <div class="location-field__actions">
-        <button id="co_to_clear" type="button" class="location-clear" data-location-clear="to" hidden>Clear</button>
-      </div>
-    </div>
+    <input id="co_to" type="text" class="ex-input"/>
 
     <div id="co_km_block" style="display:none;">
       <label class="field-label"><i data-feather="navigation"></i> Kilometer <span class="opt-tag">(Optional)</span></label>
@@ -1208,41 +956,6 @@
       <button class="ex-btn ex-danger" onclick="closeCashOutModal()">Close</button>
     </div>
 
-  </div>
-</div>
-
-<!-- LOCATION PICKER MODAL -->
-<div id="locationPickerModal" class="location-modal" aria-hidden="true">
-  <div class="location-modal-box" role="dialog" aria-modal="true" aria-labelledby="locationPickerTitle">
-    <div class="location-modal-head">
-      <h3 id="locationPickerTitle" class="location-modal-title">Pick location</h3>
-      <button id="locationPickerClose" type="button" class="location-modal-close" aria-label="Close">×</button>
-    </div>
-
-    <p class="location-modal-note">Search for an address or tap the map to choose the location for <strong id="locationPickerFieldLabel">From</strong>.</p>
-
-    <div class="location-search-row">
-      <input id="locationSearchInput" type="text" class="ex-input location-search-input" placeholder="Search for a place or address"/>
-      <button id="locationSearchBtn" type="button" class="ex-btn ex-primary location-search-btn">Search</button>
-    </div>
-
-    <div class="location-tools-row">
-      <button id="locationUseCurrentBtn" type="button" class="ex-btn location-current-btn">Use current location</button>
-    </div>
-
-    <div id="locationSearchResults" class="location-search-results" aria-live="polite"></div>
-
-    <div id="locationMap" class="location-map" aria-label="Location map"></div>
-
-    <div class="location-picked-card">
-      <div class="location-picked-card__label">Selected location</div>
-      <div id="locationPickedValue" class="location-picked-card__value is-empty">No location selected yet.</div>
-    </div>
-
-    <div class="location-modal-actions">
-      <button id="locationConfirmBtn" type="button" class="ex-btn ex-primary" disabled>Use this location</button>
-      <button id="locationCancelBtn" type="button" class="ex-btn ex-danger">Cancel</button>
-    </div>
   </div>
 </div>
 
@@ -1296,8 +1009,7 @@
 
 <script>feather.replace();</script>
 <script src="/js/common-ui.js"></script>
-<script src="/js/expenses.js?v=google-maps-1"></script>
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB2ahDmohM2_r2aetTaBI4UENYgDhaMRQY&v=weekly&callback=initExpenseGoogleMapsApi" async defer></script>
+<script src="/js/expenses.js"></script>
 
   
 </body>
