@@ -313,9 +313,31 @@ document.addEventListener("DOMContentLoaded", () => {
     const state = modernSelectState.get(selectEl);
     if (!state) return;
     state.panel.hidden = true;
-    state.wrap.classList.remove("is-open");
+    state.panel.style.maxHeight = "";
+    state.wrap.classList.remove("is-open", "is-dropup");
     state.trigger.setAttribute("aria-expanded", "false");
     if (openModernSelect === selectEl) openModernSelect = null;
+  }
+
+  function updateModernSelectPlacement(selectEl) {
+    const state = modernSelectState.get(selectEl);
+    if (!state || state.panel.hidden) return;
+
+    const triggerRect = state.trigger.getBoundingClientRect();
+    const gap = 10;
+    const viewportPadding = 16;
+    const rawSpaceBelow = window.innerHeight - triggerRect.bottom - viewportPadding - gap;
+    const rawSpaceAbove = triggerRect.top - viewportPadding - gap;
+    const spaceBelow = Math.max(0, rawSpaceBelow);
+    const spaceAbove = Math.max(0, rawSpaceAbove);
+    const desiredHeight = Math.min(state.panel.scrollHeight || 0, 320);
+    const shouldDropUp = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
+    const availableSpace = shouldDropUp ? spaceAbove : spaceBelow;
+    const fallbackHeight = Math.min(Math.max(desiredHeight || 0, 180), 320);
+    const maxHeight = Math.max(120, Math.min(320, availableSpace || fallbackHeight));
+
+    state.wrap.classList.toggle("is-dropup", shouldDropUp);
+    state.panel.style.maxHeight = `${maxHeight}px`;
   }
 
   function refreshModernSelect(selectEl) {
@@ -413,6 +435,15 @@ document.addEventListener("DOMContentLoaded", () => {
       wrap.classList.toggle("is-open", willOpen);
       trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
       openModernSelect = willOpen ? selectEl : null;
+
+      if (willOpen) {
+        window.requestAnimationFrame(() => {
+          updateModernSelectPlacement(selectEl);
+          try {
+            panel.scrollTop = 0;
+          } catch {}
+        });
+      }
     });
 
     panel.addEventListener("click", (e) => {
@@ -436,6 +467,14 @@ document.addEventListener("DOMContentLoaded", () => {
     document.addEventListener("click", (e) => {
       if (!wrap.contains(e.target)) closeModernSelect(selectEl);
     });
+
+    window.addEventListener("resize", () => {
+      if (openModernSelect === selectEl) updateModernSelectPlacement(selectEl);
+    });
+
+    document.addEventListener("scroll", () => {
+      if (openModernSelect === selectEl) updateModernSelectPlacement(selectEl);
+    }, true);
 
     modernSelectState.set(selectEl, state);
     refreshModernSelect(selectEl);
@@ -1354,9 +1393,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     if (logMaintenanceBtn) {
-      const canLogMaintenance =
-        isMaintenanceOrder &&
-        (stage?.idx || 1) >= 4;
+      const stageIdx = stage?.idx || 1;
+      const canLogMaintenance = isMaintenanceOrder && (
+        isMaintenancePage
+          ? stageIdx >= 4
+          : currentTab === "not-started"
+      );
       logMaintenanceBtn.style.display = canLogMaintenance ? "inline-flex" : "none";
     }
     if (maintenancePdfBtn) {
