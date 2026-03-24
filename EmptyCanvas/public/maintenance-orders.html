@@ -157,6 +157,11 @@
       </div>
 
       <div class="co-modal-actions ro-actions ro-actions--right" id="reqModalActions">
+        <button type="button" class="ro-action-btn ro-action-btn--light" id="reqMaintenancePdfBtn" style="display:none;">
+          <i data-feather="download"></i>
+          Download
+        </button>
+
         <button type="button" class="ro-action-btn ro-action-btn--light" id="reqLogMaintenanceBtn" style="display:none;">
           <i data-feather="clipboard"></i>
           Log Maintenance
@@ -189,7 +194,7 @@
       <div class="co-submodal-fields">
         <div class="co-submodal-field">
           <label class="co-submodal-label" for="reqMaintenanceResolutionSelect">Resolution Method</label>
-          <select class="co-submodal-select" id="reqMaintenanceResolutionSelect">
+          <select class="co-submodal-select" id="reqMaintenanceResolutionSelect" data-placeholder="Select resolution method">
             <option value="">Select resolution method</option>
           </select>
         </div>
@@ -216,7 +221,7 @@
 
         <div class="co-submodal-field">
           <label class="co-submodal-label" for="reqMaintenanceSparePartSelect">Spare parts replaced</label>
-          <select class="co-submodal-select" id="reqMaintenanceSparePartSelect">
+          <select class="co-submodal-select" id="reqMaintenanceSparePartSelect" data-placeholder="No spare part selected">
             <option value="">No spare part selected</option>
           </select>
         </div>
@@ -228,6 +233,41 @@
     <div class="co-submodal-actions">
       <button type="button" class="ro-action-btn ro-action-btn--light" id="reqMaintenanceLogCancel">Cancel</button>
       <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqMaintenanceLogConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MAINTENANCE RECEIPT (SUB-MODAL) ===================== -->
+<div id="reqMaintenanceReceiptModal" class="co-submodal-overlay" aria-hidden="true" hidden>
+  <div class="co-submodal-dialog" role="dialog" aria-modal="true" aria-labelledby="reqMaintenanceReceiptTitle" aria-describedby="reqMaintenanceReceiptSub">
+    <button type="button" class="co-submodal-close" id="reqMaintenanceReceiptClose" aria-label="Close">
+      <i data-feather="x"></i>
+    </button>
+
+    <div class="co-submodal-header">
+      <div class="co-submodal-title" id="reqMaintenanceReceiptTitle">Upload Maintenance Receipt</div>
+      <div class="co-submodal-sub" id="reqMaintenanceReceiptSub">Upload the maintenance receipt image before marking this order as delivered.</div>
+    </div>
+
+    <div class="co-submodal-body">
+      <div class="co-submodal-field">
+        <label class="co-submodal-label" for="reqMaintenanceReceiptInput">Maintenance receipt image</label>
+        <input class="co-upload-field__input" id="reqMaintenanceReceiptInput" type="file" accept="image/*" hidden />
+        <button type="button" class="co-upload-field" id="reqMaintenanceReceiptChooseBtn">
+          <span class="co-upload-field__icon"><i data-feather="upload-cloud"></i></span>
+          <span class="co-upload-field__content">
+            <span class="co-upload-field__title" id="reqMaintenanceReceiptName">Choose image</span>
+            <span class="co-upload-field__meta" id="reqMaintenanceReceiptMeta">PNG, JPG or WEBP</span>
+          </span>
+        </button>
+      </div>
+
+      <div class="co-submodal-error" id="reqMaintenanceReceiptError" role="alert" aria-live="polite"></div>
+    </div>
+
+    <div class="co-submodal-actions">
+      <button type="button" class="ro-action-btn ro-action-btn--light" id="reqMaintenanceReceiptCancel">Cancel</button>
+      <button type="button" class="ro-action-btn ro-action-btn--dark" id="reqMaintenanceReceiptConfirm">Confirm</button>
     </div>
   </div>
 </div>
