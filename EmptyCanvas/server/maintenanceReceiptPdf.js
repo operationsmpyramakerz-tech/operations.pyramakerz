@@ -63,6 +63,25 @@ function ensureText(value, fallback = "—") {
   return text || fallback;
 }
 
+function toUniqueTextList(value) {
+  const out = [];
+  const seen = new Set();
+
+  const push = (entry) => {
+    const text = String(entry || "").trim();
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(text);
+  };
+
+  if (Array.isArray(value)) value.forEach((entry) => push(entry));
+  else push(value);
+
+  return out;
+}
+
 function drawFieldCard(doc, x, y, w, label, value, options = {}) {
   const COLORS = options.colors;
   const valueText = ensureText(value);
@@ -262,9 +281,10 @@ async function pipeMaintenanceReceiptPDF(params = {}, stream) {
   drawSectionTitle("Resolution Summary");
   const summaryY = doc.y;
   const summaryW = (contentW - 12) / 2;
+  const sparePartsText = toUniqueTextList(params.sparePartsReplacedList || params.sparePartsReplaced).join(", ");
   const summaryHeights = [
     drawFieldCard(doc, mL, summaryY, summaryW, "Resolution Method", params.resolutionMethod, { colors: COLORS }),
-    drawFieldCard(doc, mL + summaryW + 12, summaryY, summaryW, "Spare parts replaced", params.sparePartsReplaced, { colors: COLORS }),
+    drawFieldCard(doc, mL + summaryW + 12, summaryY, summaryW, "Spare parts replaced", sparePartsText, { colors: COLORS }),
   ];
   doc.y = summaryY + Math.max(...summaryHeights) + 18;
 
@@ -272,29 +292,53 @@ async function pipeMaintenanceReceiptPDF(params = {}, stream) {
   drawComponentsTable(params.rows);
 
   drawSectionTitle("Attached Maintenance Receipt");
-  const imageBuffer = await readRemoteImageBuffer(params.maintenanceReceiptUrl);
-  if (imageBuffer) {
-    ensureSpace(320);
-    const startY = doc.y;
-    const boxH = 300;
-    doc.save();
-    doc.roundedRect(mL, startY, contentW, boxH, 14).fillAndStroke("#FFFFFF", COLORS.border);
-    try {
-      doc.image(imageBuffer, mL + 12, startY + 12, {
-        fit: [contentW - 24, boxH - 24],
-        align: "center",
-        valign: "center",
-      });
-    } catch {
-      doc.fillColor(COLORS.muted).font("Helvetica").fontSize(11).text("The attached maintenance receipt could not be embedded in the PDF.", mL + 12, startY + 20, {
-        width: contentW - 24,
-      });
-    }
-    doc.restore();
-    doc.y = startY + boxH + 12;
+  const receiptFiles = Array.isArray(params.maintenanceReceiptFiles) && params.maintenanceReceiptFiles.length
+    ? params.maintenanceReceiptFiles
+    : [{ name: params.maintenanceReceiptName, url: params.maintenanceReceiptUrl }].filter((item) => item?.name || item?.url);
+
+  if (!receiptFiles.length) {
+    drawTextBlock("Receipt file", "No maintenance receipt image uploaded.", 64);
   } else {
-    const fallbackText = params.maintenanceReceiptName || params.maintenanceReceiptUrl || "No maintenance receipt image uploaded.";
-    drawTextBlock("Receipt file", fallbackText, 64);
+    let renderedAny = false;
+    for (let index = 0; index < receiptFiles.length; index += 1) {
+      const file = receiptFiles[index] || {};
+      const fileLabel = file?.name || `Receipt ${index + 1}`;
+      const imageBuffer = await readRemoteImageBuffer(file?.url);
+
+      if (imageBuffer) {
+        ensureSpace(336);
+        const startY = doc.y;
+        const boxH = 312;
+        doc.save();
+        doc.roundedRect(mL, startY, contentW, boxH, 14).fillAndStroke("#FFFFFF", COLORS.border);
+        doc.fillColor(COLORS.muted).font("Helvetica-Bold").fontSize(9).text(fileLabel, mL + 12, startY + 12, {
+          width: contentW - 24,
+        });
+        try {
+          doc.image(imageBuffer, mL + 12, startY + 36, {
+            fit: [contentW - 24, boxH - 48],
+            align: "center",
+            valign: "center",
+          });
+        } catch {
+          doc.fillColor(COLORS.muted).font("Helvetica").fontSize(11).text("The attached maintenance receipt could not be embedded in the PDF.", mL + 12, startY + 48, {
+            width: contentW - 24,
+          });
+        }
+        doc.restore();
+        doc.y = startY + boxH + 12;
+        renderedAny = true;
+        continue;
+      }
+
+      drawTextBlock(fileLabel, file?.url || file?.name || "Receipt image unavailable.", 64);
+      renderedAny = true;
+    }
+
+    if (!renderedAny) {
+      const fallbackText = params.maintenanceReceiptName || params.maintenanceReceiptUrl || "No maintenance receipt image uploaded.";
+      drawTextBlock("Receipt file", fallbackText, 64);
+    }
   }
 
   return await new Promise((resolve, reject) => {

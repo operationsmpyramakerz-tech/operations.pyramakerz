@@ -523,6 +523,47 @@ function _firstNotionFileMeta(prop) {
   };
 }
 
+function notionFileMetas(prop) {
+  const files = Array.isArray(prop?.files) ? prop.files : [];
+  return files
+    .map((f) => {
+      const url =
+        (f?.type === "external" ? f?.external?.url : "") ||
+        (f?.type === "file" ? f?.file?.url : "") ||
+        "";
+      return {
+        name: String(f?.name || "").trim(),
+        url: String(url || "").trim(),
+      };
+    })
+    .filter((item) => item.name || item.url);
+}
+
+function toUniqueStringArray(value, { splitComma = false } = {}) {
+  const out = [];
+  const seen = new Set();
+
+  const push = (entry) => {
+    if (entry === null || entry === undefined) return;
+    const raw = String(entry || "").trim();
+    if (!raw) return;
+    if (splitComma && raw.includes(",")) {
+      raw.split(",").forEach((part) => push(part));
+      return;
+    }
+    const key = normKey(raw) || raw;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(raw);
+  };
+
+  if (Array.isArray(value)) value.forEach((entry) => push(entry));
+  else if (value instanceof Set) Array.from(value).forEach((entry) => push(entry));
+  else if (value !== undefined) push(value);
+
+  return out;
+}
+
 function findProfilePhotoPropName(props) {
   const preferred = [
     "Profile picture",
@@ -5962,37 +6003,53 @@ app.get(
             : null;
           const sparePartsReplacedIds = notionPropRelationIds(sparePartsProp);
           const sparePartsReplacedId = sparePartsReplacedIds[0] || null;
-          let sparePartsReplacedName = null;
+          let sparePartsReplacedNames = [];
 
-          if (sparePartsReplacedId) {
-            try {
-              const spareInfo = await getProductInfo(sparePartsReplacedId);
-              sparePartsReplacedName =
-                String(spareInfo?.name || "").trim() ||
-                String(await pageTitleById(sparePartsReplacedId) || "").trim() ||
-                null;
-            } catch {
-              sparePartsReplacedName = String(await pageTitleById(sparePartsReplacedId) || "").trim() || null;
-            }
+          if (sparePartsReplacedIds.length) {
+            sparePartsReplacedNames = toUniqueStringArray(
+              await Promise.all(
+                sparePartsReplacedIds.map(async (relationId) => {
+                  try {
+                    const spareInfo = await getProductInfo(relationId);
+                    return (
+                      String(spareInfo?.name || "").trim() ||
+                      String(await pageTitleById(relationId) || "").trim() ||
+                      ""
+                    );
+                  } catch {
+                    return String(await pageTitleById(relationId) || "").trim() || "";
+                  }
+                }),
+              ),
+            );
           }
 
-          if (!sparePartsReplacedName && sparePartsProp?.type === "multi_select") {
-            sparePartsReplacedName = (sparePartsProp.multi_select || [])
-              .map((x) => String(x?.name || "").trim())
-              .filter(Boolean)
-              .join(", ") || null;
+          if (!sparePartsReplacedNames.length && sparePartsProp?.type === "multi_select") {
+            sparePartsReplacedNames = toUniqueStringArray(
+              (sparePartsProp.multi_select || []).map((x) => String(x?.name || "").trim()),
+            );
           }
 
-          if (!sparePartsReplacedName) {
-            sparePartsReplacedName = parseTextProp(sparePartsProp) || null;
+          if (!sparePartsReplacedNames.length) {
+            sparePartsReplacedNames = toUniqueStringArray(parseTextProp(sparePartsProp) || "", {
+              splitComma: true,
+            });
           }
+
+          const sparePartsReplacedName = sparePartsReplacedNames.join(", ") || null;
 
           const maintenanceReceiptProp = maintenanceReceiptPropName
             ? props[maintenanceReceiptPropName]
             : null;
-          const maintenanceReceiptMeta = _firstNotionFileMeta(maintenanceReceiptProp);
-          const maintenanceReceiptName = maintenanceReceiptMeta.name || null;
-          const maintenanceReceiptUrl = maintenanceReceiptMeta.url || null;
+          const maintenanceReceiptMetas = notionFileMetas(maintenanceReceiptProp);
+          const maintenanceReceiptNames = maintenanceReceiptMetas
+            .map((item) => String(item?.name || "").trim())
+            .filter(Boolean);
+          const maintenanceReceiptUrls = maintenanceReceiptMetas
+            .map((item) => String(item?.url || "").trim())
+            .filter(Boolean);
+          const maintenanceReceiptName = maintenanceReceiptNames[0] || null;
+          const maintenanceReceiptUrl = maintenanceReceiptUrls[0] || null;
 
 // Qty in the UI should come from "Quantity Progress" (fallback to "Quantity Requested" if missing)
 const qtyProgress =
@@ -6164,8 +6221,12 @@ if (svApproval !== "Approved") continue;
     repairAction,
     resolutionMethod,
     resolutionMethodColor,
+    sparePartsReplacedIds,
     sparePartsReplacedId,
+    sparePartsReplacedNames,
     sparePartsReplacedName,
+    maintenanceReceiptNames,
+    maintenanceReceiptUrls,
     maintenanceReceiptName,
     maintenanceReceiptUrl,
     operationsByIds,
@@ -6716,6 +6777,8 @@ app.post(
         actualIssueDescription,
         repairAction,
         sparePartId,
+        sparePartIds,
+        sparePartNames,
       } = req.body || {};
 
       if (!Array.isArray(orderIds) || orderIds.length === 0) {
@@ -6756,23 +6819,60 @@ app.post(
       const repairActionText = String(repairAction || "")
         .replace(/\r\n/g, "\n")
         .trim();
-      const sparePartPageIdRaw = String(sparePartId || "").trim();
-      const sparePartPageId = sparePartPageIdRaw
-        ? (looksLikeNotionId(sparePartPageIdRaw) ? toHyphenatedUUID(sparePartPageIdRaw) : sparePartPageIdRaw)
-        : "";
 
-      let sparePartName = "";
-      if (sparePartPageId) {
+      const rawSparePartTokens = toUniqueStringArray(
+        Array.isArray(sparePartIds) && sparePartIds.length ? sparePartIds : sparePartId,
+      );
+      const requestedSparePartIds = rawSparePartTokens
+        .filter((value) => looksLikeNotionId(value))
+        .map((value) => toHyphenatedUUID(value))
+        .filter(Boolean);
+      const requestedSparePartNames = toUniqueStringArray(
+        [
+          ...rawSparePartTokens.filter((value) => !looksLikeNotionId(value)),
+          ...(Array.isArray(sparePartNames) ? sparePartNames : [sparePartNames]),
+        ],
+        { splitComma: true },
+      );
+
+      const finalSparePartIds = [...requestedSparePartIds];
+      const finalSparePartNames = [];
+
+      if (requestedSparePartNames.length) {
         try {
-          const spareInfo = await getProductInfoCached(sparePartPageId);
-          sparePartName = String(spareInfo?.name || "").trim();
+          const catalog = await listSparePartsComponents();
+          const byName = new Map(
+            catalog.map((item) => [normKey(item?.name), { id: item?.id, name: String(item?.name || "").trim() }]),
+          );
+          requestedSparePartNames.forEach((name) => {
+            const match = byName.get(normKey(name));
+            if (match?.id && !finalSparePartIds.includes(match.id)) {
+              finalSparePartIds.push(match.id);
+            }
+            finalSparePartNames.push(match?.name || String(name || "").trim());
+          });
         } catch {
-          sparePartName = "";
-        }
-        if (!sparePartName) {
-          sparePartName = String(await pageTitleById(sparePartPageId) || "").trim();
+          finalSparePartNames.push(...requestedSparePartNames);
         }
       }
+
+      if (finalSparePartIds.length) {
+        const resolvedNames = await Promise.all(
+          finalSparePartIds.map(async (pageId) => {
+            try {
+              const spareInfo = await getProductInfoCached(pageId);
+              return String(spareInfo?.name || "").trim() || String(await pageTitleById(pageId) || "").trim() || "";
+            } catch {
+              return String(await pageTitleById(pageId) || "").trim() || "";
+            }
+          }),
+        );
+        finalSparePartNames.push(...resolvedNames);
+      }
+
+      const normalizedSparePartIds = toUniqueStringArray(finalSparePartIds);
+      const normalizedSparePartNames = toUniqueStringArray(finalSparePartNames, { splitComma: true });
+      const sparePartText = normalizedSparePartNames.join(", ");
 
       const resolutionMethodValue = resolutionMethodPropName && resolutionMethodMeta
         ? buildWritableTextPropValue(
@@ -6808,26 +6908,26 @@ app.post(
         if (propType === "relation") {
           sparePartValue = {
             [sparePartsReplacedPropName]: {
-              relation: sparePartPageId ? [{ id: sparePartPageId }] : [],
+              relation: normalizedSparePartIds.map((pageId) => ({ id: pageId })),
             },
           };
         } else if (propType === "multi_select") {
           sparePartValue = {
             [sparePartsReplacedPropName]: {
-              multi_select: sparePartName ? [{ name: sparePartName }] : [],
+              multi_select: normalizedSparePartNames.map((name) => ({ name })),
             },
           };
         } else if (propType === "select" || propType === "status") {
           sparePartValue = buildWritableTextPropValue(
             sparePartsReplacedPropName,
             propType,
-            sparePartName,
+            normalizedSparePartNames[0] || "",
           );
         } else {
           sparePartValue = buildWritableTextPropValue(
             sparePartsReplacedPropName,
             propType || "rich_text",
-            sparePartName,
+            sparePartText,
           );
         }
       }
@@ -6856,8 +6956,10 @@ app.post(
         resolutionMethod: resolutionMethodText || null,
         actualIssueDescription: actualIssueDescriptionText || null,
         repairAction: repairActionText || null,
-        sparePartsReplacedId: sparePartPageId || null,
-        sparePartsReplacedName: sparePartName || null,
+        sparePartsReplacedIds: normalizedSparePartIds,
+        sparePartsReplacedId: normalizedSparePartIds[0] || null,
+        sparePartsReplacedNames: normalizedSparePartNames,
+        sparePartsReplacedName: sparePartText || null,
       });
     } catch (e) {
       console.error("log-maintenance error:", e?.body || e);
@@ -6878,6 +6980,8 @@ app.post(
         orderIds,
         maintenanceReceiptDataUrl,
         maintenanceReceiptFilename,
+        maintenanceReceiptDataUrls,
+        maintenanceReceiptFilenames,
       } = req.body || {};
       if (!Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "orderIds required" });
@@ -6935,14 +7039,24 @@ app.post(
           ? { status: { name: arrivedName } }
           : { select: { name: arrivedName } };
 
-      let maintenanceReceiptName = null;
-      let maintenanceReceiptUrl = null;
+      let maintenanceReceiptNames = [];
+      let maintenanceReceiptUrls = [];
       let maintenanceReceiptPropName = null;
 
       if (isMaintenanceOrder) {
-        const receiptDataUrl = String(maintenanceReceiptDataUrl || "").trim();
-        if (!receiptDataUrl) {
-          return res.status(400).json({ error: "Maintenance receipt image is required." });
+        const receiptDataUrls = (Array.isArray(maintenanceReceiptDataUrls) && maintenanceReceiptDataUrls.length
+          ? maintenanceReceiptDataUrls
+          : [maintenanceReceiptDataUrl])
+          .map((item) => String(item || "").trim())
+          .filter(Boolean);
+        const receiptFilenames = (Array.isArray(maintenanceReceiptFilenames) && maintenanceReceiptFilenames.length
+          ? maintenanceReceiptFilenames
+          : [maintenanceReceiptFilename])
+          .map((item) => String(item || "").trim())
+          .filter(Boolean);
+
+        if (!receiptDataUrls.length) {
+          return res.status(400).json({ error: "At least one maintenance receipt image is required." });
         }
 
         maintenanceReceiptPropName = await detectMaintenanceReceiptPropName();
@@ -6950,22 +7064,34 @@ app.post(
           return res.status(400).json({ error: "Maintenance receipt property is missing in Notion." });
         }
 
-        const rawFileName = String(maintenanceReceiptFilename || "maintenance-receipt.jpg").trim() || "maintenance-receipt.jpg";
-        const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "maintenance-receipt.jpg";
-        const extMatch = cleanFileName.match(/\.([a-zA-Z0-9]+)$/);
-        const safeExt = extMatch?.[1] ? extMatch[1].toLowerCase() : "jpg";
-        const blobName = `maintenance-receipts/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
+        const uploadedFiles = [];
+        for (let index = 0; index < receiptDataUrls.length; index += 1) {
+          const receiptDataUrl = String(receiptDataUrls[index] || "").trim();
+          if (!receiptDataUrl) continue;
 
-        try {
-          maintenanceReceiptUrl = await uploadToBlobFromBase64(receiptDataUrl, blobName);
-        } catch (uploadErr) {
-          const uploadMessage =
-            String(uploadErr?.message || "").trim() === "BLOB_TOKEN_MISSING"
-              ? "Maintenance receipt upload is not configured."
-              : "Failed to upload maintenance receipt.";
-          return res.status(500).json({ error: uploadMessage });
+          const rawFileName = String(receiptFilenames[index] || receiptFilenames[0] || `maintenance-receipt-${index + 1}.jpg`).trim() || `maintenance-receipt-${index + 1}.jpg`;
+          const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || `maintenance-receipt-${index + 1}.jpg`;
+          const extMatch = cleanFileName.match(/\.([a-zA-Z0-9]+)$/);
+          const safeExt = extMatch?.[1] ? extMatch[1].toLowerCase() : "jpg";
+          const blobName = `maintenance-receipts/${Date.now()}-${index + 1}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
+
+          try {
+            const publicUrl = await uploadToBlobFromBase64(receiptDataUrl, blobName);
+            uploadedFiles.push({
+              name: cleanFileName,
+              url: publicUrl,
+            });
+          } catch (uploadErr) {
+            const uploadMessage =
+              String(uploadErr?.message || "").trim() === "BLOB_TOKEN_MISSING"
+                ? "Maintenance receipt upload is not configured."
+                : "Failed to upload maintenance receipt.";
+            return res.status(500).json({ error: uploadMessage });
+          }
         }
-        maintenanceReceiptName = cleanFileName;
+
+        maintenanceReceiptNames = uploadedFiles.map((file) => file.name).filter(Boolean);
+        maintenanceReceiptUrls = uploadedFiles.map((file) => file.url).filter(Boolean);
       }
 
       await Promise.all(
@@ -6974,9 +7100,14 @@ app.post(
             [statusProp]: value,
           };
 
-          if (isMaintenanceOrder && maintenanceReceiptPropName && maintenanceReceiptUrl) {
+          if (isMaintenanceOrder && maintenanceReceiptPropName && maintenanceReceiptUrls.length) {
             properties[maintenanceReceiptPropName] = {
-              files: [makeExternalFile(maintenanceReceiptName || "maintenance-receipt.jpg", maintenanceReceiptUrl)],
+              files: maintenanceReceiptUrls.map((url, index) => (
+                makeExternalFile(
+                  maintenanceReceiptNames[index] || `maintenance-receipt-${index + 1}.jpg`,
+                  url,
+                )
+              )),
             };
           }
 
@@ -6993,8 +7124,10 @@ app.post(
         success: true,
         status: arrivedName,
         statusColor: arrivedColor,
-        maintenanceReceiptName,
-        maintenanceReceiptUrl,
+        maintenanceReceiptNames,
+        maintenanceReceiptName: maintenanceReceiptNames[0] || null,
+        maintenanceReceiptUrls,
+        maintenanceReceiptUrl: maintenanceReceiptUrls[0] || null,
       });
     } catch (e) {
       console.error("mark-arrived error:", e.body || e);
@@ -7973,35 +8106,46 @@ app.post(
       const repairAction = pickFirstText(repairActionPropName);
       const resolutionMethod = pickFirstText(resolutionMethodPropName);
 
-      let sparePartsReplaced = "";
+      let sparePartsReplacedList = [];
       if (sparePartsReplacedPropName) {
         for (const page of pages) {
           const prop = page?.properties?.[sparePartsReplacedPropName];
           const relationIds = notionPropRelationIds(prop);
           if (relationIds.length) {
-            const info = await productInfo(relationIds[0]);
-            sparePartsReplaced = String(info?.name || "").trim() || String(await pageTitleById(relationIds[0]) || "").trim();
+            const relationNames = await Promise.all(
+              relationIds.map(async (relationId) => {
+                const info = await productInfo(relationId);
+                return String(info?.name || "").trim() || String(await pageTitleById(relationId) || "").trim();
+              }),
+            );
+            sparePartsReplacedList.push(...relationNames);
           }
-          if (!sparePartsReplaced && prop?.type === "multi_select") {
-            sparePartsReplaced = (prop.multi_select || []).map((item) => String(item?.name || "").trim()).filter(Boolean).join(", ");
+          if (!sparePartsReplacedList.length && prop?.type === "multi_select") {
+            sparePartsReplacedList.push(
+              ...(prop.multi_select || []).map((item) => String(item?.name || "").trim()).filter(Boolean),
+            );
           }
-          if (!sparePartsReplaced) {
-            sparePartsReplaced = String(_extractPropText(prop) || "").trim();
+          if (!sparePartsReplacedList.length) {
+            sparePartsReplacedList.push(...toUniqueStringArray(String(_extractPropText(prop) || "").trim(), {
+              splitComma: true,
+            }));
           }
-          if (sparePartsReplaced) break;
+          if (sparePartsReplacedList.length) break;
         }
       }
+      sparePartsReplacedList = toUniqueStringArray(sparePartsReplacedList, { splitComma: true });
+      const sparePartsReplaced = sparePartsReplacedList.join(", ");
 
-      let maintenanceReceiptName = "";
-      let maintenanceReceiptUrl = "";
+      let maintenanceReceiptFiles = [];
       if (maintenanceReceiptPropName) {
         for (const page of pages) {
-          const meta = _firstNotionFileMeta(page?.properties?.[maintenanceReceiptPropName]);
-          maintenanceReceiptName = maintenanceReceiptName || String(meta?.name || "").trim();
-          maintenanceReceiptUrl = maintenanceReceiptUrl || String(meta?.url || "").trim();
-          if (maintenanceReceiptUrl) break;
+          maintenanceReceiptFiles.push(...notionFileMetas(page?.properties?.[maintenanceReceiptPropName]));
+          if (maintenanceReceiptFiles.length) break;
         }
       }
+      maintenanceReceiptFiles = maintenanceReceiptFiles.filter((item) => item?.name || item?.url);
+      const maintenanceReceiptName = maintenanceReceiptFiles[0]?.name || "";
+      const maintenanceReceiptUrl = maintenanceReceiptFiles[0]?.url || "";
 
       const rows = [];
       for (const page of pages) {
@@ -8056,9 +8200,11 @@ app.post(
           repairAction,
           resolutionMethod,
           sparePartsReplaced,
+          sparePartsReplacedList,
           rows,
           maintenanceReceiptName,
           maintenanceReceiptUrl,
+          maintenanceReceiptFiles,
         },
         res,
       );
