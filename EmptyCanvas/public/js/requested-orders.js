@@ -243,22 +243,96 @@ document.addEventListener("DOMContentLoaded", () => {
     return String(item?.issueDescription || item?.reason || modalReason?.textContent || "").trim();
   }
 
+  function toStringArray(value, { splitComma = false } = {}) {
+    const out = [];
+    const seen = new Set();
+
+    const push = (entry) => {
+      if (entry === null || entry === undefined) return;
+      const raw = String(entry).trim();
+      if (!raw) return;
+      if (splitComma && raw.includes(",")) {
+        raw.split(",").forEach((part) => push(part));
+        return;
+      }
+      if (seen.has(raw)) return;
+      seen.add(raw);
+      out.push(raw);
+    };
+
+    if (Array.isArray(value)) value.forEach((entry) => push(entry));
+    else if (value instanceof Set) Array.from(value).forEach((entry) => push(entry));
+    else if (value !== undefined) push(value);
+
+    return out;
+  }
+
+  function getSelectSelectedValues(selectEl) {
+    if (!selectEl) return [];
+    if (selectEl.multiple) {
+      return Array.from(selectEl.options || [])
+        .filter((opt) => opt.selected && String(opt.value || "").trim())
+        .map((opt) => String(opt.value || "").trim());
+    }
+    const value = String(selectEl.value || "").trim();
+    return value ? [value] : [];
+  }
+
+  function getSelectSelectedLabels(selectEl) {
+    if (!selectEl) return [];
+    if (selectEl.multiple) {
+      return Array.from(selectEl.selectedOptions || [])
+        .map((opt) => String(opt.textContent || "").trim())
+        .filter(Boolean);
+    }
+
+    const option = selectEl.selectedOptions?.[0] || null;
+    const label = String(option?.textContent || "").trim();
+    return label ? [label] : [];
+  }
+
+  function setSelectValues(selectEl, values) {
+    if (!selectEl) return;
+    const nextValues = new Set(toStringArray(values));
+    const options = Array.from(selectEl.options || []);
+
+    if (selectEl.multiple) {
+      options.forEach((opt) => {
+        opt.selected = nextValues.has(String(opt.value || "").trim());
+      });
+      selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    const nextValue = toStringArray(values)[0] || "";
+    selectEl.value = nextValue;
+    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   function fillSelectOptions(selectEl, options, {
     placeholder = "Select an option",
-    allowEmpty = true,
+    allowEmpty = !selectEl?.multiple,
     selectedValue = "",
+    selectedValues = null,
   } = {}) {
     if (!selectEl) return;
 
     const items = Array.isArray(options) ? options : [];
-    const current = String(selectedValue || "").trim();
+    const isMultiple = !!selectEl.multiple;
+    const currentValues = toStringArray(
+      isMultiple ? (selectedValues ?? selectedValue) : selectedValue,
+      { splitComma: isMultiple },
+    );
+    const selectedSet = new Set(currentValues);
     const frag = document.createDocumentFragment();
+    const optionValues = new Set();
 
-    if (allowEmpty) {
+    if (!isMultiple && allowEmpty) {
       const opt = document.createElement("option");
       opt.value = "";
       opt.textContent = placeholder;
       frag.appendChild(opt);
+      optionValues.add("");
     }
 
     items.forEach((item) => {
@@ -269,19 +343,32 @@ document.addEventListener("DOMContentLoaded", () => {
       const opt = document.createElement("option");
       opt.value = value;
       opt.textContent = label;
+      if (selectedSet.has(value)) opt.selected = true;
       frag.appendChild(opt);
+      optionValues.add(value);
     });
 
-    if (current && !items.some((item) => String(item?.value ?? item?.id ?? item?.name ?? "").trim() === current)) {
+    currentValues.forEach((value) => {
+      if (!value || optionValues.has(value)) return;
       const opt = document.createElement("option");
-      opt.value = current;
-      opt.textContent = current;
+      opt.value = value;
+      opt.textContent = value;
+      opt.selected = true;
       frag.appendChild(opt);
-    }
+      optionValues.add(value);
+    });
 
     selectEl.innerHTML = "";
     selectEl.appendChild(frag);
-    selectEl.value = current;
+
+    if (isMultiple) {
+      Array.from(selectEl.options || []).forEach((opt) => {
+        opt.selected = selectedSet.has(String(opt.value || "").trim());
+      });
+    } else {
+      selectEl.value = currentValues[0] || "";
+    }
+
     refreshModernSelect(selectEl);
   }
 
@@ -314,8 +401,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!state) return;
     state.panel.hidden = true;
     state.panel.style.maxHeight = "";
+    if (state.optionsList) state.optionsList.style.maxHeight = "";
     state.wrap.classList.remove("is-open", "is-dropup");
     state.trigger.setAttribute("aria-expanded", "false");
+    if (state.searchInput) state.searchInput.value = "";
+    applyModernSelectFilter(selectEl);
     if (openModernSelect === selectEl) openModernSelect = null;
   }
 
@@ -330,14 +420,60 @@ document.addEventListener("DOMContentLoaded", () => {
     const rawSpaceAbove = triggerRect.top - viewportPadding - gap;
     const spaceBelow = Math.max(0, rawSpaceBelow);
     const spaceAbove = Math.max(0, rawSpaceAbove);
-    const desiredHeight = Math.min(state.panel.scrollHeight || 0, 320);
+    const desiredHeight = Math.min(state.panel.scrollHeight || 0, 360);
     const shouldDropUp = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
     const availableSpace = shouldDropUp ? spaceAbove : spaceBelow;
-    const fallbackHeight = Math.min(Math.max(desiredHeight || 0, 180), 320);
-    const maxHeight = Math.max(120, Math.min(320, availableSpace || fallbackHeight));
+    const fallbackHeight = Math.min(Math.max(desiredHeight || 0, 220), 360);
+    const maxHeight = Math.max(140, Math.min(360, availableSpace || fallbackHeight));
+    const searchHeight = state.searchWrap && !state.searchWrap.hidden
+      ? Math.max(0, state.searchWrap.offsetHeight)
+      : 0;
+    const listMaxHeight = Math.max(88, maxHeight - searchHeight - 18);
 
     state.wrap.classList.toggle("is-dropup", shouldDropUp);
     state.panel.style.maxHeight = `${maxHeight}px`;
+    if (state.optionsList) state.optionsList.style.maxHeight = `${listMaxHeight}px`;
+  }
+
+  function getModernSelectPlaceholder(selectEl) {
+    return (
+      String(selectEl?.dataset?.placeholder || "").trim() ||
+      String(selectEl?.options?.[0]?.textContent || "Select an option").trim() ||
+      "Select an option"
+    );
+  }
+
+  function getModernSelectTriggerLabel(selectEl, selectedOptions, placeholder) {
+    const picked = Array.isArray(selectedOptions) ? selectedOptions : [];
+    if (!selectEl?.multiple) return picked[0]?.label || placeholder;
+    if (!picked.length) return placeholder;
+    if (picked.length === 1) return picked[0].label || placeholder;
+    if (picked.length === 2) {
+      return `${picked[0].label || placeholder}, ${picked[1].label || placeholder}`;
+    }
+    return `${picked[0].label || placeholder}, ${picked[1].label || placeholder} +${picked.length - 2}`;
+  }
+
+  function applyModernSelectFilter(selectEl) {
+    const state = modernSelectState.get(selectEl);
+    if (!state) return;
+
+    const query = norm(state.searchInput?.value || "");
+    let visibleCount = 0;
+
+    Array.from(state.optionsList?.children || []).forEach((btn) => {
+      const label = String(btn.dataset.label || btn.textContent || "").trim();
+      const isClear = btn.dataset.clear === "true";
+      const visible = !query || (!isClear && norm(label).includes(query)) || (isClear && !query);
+      btn.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+
+    if (state.empty) {
+      state.empty.classList.toggle("is-visible", visibleCount === 0);
+    }
+
+    if (openModernSelect === selectEl) updateModernSelectPlacement(selectEl);
   }
 
   function refreshModernSelect(selectEl) {
@@ -345,43 +481,65 @@ document.addEventListener("DOMContentLoaded", () => {
     const state = ensureModernSelect(selectEl);
     if (!state) return;
 
-    const placeholder =
-      String(selectEl.dataset.placeholder || "").trim() ||
-      String(selectEl.options?.[0]?.textContent || "Select an option").trim() ||
-      "Select an option";
+    const placeholder = getModernSelectPlaceholder(selectEl);
+    const isMultiple = !!selectEl.multiple;
+    const searchable = String(selectEl.dataset.searchable || "").trim().toLowerCase() === "true";
+    const allowClear = isMultiple;
 
-    const options = Array.from(selectEl.options || []).map((opt) => ({
-      value: String(opt.value || ""),
-      label: String(opt.textContent || "").trim() || placeholder,
-      disabled: !!opt.disabled,
-      selected: opt.selected,
-    }));
+    const options = Array.from(selectEl.options || [])
+      .map((opt) => ({
+        value: String(opt.value || "").trim(),
+        label: String(opt.textContent || "").trim() || placeholder,
+        disabled: !!opt.disabled,
+        selected: !!opt.selected,
+      }))
+      .filter((opt) => !(isMultiple && !opt.value));
 
-    const selectedOption =
-      options.find((opt) => opt.value === String(selectEl.value || "")) ||
-      options.find((opt) => opt.selected) ||
-      options[0] ||
-      null;
+    const selectedOptions = isMultiple
+      ? options.filter((opt) => opt.selected)
+      : options.filter((opt) => opt.value === String(selectEl.value || "").trim()).slice(0, 1);
 
-    state.value.textContent = selectedOption?.label || placeholder;
+    state.value.textContent = getModernSelectTriggerLabel(selectEl, selectedOptions, placeholder);
     state.trigger.disabled = !!selectEl.disabled;
     state.wrap.classList.toggle("is-disabled", !!selectEl.disabled);
+    state.searchWrap.hidden = !searchable;
+    if (!searchable && state.searchInput) state.searchInput.value = "";
+    if (state.searchInput) {
+      state.searchInput.placeholder = String(selectEl.dataset.searchPlaceholder || "Search options").trim() || "Search options";
+    }
 
-    state.panel.innerHTML = "";
+    state.optionsList.innerHTML = "";
+
+    if (allowClear) {
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "co-modern-select__option";
+      if (!selectedOptions.length) clearBtn.classList.add("is-selected");
+      clearBtn.dataset.clear = "true";
+      clearBtn.dataset.label = placeholder;
+      clearBtn.innerHTML = `
+        <span class="co-modern-select__option-label">${escapeHTML(placeholder)}</span>
+        <span class="co-modern-select__check" aria-hidden="true"></span>
+      `;
+      state.optionsList.appendChild(clearBtn);
+    }
+
     options.forEach((opt) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "co-modern-select__option";
       if (opt.selected) btn.classList.add("is-selected");
       btn.dataset.value = opt.value;
+      btn.dataset.label = opt.label;
       btn.disabled = !!opt.disabled;
       btn.innerHTML = `
-        <span>${escapeHTML(opt.label || placeholder)}</span>
+        <span class="co-modern-select__option-label">${escapeHTML(opt.label || placeholder)}</span>
         <span class="co-modern-select__check" aria-hidden="true"></span>
       `;
-      state.panel.appendChild(btn);
+      state.optionsList.appendChild(btn);
     });
 
+    applyModernSelectFilter(selectEl);
     if (window.feather) window.feather.replace();
   }
 
@@ -410,6 +568,28 @@ document.addEventListener("DOMContentLoaded", () => {
     panel.hidden = true;
     panel.setAttribute("role", "listbox");
 
+    const searchWrap = document.createElement("div");
+    searchWrap.className = "co-modern-select__search-wrap";
+    searchWrap.hidden = true;
+
+    const searchInput = document.createElement("input");
+    searchInput.type = "search";
+    searchInput.className = "co-modern-select__search";
+    searchInput.autocomplete = "off";
+    searchInput.spellcheck = false;
+    searchWrap.appendChild(searchInput);
+
+    const optionsList = document.createElement("div");
+    optionsList.className = "co-modern-select__options";
+
+    const empty = document.createElement("div");
+    empty.className = "co-modern-select__empty";
+    empty.textContent = "No matching results";
+
+    panel.appendChild(searchWrap);
+    panel.appendChild(optionsList);
+    panel.appendChild(empty);
+
     parent.insertBefore(wrap, selectEl);
     wrap.appendChild(selectEl);
     wrap.appendChild(trigger);
@@ -422,6 +602,10 @@ document.addEventListener("DOMContentLoaded", () => {
       trigger,
       panel,
       value: trigger.querySelector(".co-modern-select__value"),
+      searchWrap,
+      searchInput,
+      optionsList,
+      empty,
     };
 
     trigger.addEventListener("click", (e) => {
@@ -437,10 +621,15 @@ document.addEventListener("DOMContentLoaded", () => {
       openModernSelect = willOpen ? selectEl : null;
 
       if (willOpen) {
+        if (state.searchInput) state.searchInput.value = "";
+        applyModernSelectFilter(selectEl);
         window.requestAnimationFrame(() => {
           updateModernSelectPlacement(selectEl);
           try {
-            panel.scrollTop = 0;
+            state.optionsList.scrollTop = 0;
+          } catch {}
+          try {
+            if (!state.searchWrap.hidden) state.searchInput.focus();
           } catch {}
         });
       }
@@ -449,6 +638,27 @@ document.addEventListener("DOMContentLoaded", () => {
     panel.addEventListener("click", (e) => {
       const btn = e.target.closest(".co-modern-select__option");
       if (!btn || btn.disabled) return;
+
+      if (selectEl.multiple) {
+        if (btn.dataset.clear === "true") {
+          Array.from(selectEl.options || []).forEach((opt) => {
+            opt.selected = false;
+          });
+        } else {
+          const nextValue = String(btn.dataset.value || "").trim();
+          Array.from(selectEl.options || []).forEach((opt) => {
+            if (String(opt.value || "").trim() === nextValue) opt.selected = !opt.selected;
+          });
+        }
+        selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+        window.requestAnimationFrame(() => {
+          try {
+            if (!state.searchWrap.hidden) state.searchInput.focus();
+          } catch {}
+        });
+        return;
+      }
+
       const nextValue = String(btn.dataset.value || "");
       if (String(selectEl.value || "") !== nextValue) {
         selectEl.value = nextValue;
@@ -462,6 +672,17 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch {}
     });
 
+    searchInput.addEventListener("input", () => applyModernSelectFilter(selectEl));
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeModernSelect(selectEl);
+        try {
+          trigger.focus();
+        } catch {}
+      }
+    });
+
     selectEl.addEventListener("change", () => refreshModernSelect(selectEl));
 
     document.addEventListener("click", (e) => {
@@ -472,9 +693,17 @@ document.addEventListener("DOMContentLoaded", () => {
       if (openModernSelect === selectEl) updateModernSelectPlacement(selectEl);
     });
 
-    document.addEventListener("scroll", () => {
-      if (openModernSelect === selectEl) updateModernSelectPlacement(selectEl);
-    }, true);
+    document.addEventListener(
+      "scroll",
+      () => {
+        if (openModernSelect === selectEl) updateModernSelectPlacement(selectEl);
+      },
+      true,
+    );
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && openModernSelect === selectEl) closeModernSelect(selectEl);
+    });
 
     modernSelectState.set(selectEl, state);
     refreshModernSelect(selectEl);
@@ -485,8 +714,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!selectEl) return;
     fillSelectOptions(selectEl, [], {
       placeholder: loadingLabel || selectEl.dataset.placeholder || "Loading...",
-      allowEmpty: true,
-      selectedValue: "",
+      allowEmpty: !selectEl.multiple,
+      selectedValues: [],
     });
     selectEl.disabled = true;
     refreshModernSelect(selectEl);
@@ -1142,6 +1371,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ...(g.items || []).map((x) => x.repairAction),
       ...(g.items || []).map((x) => x.resolutionMethod),
       ...(g.items || []).map((x) => x.sparePartsReplacedName),
+      ...(g.items || []).flatMap((x) => Array.isArray(x?.sparePartsReplacedNames) ? x.sparePartsReplacedNames : []),
     ]
       .filter(Boolean)
       .join(" ");
@@ -1708,8 +1938,13 @@ document.addEventListener("DOMContentLoaded", () => {
     setMaintenanceLogError("");
     const item = getPrimaryMaintenanceItem(activeGroup);
     const currentResolution = String(item?.resolutionMethod || "").trim();
-    const currentSparePartId = String(item?.sparePartsReplacedId || "").trim();
-    const currentSparePartName = String(item?.sparePartsReplacedName || "").trim();
+    const currentSparePartIds = toStringArray(
+      item?.sparePartsReplacedIds?.length ? item.sparePartsReplacedIds : item?.sparePartsReplacedId,
+    );
+    const currentSparePartNames = toStringArray(
+      item?.sparePartsReplacedNames?.length ? item.sparePartsReplacedNames : item?.sparePartsReplacedName,
+      { splitComma: true },
+    );
     const loadToken = ++maintenanceLogLoadToken;
 
     if (maintenanceLogConfirmBtn) maintenanceLogConfirmBtn.disabled = true;
@@ -1726,8 +1961,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     fillSelectOptions(maintenanceSparePartSelect, [], {
       placeholder: "Loading spare parts...",
-      allowEmpty: true,
-      selectedValue: "",
+      allowEmpty: false,
+      selectedValues: [],
     });
     setSelectLoading(maintenanceResolutionSelect, "Loading resolution methods...");
     setSelectLoading(maintenanceSparePartSelect, "Loading spare parts...");
@@ -1775,22 +2010,22 @@ document.addEventListener("DOMContentLoaded", () => {
         sparePartOptions,
         {
           placeholder: "No spare part selected",
-          allowEmpty: true,
-          selectedValue: currentSparePartId,
+          allowEmpty: false,
+          selectedValues: currentSparePartIds,
         },
       );
 
-      if (currentSparePartName && !currentSparePartId) {
+      if (currentSparePartNames.length && !currentSparePartIds.length) {
         fillSelectOptions(
           maintenanceSparePartSelect,
           [
             ...sparePartOptions,
-            { value: currentSparePartName, label: currentSparePartName },
+            ...currentSparePartNames.map((name) => ({ value: name, label: name })),
           ],
           {
             placeholder: "No spare part selected",
-            allowEmpty: true,
-            selectedValue: currentSparePartName,
+            allowEmpty: false,
+            selectedValues: currentSparePartNames,
           },
         );
       }
@@ -1830,14 +2065,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let maintenanceReceiptLastFocus = null;
 
-  function updateMaintenanceReceiptUI(file = null) {
+  function updateMaintenanceReceiptUI(files = []) {
+    const pickedFiles = Array.from(files || []).filter(Boolean);
     if (maintenanceReceiptName) {
-      maintenanceReceiptName.textContent = file?.name || "Choose image";
+      if (!pickedFiles.length) maintenanceReceiptName.textContent = "Choose images";
+      else if (pickedFiles.length === 1) maintenanceReceiptName.textContent = pickedFiles[0].name || "1 image selected";
+      else maintenanceReceiptName.textContent = `${pickedFiles.length} images selected`;
     }
     if (maintenanceReceiptMeta) {
-      maintenanceReceiptMeta.textContent = file
-        ? [String(file.type || "Image").replace(/^image\//i, "").toUpperCase(), humanFileSize(file.size)].filter(Boolean).join(" • ")
-        : "PNG, JPG or WEBP";
+      if (!pickedFiles.length) {
+        maintenanceReceiptMeta.textContent = "PNG, JPG or WEBP";
+      } else {
+        const totalSize = pickedFiles.reduce((sum, file) => sum + (Number(file?.size) || 0), 0);
+        const labels = pickedFiles.slice(0, 2).map((file) => String(file?.name || "").trim()).filter(Boolean);
+        const moreLabel = pickedFiles.length > 2 ? `+${pickedFiles.length - 2} more` : "";
+        maintenanceReceiptMeta.textContent = [
+          labels.join(" • "),
+          moreLabel,
+          humanFileSize(totalSize),
+        ].filter(Boolean).join(" • ");
+      }
     }
   }
 
@@ -1854,7 +2101,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     maintenanceReceiptLastFocus = document.activeElement;
     maintenanceReceiptInput.value = "";
-    updateMaintenanceReceiptUI(null);
+    updateMaintenanceReceiptUI([]);
     setMaintenanceReceiptError("");
 
     maintenanceReceiptConfirmBtn.disabled = false;
@@ -2429,7 +2676,8 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     const resolutionMethod = String(payload?.resolutionMethod || "").trim();
     const actualIssueDescription = String(payload?.actualIssueDescription || "").trim();
     const repairAction = String(payload?.repairAction || "").trim();
-    const sparePartId = String(payload?.sparePartId || "").trim();
+    const sparePartIds = toStringArray(payload?.sparePartIds ?? payload?.sparePartId);
+    const sparePartNames = toStringArray(payload?.sparePartNames, { splitComma: true });
 
     if (maintenanceLogConfirmBtn) {
       maintenanceLogConfirmBtn.disabled = true;
@@ -2445,15 +2693,18 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
         resolutionMethod,
         actualIssueDescription,
         repairAction,
-        sparePartId,
+        sparePartIds,
+        sparePartNames,
       });
 
-      const selectedSparePartOption = maintenanceSparePartSelect?.selectedOptions?.[0] || null;
-      const selectedSparePartLabel = String(
-        data?.sparePartsReplacedName ||
-        selectedSparePartOption?.textContent ||
-        "",
-      ).trim();
+      const selectedSparePartIds = toStringArray(data?.sparePartsReplacedIds ?? sparePartIds);
+      const selectedSparePartLabels = toStringArray(
+        data?.sparePartsReplacedNames?.length
+          ? data.sparePartsReplacedNames
+          : getSelectSelectedLabels(maintenanceSparePartSelect),
+        { splitComma: true },
+      );
+      const selectedSparePartLabel = toStringArray(data?.sparePartsReplacedName || selectedSparePartLabels).join(", ");
       const idSet = new Set(g.orderIds);
 
       allItems.forEach((it) => {
@@ -2461,11 +2712,10 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
         it.resolutionMethod = data?.resolutionMethod || resolutionMethod || null;
         it.actualIssueDescription = data?.actualIssueDescription || actualIssueDescription || null;
         it.repairAction = data?.repairAction || repairAction || null;
-        it.sparePartsReplacedId = data?.sparePartsReplacedId || sparePartId || null;
-        it.sparePartsReplacedName =
-          data?.sparePartsReplacedName ||
-          selectedSparePartLabel ||
-          null;
+        it.sparePartsReplacedIds = selectedSparePartIds;
+        it.sparePartsReplacedId = selectedSparePartIds[0] || null;
+        it.sparePartsReplacedNames = selectedSparePartLabels;
+        it.sparePartsReplacedName = selectedSparePartLabel || null;
       });
 
       writeRequestedCache(allItems);
@@ -2499,8 +2749,12 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
   async function markArrived(g, extra = {}) {
     if (!g || !g.orderIds?.length) return;
 
-    const maintenanceReceiptDataUrl = String(extra?.maintenanceReceiptDataUrl || "").trim();
-    const maintenanceReceiptFilename = String(extra?.maintenanceReceiptFilename || "").trim();
+    const maintenanceReceiptDataUrls = toStringArray(
+      extra?.maintenanceReceiptDataUrls ?? extra?.maintenanceReceiptDataUrl,
+    );
+    const maintenanceReceiptFilenames = toStringArray(
+      extra?.maintenanceReceiptFilenames ?? extra?.maintenanceReceiptFilename,
+    );
     const silent = !!extra?.silent;
 
     if (arrivedBtn) {
@@ -2512,8 +2766,8 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     try {
       const data = await postJson("/api/orders/requested/mark-arrived", {
         orderIds: g.orderIds,
-        maintenanceReceiptDataUrl: maintenanceReceiptDataUrl || null,
-        maintenanceReceiptFilename: maintenanceReceiptFilename || null,
+        maintenanceReceiptDataUrls,
+        maintenanceReceiptFilenames,
       });
 
       const idSet = new Set(g.orderIds);
@@ -2521,8 +2775,10 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
         if (!idSet.has(it.id)) return;
         it.status = "Arrived";
         it.statusColor = data.statusColor || it.statusColor;
-        if (data?.maintenanceReceiptUrl) it.maintenanceReceiptUrl = data.maintenanceReceiptUrl;
-        if (data?.maintenanceReceiptName) it.maintenanceReceiptName = data.maintenanceReceiptName;
+        it.maintenanceReceiptUrls = toStringArray(data?.maintenanceReceiptUrls ?? data?.maintenanceReceiptUrl);
+        it.maintenanceReceiptNames = toStringArray(data?.maintenanceReceiptNames ?? data?.maintenanceReceiptName);
+        it.maintenanceReceiptUrl = it.maintenanceReceiptUrls[0] || null;
+        it.maintenanceReceiptName = it.maintenanceReceiptNames[0] || null;
       });
 
       writeRequestedCache(allItems);
@@ -2905,7 +3161,8 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
       resolutionMethod: maintenanceResolutionSelect?.value || "",
       actualIssueDescription: maintenanceActualIssueInput?.value || "",
       repairAction: maintenanceRepairActionInput?.value || "",
-      sparePartId: maintenanceSparePartSelect?.value || "",
+      sparePartIds: getSelectSelectedValues(maintenanceSparePartSelect),
+      sparePartNames: getSelectSelectedLabels(maintenanceSparePartSelect),
     });
   });
 
@@ -2914,7 +3171,7 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     maintenanceReceiptInput?.click();
   });
   maintenanceReceiptInput?.addEventListener("change", () => {
-    updateMaintenanceReceiptUI(maintenanceReceiptInput.files?.[0] || null);
+    updateMaintenanceReceiptUI(Array.from(maintenanceReceiptInput.files || []));
     if (maintenanceReceiptError?.textContent) setMaintenanceReceiptError("");
   });
   maintenanceReceiptCloseBtn?.addEventListener("click", (e) => {
@@ -2927,9 +3184,9 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
   });
   maintenanceReceiptConfirmBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
-    const file = maintenanceReceiptInput?.files?.[0] || null;
-    if (!file) {
-      setMaintenanceReceiptError("Please upload the maintenance receipt image.");
+    const files = Array.from(maintenanceReceiptInput?.files || []).filter(Boolean);
+    if (!files.length) {
+      setMaintenanceReceiptError("Please upload at least one maintenance receipt image.");
       return;
     }
 
@@ -2940,10 +3197,10 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     if (maintenanceReceiptChooseBtn) maintenanceReceiptChooseBtn.disabled = true;
 
     try {
-      const dataUrl = await fileToDataUrl(file);
+      const dataUrls = await Promise.all(files.map((file) => fileToDataUrl(file)));
       await markArrived(activeGroup, {
-        maintenanceReceiptDataUrl: String(dataUrl || ""),
-        maintenanceReceiptFilename: file.name || "maintenance-receipt.jpg",
+        maintenanceReceiptDataUrls: dataUrls.map((item) => String(item || "")).filter(Boolean),
+        maintenanceReceiptFilenames: files.map((file) => file.name || "maintenance-receipt.jpg"),
         silent: true,
       });
       closeMaintenanceReceiptModal({ restoreFocus: false });
