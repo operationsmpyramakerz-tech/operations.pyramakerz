@@ -10,18 +10,6 @@ let CASH_IN_FROM_OPTIONS = [];
 let IS_CASHIN_SUBMITTING = false;
 let IS_CASHOUT_SUBMITTING = false;
 
-const LOCATION_PICKER_DEFAULT = { lat: 30.0444, lng: 31.2357, zoom: 11 };
-const CASH_OUT_LOCATION_STATE = { from: null, to: null };
-let LOCATION_PICKER_MAP = null;
-let LOCATION_PICKER_MARKER = null;
-let LOCATION_PICKER_GEOCODER = null;
-let LOCATION_PICKER_ACTIVE_FIELD = "from";
-let LOCATION_PICKER_SELECTION = null;
-let LOCATION_PICKER_SEARCH_REQUEST_ID = 0;
-let LOCATION_PICKER_REVERSE_REQUEST_ID = 0;
-let GOOGLE_MAPS_READY = !!(window.google && window.google.maps);
-let GOOGLE_MAPS_READY_WAITERS = [];
-
 function showSubmitLoader(text) {
   const overlay = document.getElementById("submitLoader");
   const label = document.getElementById("submitLoaderText");
@@ -39,8 +27,7 @@ function hideSubmitLoader() {
     overlay.style.display = "none";
     overlay.setAttribute("aria-hidden", "true");
   }
-  document.body.classList.remove("is-loading");
-}
+
 
 /* =============================
    MODERN TOAST (errors / info)
@@ -91,6 +78,9 @@ function showToast(message, type = "error", { duration = 4000 } = {}) {
   if (duration && duration > 0) {
     window.setTimeout(remove, duration);
   }
+}
+
+  document.body.classList.remove("is-loading");
 }
 
 /* =============================
@@ -165,676 +155,8 @@ function escapeHtml(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function truncateText(value, max = 90) {
-  const str = String(value || "").trim();
-  if (!str) return "";
-  if (str.length <= max) return str;
-  return `${str.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
-}
-
-function getLocationFieldLabel(field) {
-  return String(field || "").trim().toLowerCase() === "to" ? "To" : "From";
-}
-
-window.initExpenseGoogleMapsApi = function initExpenseGoogleMapsApi() {
-  GOOGLE_MAPS_READY = !!(window.google && window.google.maps);
-  const waiters = Array.isArray(GOOGLE_MAPS_READY_WAITERS) ? [...GOOGLE_MAPS_READY_WAITERS] : [];
-  GOOGLE_MAPS_READY_WAITERS = [];
-  waiters.forEach((resolve) => {
-    try {
-      resolve(window.google.maps);
-    } catch {}
-  });
-};
-
-function waitForGoogleMaps(timeout = 15000) {
-  if (window.google && window.google.maps) {
-    GOOGLE_MAPS_READY = true;
-    return Promise.resolve(window.google.maps);
-  }
-
-  return new Promise((resolve, reject) => {
-    const wrappedResolve = (maps) => {
-      window.clearTimeout(timer);
-      resolve(maps);
-    };
-
-    const timer = window.setTimeout(() => {
-      GOOGLE_MAPS_READY_WAITERS = GOOGLE_MAPS_READY_WAITERS.filter((item) => item !== wrappedResolve);
-      reject(new Error("Google Maps failed to load"));
-    }, timeout);
-
-    GOOGLE_MAPS_READY_WAITERS.push(wrappedResolve);
-  });
-}
-
-function formatLocationCoords(lat, lng) {
-  const latNum = Number(lat);
-  const lngNum = Number(lng);
-  const safeLat = Number.isFinite(latNum) ? latNum.toFixed(6) : "0.000000";
-  const safeLng = Number.isFinite(lngNum) ? lngNum.toFixed(6) : "0.000000";
-  return `${safeLat}, ${safeLng}`;
-}
-
-function buildGoogleMapsLocationUrl(lat, lng) {
-  const latNum = Number(lat);
-  const lngNum = Number(lng);
-  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return "";
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatLocationCoords(latNum, lngNum))}`;
-}
-
-function buildLocationDisplayLabel(location) {
-  if (!location) return "";
-  const label = String(location.label || "").trim();
-  if (label) return label;
-  return formatLocationCoords(location.lat, location.lng);
-}
-
-function buildLocationSummary(location) {
-  if (!location) return "";
-  return truncateText(buildLocationDisplayLabel(location), 84);
-}
-
-function normalizeLocationValue(location) {
-  if (!location) return null;
-
-  const lat = Number(location.lat);
-  const lng = Number(location.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-  const label = buildLocationDisplayLabel(location);
-  const url = String(location.url || "").trim() || buildGoogleMapsLocationUrl(lat, lng);
-
-  return {
-    lat,
-    lng,
-    label,
-    url,
-  };
-}
-
-function getCashOutLocationElements(field) {
-  const safeField = String(field || "").trim().toLowerCase() === "to" ? "to" : "from";
-  return {
-    input: document.getElementById(`co_${safeField}`),
-    text: document.getElementById(`co_${safeField}_text`),
-    clear: document.getElementById(`co_${safeField}_clear`),
-    trigger: document.getElementById(`co_${safeField}_btn`),
-  };
-}
-
-function updateLocationTriggerText(el, text, isEmpty = false) {
-  if (!el) return;
-  el.textContent = String(text || "");
-  el.classList.toggle("is-empty", !!isEmpty);
-}
-
-function setCashOutLocationValue(field, location) {
-  const safeField = String(field || "").trim().toLowerCase() === "to" ? "to" : "from";
-  const els = getCashOutLocationElements(safeField);
-  const normalized = normalizeLocationValue(location);
-
-  if (!normalized) {
-    CASH_OUT_LOCATION_STATE[safeField] = null;
-    if (els.input) {
-      els.input.value = "";
-      delete els.input.dataset.lat;
-      delete els.input.dataset.lng;
-      delete els.input.dataset.label;
-      delete els.input.dataset.url;
-    }
-    updateLocationTriggerText(els.text, "No location selected", true);
-    if (els.clear) els.clear.hidden = true;
-    return;
-  }
-
-  CASH_OUT_LOCATION_STATE[safeField] = normalized;
-  if (els.input) {
-    els.input.value = normalized.url || "";
-    els.input.dataset.lat = String(normalized.lat);
-    els.input.dataset.lng = String(normalized.lng);
-    els.input.dataset.label = normalized.label;
-    els.input.dataset.url = normalized.url || "";
-  }
-  updateLocationTriggerText(els.text, buildLocationSummary(normalized), false);
-  if (els.clear) els.clear.hidden = false;
-}
-
-function getCashOutLocationPayload(field) {
-  const safeField = String(field || "").trim().toLowerCase() === "to" ? "to" : "from";
-  const input = document.getElementById(`co_${safeField}`);
-  const lat = Number(input?.dataset?.lat);
-  const lng = Number(input?.dataset?.lng);
-  const label = String(input?.dataset?.label || "").trim();
-  const url = String(input?.dataset?.url || input?.value || "").trim();
-
-  if (!label && !url && !Number.isFinite(lat) && !Number.isFinite(lng)) {
-    return null;
-  }
-
-  const normalized = normalizeLocationValue({ lat, lng, label, url });
-  if (normalized) return normalized;
-
-  if (!url && !label) return null;
-  return {
-    lat: Number.isFinite(lat) ? lat : null,
-    lng: Number.isFinite(lng) ? lng : null,
-    label: label || url,
-    url,
-  };
-}
-
-function resetCashOutLocationFields() {
-  setCashOutLocationValue("from", null);
-  setCashOutLocationValue("to", null);
-}
-
-function setLocationSearchResultsHtml(html = "", { open = false } = {}) {
-  const box = document.getElementById("locationSearchResults");
-  if (!box) return;
-  box.innerHTML = html;
-  box.classList.toggle("is-open", !!open && !!String(html || "").trim());
-}
-
-function splitLocationLabel(label) {
-  const raw = String(label || "").trim();
-  if (!raw) return { title: "Pinned location", meta: "" };
-  const parts = raw.split(",").map((part) => part.trim()).filter(Boolean);
-  const title = parts.shift() || raw;
-  return { title, meta: parts.join(", ") };
-}
-
-function updateLocationPickedValue(location) {
-  const el = document.getElementById("locationPickedValue");
-  if (!el) return;
-  if (!location) {
-    updateLocationTriggerText(el, "No location selected yet.", true);
-    return;
-  }
-  updateLocationTriggerText(el, buildLocationDisplayLabel(location), false);
-}
-
-function buildExpenseLocationAnchorHtml(label, url) {
-  const safeLabel = String(label || "").trim();
-  const safeUrl = String(url || "").trim();
-  if (!safeLabel && !safeUrl) return "";
-
-  const text = escapeHtml(safeLabel || safeUrl);
-  if (!safeUrl) return text;
-
-  return `<a class="expense-location-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${text}</a>`;
-}
-
-function buildExpenseRouteLineHtml(fromLabel, fromUrl, toLabel, toUrl, arrow = "←") {
-  const fromHtml = buildExpenseLocationAnchorHtml(fromLabel, fromUrl);
-  const toHtml = buildExpenseLocationAnchorHtml(toLabel, toUrl);
-
-  if (!fromHtml && !toHtml) return "";
-  if (fromHtml && toHtml) return `${fromHtml} ${escapeHtml(arrow)} ${toHtml}`;
-  return fromHtml || toHtml;
-}
-
-function setLocationMapStatus(message = "") {
-  const mapEl = document.getElementById("locationMap");
-  if (!mapEl) return;
-  if (!String(message || "").trim()) {
-    mapEl.innerHTML = "";
-    return;
-  }
-  mapEl.innerHTML = `<div class="location-search-empty" style="padding:1rem;">${escapeHtml(message)}</div>`;
-}
-
-function getGoogleLocationGeocoder() {
-  if (!window.google || !window.google.maps) return null;
-  if (!LOCATION_PICKER_GEOCODER) {
-    LOCATION_PICKER_GEOCODER = new window.google.maps.Geocoder();
-  }
-  return LOCATION_PICKER_GEOCODER;
-}
-
-function clearLocationPickerMarker() {
-  if (!LOCATION_PICKER_MARKER) return;
-  try {
-    LOCATION_PICKER_MARKER.setMap(null);
-  } catch {}
-}
-
-function setLocationPickerSelection(location, { center = true } = {}) {
-  const normalized = normalizeLocationValue(location);
-  LOCATION_PICKER_SELECTION = normalized;
-
-  const confirmBtn = document.getElementById("locationConfirmBtn");
-  if (confirmBtn) confirmBtn.disabled = !normalized;
-
-  updateLocationPickedValue(normalized);
-
-  const map = ensureLocationPickerMap();
-  if (!map || !normalized || !window.google || !window.google.maps) return normalized;
-
-  const position = { lat: normalized.lat, lng: normalized.lng };
-  if (!LOCATION_PICKER_MARKER) {
-    LOCATION_PICKER_MARKER = new window.google.maps.Marker({
-      map,
-      position,
-    });
-  } else {
-    LOCATION_PICKER_MARKER.setPosition(position);
-    if (!LOCATION_PICKER_MARKER.getMap()) LOCATION_PICKER_MARKER.setMap(map);
-  }
-
-  if (center) {
-    map.panTo(position);
-    map.setZoom(Math.max(Number(map.getZoom?.() || 0), 15));
-  }
-
-  return normalized;
-}
-
-function ensureLocationPickerMap() {
-  if (!window.google || !window.google.maps) {
-    return null;
-  }
-
-  const mapEl = document.getElementById("locationMap");
-  if (!mapEl) return null;
-
-  if (!LOCATION_PICKER_MAP) {
-    LOCATION_PICKER_MAP = new window.google.maps.Map(mapEl, {
-      center: { lat: LOCATION_PICKER_DEFAULT.lat, lng: LOCATION_PICKER_DEFAULT.lng },
-      zoom: LOCATION_PICKER_DEFAULT.zoom,
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: false,
-    });
-
-    LOCATION_PICKER_MAP.addListener("click", (event) => {
-      const lat = Number(event?.latLng?.lat?.());
-      const lng = Number(event?.latLng?.lng?.());
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      handleMapLocationPick(lat, lng);
-    });
-  }
-
-  window.setTimeout(() => {
-    try {
-      window.google.maps.event.trigger(LOCATION_PICKER_MAP, "resize");
-    } catch {}
-  }, 120);
-
-  return LOCATION_PICKER_MAP;
-}
-
-async function openLocationPicker(field) {
-  const safeField = String(field || "").trim().toLowerCase() === "to" ? "to" : "from";
-  LOCATION_PICKER_ACTIVE_FIELD = safeField;
-
-  const modal = document.getElementById("locationPickerModal");
-  const fieldLabelEl = document.getElementById("locationPickerFieldLabel");
-  const titleEl = document.getElementById("locationPickerTitle");
-  const searchInput = document.getElementById("locationSearchInput");
-
-  if (fieldLabelEl) fieldLabelEl.textContent = getLocationFieldLabel(safeField);
-  if (titleEl) titleEl.textContent = `Pick ${getLocationFieldLabel(safeField)} location`;
-
-  const currentValue = CASH_OUT_LOCATION_STATE[safeField];
-  LOCATION_PICKER_SELECTION = currentValue ? { ...currentValue } : null;
-  updateLocationPickedValue(LOCATION_PICKER_SELECTION);
-
-  if (searchInput) {
-    searchInput.value = currentValue?.label || "";
-  }
-
-  setLocationSearchResultsHtml("", { open: false });
-  if (!window.google || !window.google.maps) {
-    setLocationMapStatus("Loading Google Maps...");
-  }
-
-  if (modal) {
-    modal.style.display = "flex";
-    modal.setAttribute("aria-hidden", "false");
-  }
-
-  try {
-    await waitForGoogleMaps();
-  } catch (err) {
-    console.error("Google Maps load error:", err);
-    setLocationMapStatus("Google Maps could not load.");
-    showToast("Google Maps could not load. Please refresh and try again.", "error");
-    return;
-  }
-
-  if (!LOCATION_PICKER_MAP) {
-    setLocationMapStatus("");
-  }
-
-  const map = ensureLocationPickerMap();
-  if (!map) {
-    showToast("Map failed to load. Please refresh the page.", "error");
-    return;
-  }
-
-  if (searchInput) {
-    window.setTimeout(() => {
-      try { searchInput.focus(); } catch {}
-    }, 120);
-  }
-
-  if (currentValue) {
-    setLocationPickerSelection(currentValue, { center: true });
-  } else {
-    const defaultCenter = { lat: LOCATION_PICKER_DEFAULT.lat, lng: LOCATION_PICKER_DEFAULT.lng };
-    map.setCenter(defaultCenter);
-    map.setZoom(LOCATION_PICKER_DEFAULT.zoom);
-    clearLocationPickerMarker();
-    LOCATION_PICKER_SELECTION = null;
-    updateLocationPickedValue(null);
-    const confirmBtn = document.getElementById("locationConfirmBtn");
-    if (confirmBtn) confirmBtn.disabled = true;
-  }
-}
-
-function closeLocationPicker() {
-  const modal = document.getElementById("locationPickerModal");
-  if (modal) {
-    modal.style.display = "none";
-    modal.setAttribute("aria-hidden", "true");
-  }
-  setLocationSearchResultsHtml("", { open: false });
-}
-
-function renderLocationSearchResults(results) {
-  const list = Array.isArray(results) ? results : [];
-  if (!list.length) {
-    setLocationSearchResultsHtml('<div class="location-search-empty">No matching places found.</div>', { open: true });
-    return;
-  }
-
-  const html = list.map((item) => {
-    const label = String(item?.label || item?.formatted_address || item?.display_name || "").trim();
-    const { title, meta } = splitLocationLabel(label);
-    const lat = Number(item?.lat);
-    const lng = Number(item?.lng ?? item?.lon);
-    const url = String(item?.url || "").trim() || buildGoogleMapsLocationUrl(lat, lng);
-    return `
-      <button
-        type="button"
-        class="location-search-item"
-        data-lat="${escapeHtml(String(lat))}"
-        data-lng="${escapeHtml(String(lng))}"
-        data-label="${escapeHtml(label)}"
-        data-url="${escapeHtml(url)}"
-      >
-        <span class="location-search-item__title">${escapeHtml(title)}</span>
-        <span class="location-search-item__meta">${escapeHtml(meta || formatLocationCoords(lat, lng))}</span>
-      </button>
-    `;
-  }).join("");
-
-  setLocationSearchResultsHtml(html, { open: true });
-
-  const box = document.getElementById("locationSearchResults");
-  if (!box) return;
-
-  Array.from(box.querySelectorAll(".location-search-item")).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const lat = Number(btn.dataset.lat);
-      const lng = Number(btn.dataset.lng);
-      const label = String(btn.dataset.label || "").trim();
-      const url = String(btn.dataset.url || "").trim();
-      setLocationPickerSelection({ lat, lng, label, url }, { center: true });
-      setLocationSearchResultsHtml("", { open: false });
-    });
-  });
-}
-
-async function searchLocationPlaces(query) {
-  const q = String(query || "").trim();
-  if (!q) return [];
-
-  await waitForGoogleMaps();
-  const geocoder = getGoogleLocationGeocoder();
-  if (!geocoder) throw new Error("Google geocoder is not available");
-
-  return await new Promise((resolve, reject) => {
-    geocoder.geocode({ address: q }, (results, status) => {
-      const safeStatus = String(status || "");
-      if (safeStatus === "ZERO_RESULTS") {
-        resolve([]);
-        return;
-      }
-      if (safeStatus !== "OK") {
-        reject(new Error(`Google geocoder returned ${safeStatus || "unknown"}`));
-        return;
-      }
-
-      const mapped = (Array.isArray(results) ? results : [])
-        .map((item) => {
-          const lat = Number(item?.geometry?.location?.lat?.());
-          const lng = Number(item?.geometry?.location?.lng?.());
-          const label = String(item?.formatted_address || "").trim();
-          return {
-            label,
-            lat,
-            lng,
-            url: buildGoogleMapsLocationUrl(lat, lng),
-          };
-        })
-        .filter((item) => item.label && Number.isFinite(item.lat) && Number.isFinite(item.lng));
-
-      resolve(mapped);
-    });
-  });
-}
-
-async function reverseGeocodeLocation(lat, lng) {
-  await waitForGoogleMaps();
-  const geocoder = getGoogleLocationGeocoder();
-  if (!geocoder) throw new Error("Google geocoder is not available");
-
-  return await new Promise((resolve, reject) => {
-    geocoder.geocode({ location: { lat: Number(lat), lng: Number(lng) } }, (results, status) => {
-      const safeStatus = String(status || "");
-      if (safeStatus === "ZERO_RESULTS") {
-        resolve(null);
-        return;
-      }
-      if (safeStatus !== "OK") {
-        reject(new Error(`Google reverse geocoder returned ${safeStatus || "unknown"}`));
-        return;
-      }
-
-      const best = Array.isArray(results) && results.length ? results[0] : null;
-      const label = String(best?.formatted_address || "").trim();
-      resolve({
-        label,
-        lat: Number(lat),
-        lng: Number(lng),
-        url: buildGoogleMapsLocationUrl(lat, lng),
-      });
-    });
-  });
-}
-
-async function handleLocationSearch() {
-  const searchInput = document.getElementById("locationSearchInput");
-  const query = String(searchInput?.value || "").trim();
-  if (!query) {
-    showToast("Please enter a place or address to search.", "error");
-    return;
-  }
-
-  const requestId = ++LOCATION_PICKER_SEARCH_REQUEST_ID;
-  setLocationSearchResultsHtml('<div class="location-search-empty">Searching...</div>', { open: true });
-
-  try {
-    const results = await searchLocationPlaces(query);
-    if (requestId !== LOCATION_PICKER_SEARCH_REQUEST_ID) return;
-    renderLocationSearchResults(results);
-  } catch (err) {
-    console.error("Location search error:", err);
-    if (requestId !== LOCATION_PICKER_SEARCH_REQUEST_ID) return;
-    setLocationSearchResultsHtml('<div class="location-search-empty">Could not load locations right now.</div>', { open: true });
-    showToast("Could not search locations right now.", "error");
-  }
-}
-
-async function handleMapLocationPick(lat, lng) {
-  const coordsLabel = formatLocationCoords(lat, lng);
-  const defaultUrl = buildGoogleMapsLocationUrl(lat, lng);
-  setLocationPickerSelection({ lat, lng, label: coordsLabel, url: defaultUrl }, { center: true });
-
-  const requestId = ++LOCATION_PICKER_REVERSE_REQUEST_ID;
-
-  try {
-    const result = await reverseGeocodeLocation(lat, lng);
-    if (requestId !== LOCATION_PICKER_REVERSE_REQUEST_ID) return;
-    const label = String(result?.label || coordsLabel).trim() || coordsLabel;
-    const url = String(result?.url || defaultUrl).trim() || defaultUrl;
-    setLocationPickerSelection({ lat, lng, label, url }, { center: false });
-  } catch (err) {
-    console.warn("Reverse geocode error:", err);
-  }
-}
-
-function requestCurrentBrowserLocation() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("Geolocation is not supported"));
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 12000,
-      maximumAge: 0,
-    });
-  });
-}
-
-async function useCurrentLocation() {
-  const btn = document.getElementById("locationUseCurrentBtn");
-  const originalText = btn?.textContent || "Use current location";
-
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Locating...";
-  }
-
-  try {
-    const pos = await requestCurrentBrowserLocation();
-    const lat = Number(pos?.coords?.latitude);
-    const lng = Number(pos?.coords?.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      throw new Error("Invalid current location");
-    }
-    await handleMapLocationPick(lat, lng);
-  } catch (err) {
-    console.error("Use current location error:", err);
-    showToast("Could not access your current location.", "error");
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = originalText;
-    }
-  }
-}
-
-function confirmLocationPickerSelection() {
-  if (!LOCATION_PICKER_SELECTION) {
-    showToast("Please pick a location first.", "error");
-    return;
-  }
-  setCashOutLocationValue(LOCATION_PICKER_ACTIVE_FIELD, LOCATION_PICKER_SELECTION);
-  closeLocationPicker();
-}
-
-function setupCashOutLocationPicker() {
-  const modal = document.getElementById("locationPickerModal");
-  const modalBox = modal?.querySelector(".location-modal-box");
-  const searchBtn = document.getElementById("locationSearchBtn");
-  const currentBtn = document.getElementById("locationUseCurrentBtn");
-  const confirmBtn = document.getElementById("locationConfirmBtn");
-  const cancelBtn = document.getElementById("locationCancelBtn");
-  const closeBtn = document.getElementById("locationPickerClose");
-  const searchInput = document.getElementById("locationSearchInput");
-
-  document.querySelectorAll("[data-location-target]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      openLocationPicker(btn.getAttribute("data-location-target"));
-    });
-  });
-
-  document.querySelectorAll("[data-location-clear]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      const field = btn.getAttribute("data-location-clear") || "from";
-      setCashOutLocationValue(field, null);
-    });
-  });
-
-  if (searchBtn) {
-    searchBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      handleLocationSearch();
-    });
-  }
-
-  if (currentBtn) {
-    currentBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      useCurrentLocation();
-    });
-  }
-
-  if (confirmBtn) {
-    confirmBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      confirmLocationPickerSelection();
-    });
-  }
-
-  if (cancelBtn) {
-    cancelBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      closeLocationPicker();
-    });
-  }
-
-  if (closeBtn) {
-    closeBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      closeLocationPicker();
-    });
-  }
-
-  if (searchInput) {
-    searchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        handleLocationSearch();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        closeLocationPicker();
-      }
-    });
-  }
-
-  if (modal) {
-    modal.addEventListener("click", (e) => {
-      if (e.target === modal) closeLocationPicker();
-    });
-  }
-
-  if (modalBox) {
-    modalBox.addEventListener("click", (e) => e.stopPropagation());
-  }
-
-  resetCashOutLocationFields();
 }
 
 // ---------------------------------
@@ -957,7 +279,7 @@ function buildExpenseItemHtmlForModal(it) {
     : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it?.reason || "")}</div>`;
 
   const line2 = (!isIn && (it?.from || it?.to))
-    ? `<div class="expense-person">${buildExpenseRouteLineHtml(it.from, it.fromUrl, it.to, it.toUrl, "←")}</div>`
+    ? `<div class="expense-person">${escapeHtml(it.from || "")} ← ${escapeHtml(it.to || "")}</div>`
     : "";
 
   const screenshotHtml = (!isIn) ? renderReceiptImagesHtml(it) : "";
@@ -1181,8 +503,6 @@ function openCashOutModal() {
     if (ca) ca.value = "";
     if (typ) typ.value = "";
 
-    resetCashOutLocationFields();
-
     const kmBlock   = document.getElementById("co_km_block");
     const cashBlock = document.getElementById("co_cash_block");
     if (kmBlock)   kmBlock.style.display   = "none";
@@ -1199,7 +519,6 @@ function openCashOutModal() {
 }
 
 function closeCashOutModal() {
-    closeLocationPicker();
     const modal = document.getElementById("cashOutModal");
     if (modal) modal.style.display = "none";
 }
@@ -1270,10 +589,8 @@ async function submitCashOut() {
   const type   = String(document.getElementById("co_type")?.value || "").trim();
   const reason = String(document.getElementById("co_reason")?.value || "").trim();
   const date   = String(document.getElementById("co_date")?.value || "").trim();
-  const fromLocation = getCashOutLocationPayload("from");
-  const toLocation   = getCashOutLocationPayload("to");
-  const from   = String(fromLocation?.url || "").trim();
-  const to     = String(toLocation?.url || "").trim();
+  const from   = String(document.getElementById("co_from")?.value || "").trim();
+  const to     = String(document.getElementById("co_to")?.value || "").trim();
 
   if (!type || !reason || !date) {
     showToast("Please fill required fields.", "error");
@@ -1301,8 +618,6 @@ async function submitCashOut() {
       date,
       from,
       to,
-      fromLocation,
-      toLocation,
     };
 
     // Own car vs Cash logic
@@ -1529,7 +844,7 @@ async function loadExpenses() {
                   : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(it.reason || "")}</div>`;
 
                 const line2 = (!isIn && (it.from || it.to))
-                  ? `<div class="expense-person">${buildExpenseRouteLineHtml(it.from, it.fromUrl, it.to, it.toUrl, "→")}</div>`
+                  ? `<div class="expense-person">${escapeHtml(it.from || "")} → ${escapeHtml(it.to || "")}</div>`
                   : "";
 
                 const screenshotHtml = (!isIn) ? renderReceiptImagesHtml(it) : "";
@@ -1573,7 +888,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     setupCashInFromSearchableSelect();
     setupScreenshotUploadUI();
-    setupCashOutLocationPicker();
 
     const cashInBtn  = document.getElementById("cashInBtn");
     const cashOutBtn = document.getElementById("cashOutBtn");
