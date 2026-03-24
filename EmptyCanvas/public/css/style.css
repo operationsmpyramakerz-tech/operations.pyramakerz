@@ -1129,10 +1129,10 @@ body.co-modal-open{ overflow: hidden; }
   border: 1px solid #E5E7EB;
   border-radius: 18px;
   background: #FFFFFF;
-  padding: 6px;
+  padding: 8px;
   box-shadow: 0 22px 50px rgba(0,0,0,.18);
   max-height: min(320px, calc(100vh - 160px));
-  overflow: auto;
+  overflow: hidden;
 }
 
 .co-modern-select.is-dropup .co-modern-select__panel{
@@ -1142,6 +1142,46 @@ body.co-modal-open{ overflow: hidden; }
 
 .co-modern-select__panel[hidden]{
   display: none;
+}
+
+.co-modern-select__search-wrap{
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-bottom: 8px;
+  background: linear-gradient(180deg, #FFFFFF 0%, #FFFFFF 82%, rgba(255,255,255,0) 100%);
+}
+
+.co-modern-select__search{
+  width: 100%;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid #E5E7EB;
+  background: #F9FAFB;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.co-modern-select__search::placeholder{
+  color: #9CA3AF;
+}
+
+.co-modern-select__search:focus{
+  outline: none;
+  background: #fff;
+  border-color: rgba(17,24,39,.55);
+  box-shadow: 0 0 0 3px rgba(17,24,39,.08);
+}
+
+.co-modern-select__options{
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+  max-height: min(288px, calc(100vh - 220px));
+  padding-right: 2px;
 }
 
 .co-modern-select__option{
@@ -1159,6 +1199,12 @@ body.co-modal-open{ overflow: hidden; }
   gap: 12px;
   cursor: pointer;
   text-align: left;
+}
+
+.co-modern-select__option-label{
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.35;
 }
 
 .co-modern-select__option:hover{
@@ -1195,6 +1241,20 @@ body.co-modal-open{ overflow: hidden; }
 
 .co-modern-select__option.is-selected .co-modern-select__check::after{
   background: #fff;
+}
+
+.co-modern-select__empty{
+  display: none;
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #6B7280;
+  background: #F9FAFB;
+}
+
+.co-modern-select__empty.is-visible{
+  display: block;
 }
 
 .co-modern-select.is-disabled .co-modern-select__trigger,
@@ -1266,6 +1326,9 @@ body.co-modal-open{ overflow: hidden; }
   display: block;
   font-size: 13px;
   color: #6B7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .co-submodal-error{
