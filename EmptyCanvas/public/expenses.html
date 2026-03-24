@@ -17,7 +17,6 @@
   <title>Expenses</title>
   <link rel="stylesheet" href="/css/style.css"/>
   <link rel="stylesheet" href="/css/ui-redesign.css"/>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <style>
     /* 🔒 Critical: prevent sidebar links flash before permissions load */
     body.permissions-loading .sidebar li { display: none !important; }
@@ -714,6 +713,7 @@
       border: 1px solid #e2e8f0;
       background: #f8fafc;
       margin-bottom: 0.9rem;
+      position: relative;
     }
     .location-picked-card{
       background: #f8fafc;
@@ -1014,7 +1014,6 @@
   }
 </style>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB2ahDmohM2_r2aetTaBI4UENYgDhaMRQY&callback=initMap" async defer></script>
 </head>
 
 <body class="permissions-loading">
@@ -1297,8 +1296,8 @@
 
 <script>feather.replace();</script>
 <script src="/js/common-ui.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/js/expenses.js"></script>
+<script src="/js/expenses.js?v=google-maps-1"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB2ahDmohM2_r2aetTaBI4UENYgDhaMRQY&v=weekly&callback=initExpenseGoogleMapsApi" async defer></script>
 
   
 </body>
