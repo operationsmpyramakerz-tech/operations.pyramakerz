@@ -13089,6 +13089,83 @@ app.get(
   },
 );
 
+function buildExpenseGoogleMapsUrl(lat, lng, fallbackUrl = "") {
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+  if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+    const coords = `${latNum.toFixed(6)}, ${lngNum.toFixed(6)}`;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}`;
+  }
+  return String(fallbackUrl || "").trim();
+}
+
+function buildExpenseLocationRichText(rawValue, locationPayload) {
+  const fallbackRaw = String(rawValue || "").trim();
+  const lat = Number(locationPayload?.lat);
+  const lng = Number(locationPayload?.lng);
+  const explicitUrl = String(locationPayload?.url || "").trim();
+  const labelFromPayload = String(locationPayload?.label || "").trim();
+  const fallbackLooksLikeUrl = /^https?:\/\//i.test(fallbackRaw);
+  const url = explicitUrl || buildExpenseGoogleMapsUrl(lat, lng, fallbackLooksLikeUrl ? fallbackRaw : "");
+
+  let label = labelFromPayload;
+  if (!label && fallbackRaw && !fallbackLooksLikeUrl) label = fallbackRaw;
+  if (!label && Number.isFinite(lat) && Number.isFinite(lng)) label = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  if (!label && url) label = url;
+
+  if (!label && !url) {
+    return { rich_text: [] };
+  }
+
+  const text = { content: label || url };
+  if (url) text.link = { url };
+
+  return {
+    rich_text: [{
+      type: "text",
+      text,
+    }],
+  };
+}
+
+function readExpenseLocationProp(prop) {
+  if (!prop) return { text: "", url: "" };
+
+  if (prop.type === "url") {
+    const url = String(prop.url || "").trim();
+    return { text: url, url };
+  }
+
+  const plainFromRichText = Array.isArray(prop.rich_text)
+    ? prop.rich_text.map((chunk) => chunk?.plain_text || chunk?.text?.content || "").join("").trim()
+    : "";
+
+  let url = "";
+  if (Array.isArray(prop.rich_text)) {
+    for (const chunk of prop.rich_text) {
+      const candidate = String(chunk?.href || chunk?.text?.link?.url || "").trim();
+      if (candidate) {
+        url = candidate;
+        break;
+      }
+    }
+  }
+
+  if (!url && /^https?:\/\//i.test(plainFromRichText)) {
+    url = plainFromRichText;
+  }
+
+  if (plainFromRichText || url) {
+    return { text: plainFromRichText || url, url };
+  }
+
+  const plainFromTitle = Array.isArray(prop.title)
+    ? prop.title.map((chunk) => chunk?.plain_text || chunk?.text?.content || "").join("").trim()
+    : "";
+
+  return { text: plainFromTitle, url: "" };
+}
+
 app.post("/api/expenses/cash-out", async (req, res) => {
   const {
     fundsType,
@@ -13096,6 +13173,8 @@ app.post("/api/expenses/cash-out", async (req, res) => {
     date,
     from,
     to,
+    fromLocation,
+    toLocation,
     amount,
     kilometer,
     // New (multiple uploads)
@@ -13133,13 +13212,9 @@ app.post("/api/expenses/cash-out", async (req, res) => {
         date: { start: date }
       },
 
-      "From": {
-        rich_text: [{ type: "text", text: { content: from || "" }}]
-      },
+      "From": buildExpenseLocationRichText(from, fromLocation),
 
-      "To": {
-        rich_text: [{ type: "text", text: { content: to || "" }}]
-      },
+      "To": buildExpenseLocationRichText(to, toLocation),
 
       "Cash out": {
         number: Number(amount) || 0
@@ -13559,6 +13634,9 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
       const screenshotUrl = screenshots[0]?.url || "";
       const screenshotName = screenshots[0]?.name || "";
 
+      const fromInfo = readExpenseLocationProp(props["From"]);
+      const toInfo = readExpenseLocationProp(props["To"]);
+
       return {
         id: page.id,
         // Notion created_time is used by the UI to split "recent" vs "past" (relative to last settlement).
@@ -13566,8 +13644,10 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
         date: props["Date"]?.date?.start || null,
         reason,
         fundsType: props["Funds Type"]?.select?.name || "",
-        from: props["From"]?.rich_text?.[0]?.plain_text || "",
-        to: props["To"]?.rich_text?.[0]?.plain_text || "",
+        from: fromInfo.text,
+        fromUrl: fromInfo.url,
+        to: toInfo.text,
+        toUrl: toInfo.url,
         kilometer: props["Kilometer"]?.number || 0,
         cashIn: props["Cash in"]?.number || 0,
         cashOut: props["Cash out"]?.number || 0,
@@ -13821,14 +13901,19 @@ app.get(
         const screenshotUrl = screenshots[0]?.url || "";
         const screenshotName = screenshots[0]?.name || "";
 
+        const fromInfo = readExpenseLocationProp(props["From"]);
+        const toInfo = readExpenseLocationProp(props["To"]);
+
         return {
           id: page.id,
           createdTime: page.created_time || null,
           date: props["Date"]?.date?.start || null,
           reason,
           fundsType: props["Funds Type"]?.select?.name || "",
-          from: props["From"]?.rich_text?.[0]?.plain_text || "",
-          to: props["To"]?.rich_text?.[0]?.plain_text || "",
+          from: fromInfo.text,
+          fromUrl: fromInfo.url,
+          to: toInfo.text,
+          toUrl: toInfo.url,
           kilometer: props["Kilometer"]?.number || 0,
           cashIn: props["Cash in"]?.number || 0,
           cashOut: props["Cash out"]?.number || 0,
