@@ -53,6 +53,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("reqMarkArrivedBtn");
   const createWithdrawalBtn = document.getElementById("reqCreateWithdrawalBtn");
   const logMaintenanceBtn = document.getElementById("reqLogMaintenanceBtn");
+  const maintenancePdfBtn = document.getElementById("reqMaintenancePdfBtn");
   // Tracker steps
   const stepEls = {
     1: document.getElementById("reqStep1"),
@@ -96,6 +97,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const maintenanceRepairActionInput = document.getElementById("reqMaintenanceRepairActionInput");
   const maintenanceSparePartSelect = document.getElementById("reqMaintenanceSparePartSelect");
   const maintenanceLogError = document.getElementById("reqMaintenanceLogError");
+
+  // Maintenance receipt sub-modal
+  const maintenanceReceiptModal = document.getElementById("reqMaintenanceReceiptModal");
+  const maintenanceReceiptCloseBtn = document.getElementById("reqMaintenanceReceiptClose");
+  const maintenanceReceiptCancelBtn = document.getElementById("reqMaintenanceReceiptCancel");
+  const maintenanceReceiptConfirmBtn = document.getElementById("reqMaintenanceReceiptConfirm");
+  const maintenanceReceiptInput = document.getElementById("reqMaintenanceReceiptInput");
+  const maintenanceReceiptChooseBtn = document.getElementById("reqMaintenanceReceiptChooseBtn");
+  const maintenanceReceiptName = document.getElementById("reqMaintenanceReceiptName");
+  const maintenanceReceiptMeta = document.getElementById("reqMaintenanceReceiptMeta");
+  const maintenanceReceiptError = document.getElementById("reqMaintenanceReceiptError");
 
   // ---------- Utils ----------
   const norm = (s) => String(s || "").trim().toLowerCase();
@@ -212,6 +224,15 @@ document.addEventListener("DOMContentLoaded", () => {
     return !!maintenanceLogModal && maintenanceLogModal.classList.contains("is-open");
   }
 
+  function setMaintenanceReceiptError(message) {
+    if (!maintenanceReceiptError) return;
+    maintenanceReceiptError.textContent = String(message || "");
+  }
+
+  function isMaintenanceReceiptOpen() {
+    return !!maintenanceReceiptModal && maintenanceReceiptModal.classList.contains("is-open");
+  }
+
   function getPrimaryMaintenanceItem(group = activeGroup) {
     const items = Array.isArray(group?.items) ? group.items : [];
     return items[0] || null;
@@ -261,6 +282,175 @@ document.addEventListener("DOMContentLoaded", () => {
     selectEl.innerHTML = "";
     selectEl.appendChild(frag);
     selectEl.value = current;
+    refreshModernSelect(selectEl);
+  }
+
+  function humanFileSize(bytes) {
+    const size = Number(bytes) || 0;
+    if (size <= 0) return "";
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      try {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error("Failed to read file."));
+        reader.readAsDataURL(file);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  const modernSelectState = new WeakMap();
+  let openModernSelect = null;
+
+  function closeModernSelect(selectEl) {
+    const state = modernSelectState.get(selectEl);
+    if (!state) return;
+    state.panel.hidden = true;
+    state.wrap.classList.remove("is-open");
+    state.trigger.setAttribute("aria-expanded", "false");
+    if (openModernSelect === selectEl) openModernSelect = null;
+  }
+
+  function refreshModernSelect(selectEl) {
+    if (!selectEl) return;
+    const state = ensureModernSelect(selectEl);
+    if (!state) return;
+
+    const placeholder =
+      String(selectEl.dataset.placeholder || "").trim() ||
+      String(selectEl.options?.[0]?.textContent || "Select an option").trim() ||
+      "Select an option";
+
+    const options = Array.from(selectEl.options || []).map((opt) => ({
+      value: String(opt.value || ""),
+      label: String(opt.textContent || "").trim() || placeholder,
+      disabled: !!opt.disabled,
+      selected: opt.selected,
+    }));
+
+    const selectedOption =
+      options.find((opt) => opt.value === String(selectEl.value || "")) ||
+      options.find((opt) => opt.selected) ||
+      options[0] ||
+      null;
+
+    state.value.textContent = selectedOption?.label || placeholder;
+    state.trigger.disabled = !!selectEl.disabled;
+    state.wrap.classList.toggle("is-disabled", !!selectEl.disabled);
+
+    state.panel.innerHTML = "";
+    options.forEach((opt) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "co-modern-select__option";
+      if (opt.selected) btn.classList.add("is-selected");
+      btn.dataset.value = opt.value;
+      btn.disabled = !!opt.disabled;
+      btn.innerHTML = `
+        <span>${escapeHTML(opt.label || placeholder)}</span>
+        <span class="co-modern-select__check" aria-hidden="true"></span>
+      `;
+      state.panel.appendChild(btn);
+    });
+
+    if (window.feather) window.feather.replace();
+  }
+
+  function ensureModernSelect(selectEl) {
+    if (!selectEl) return null;
+    if (modernSelectState.has(selectEl)) return modernSelectState.get(selectEl);
+
+    const parent = selectEl.parentNode;
+    if (!parent) return null;
+
+    const wrap = document.createElement("div");
+    wrap.className = "co-modern-select";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "co-modern-select__trigger";
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.innerHTML = `
+      <span class="co-modern-select__value"></span>
+      <span class="co-modern-select__icon" aria-hidden="true"><i data-feather="chevron-down"></i></span>
+    `;
+
+    const panel = document.createElement("div");
+    panel.className = "co-modern-select__panel";
+    panel.hidden = true;
+    panel.setAttribute("role", "listbox");
+
+    parent.insertBefore(wrap, selectEl);
+    wrap.appendChild(selectEl);
+    wrap.appendChild(trigger);
+    wrap.appendChild(panel);
+    selectEl.classList.add("co-submodal-select--native");
+    selectEl.setAttribute("tabindex", "-1");
+
+    const state = {
+      wrap,
+      trigger,
+      panel,
+      value: trigger.querySelector(".co-modern-select__value"),
+    };
+
+    trigger.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (selectEl.disabled) return;
+
+      const willOpen = panel.hidden;
+      if (openModernSelect && openModernSelect !== selectEl) closeModernSelect(openModernSelect);
+
+      panel.hidden = !willOpen;
+      wrap.classList.toggle("is-open", willOpen);
+      trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      openModernSelect = willOpen ? selectEl : null;
+    });
+
+    panel.addEventListener("click", (e) => {
+      const btn = e.target.closest(".co-modern-select__option");
+      if (!btn || btn.disabled) return;
+      const nextValue = String(btn.dataset.value || "");
+      if (String(selectEl.value || "") !== nextValue) {
+        selectEl.value = nextValue;
+        selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        refreshModernSelect(selectEl);
+      }
+      closeModernSelect(selectEl);
+      try {
+        trigger.focus();
+      } catch {}
+    });
+
+    selectEl.addEventListener("change", () => refreshModernSelect(selectEl));
+
+    document.addEventListener("click", (e) => {
+      if (!wrap.contains(e.target)) closeModernSelect(selectEl);
+    });
+
+    modernSelectState.set(selectEl, state);
+    refreshModernSelect(selectEl);
+    return state;
+  }
+
+  function setSelectLoading(selectEl, loadingLabel) {
+    if (!selectEl) return;
+    fillSelectOptions(selectEl, [], {
+      placeholder: loadingLabel || selectEl.dataset.placeholder || "Loading...",
+      allowEmpty: true,
+      selectedValue: "",
+    });
+    selectEl.disabled = true;
+    refreshModernSelect(selectEl);
   }
 
   let maintenanceOptionsCache = null;
@@ -341,6 +531,9 @@ document.addEventListener("DOMContentLoaded", () => {
       '"': "&quot;",
       "'": "&#39;",
     }[c]));
+
+  ensureModernSelect(maintenanceResolutionSelect);
+  ensureModernSelect(maintenanceSparePartSelect);
 
   // Only allow http/https URLs to be opened from the UI
   function safeHttpUrl(url) {
@@ -930,11 +1123,9 @@ document.addEventListener("DOMContentLoaded", () => {
           if (currentTab === "delivered") return idx >= 5;
           return false;
         }
-
-        if (isMaintenanceOrder && idx >= 4) return false;
         if (currentTab === "not-started") return idx < 4;
-        if (currentTab === "remaining") return idx === 4 && !!g?.hasRemaining;
-        if (currentTab === "received") return idx === 4 && !!g?.hasReceived;
+        if (currentTab === "remaining") return !isMaintenanceOrder && idx === 4 && !!g?.hasRemaining;
+        if (currentTab === "received") return idx === 4 && (isMaintenanceOrder || !!g?.hasReceived);
         if (currentTab === "delivered") return idx >= 5;
         return false;
       })
@@ -1164,10 +1355,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (logMaintenanceBtn) {
       const canLogMaintenance =
-        isMaintenancePage &&
         isMaintenanceOrder &&
         (stage?.idx || 1) >= 4;
       logMaintenanceBtn.style.display = canLogMaintenance ? "inline-flex" : "none";
+    }
+    if (maintenancePdfBtn) {
+      const canDownloadMaintenancePdf = isMaintenanceOrder && (stage?.idx || 1) >= 4;
+      maintenancePdfBtn.style.display = canDownloadMaintenancePdf ? "inline-flex" : "none";
     }
 
     // Items list
@@ -1456,6 +1650,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   let maintenanceLogLastFocus = null;
+  let maintenanceLogLoadToken = 0;
 
   async function openMaintenanceLogModal() {
     if (
@@ -1469,17 +1664,51 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     setMaintenanceLogError("");
+    const item = getPrimaryMaintenanceItem(activeGroup);
+    const currentResolution = String(item?.resolutionMethod || "").trim();
+    const currentSparePartId = String(item?.sparePartsReplacedId || "").trim();
+    const currentSparePartName = String(item?.sparePartsReplacedName || "").trim();
+    const loadToken = ++maintenanceLogLoadToken;
 
     if (maintenanceLogConfirmBtn) maintenanceLogConfirmBtn.disabled = true;
     if (maintenanceLogCancelBtn) maintenanceLogCancelBtn.disabled = false;
     if (maintenanceLogCloseBtn) maintenanceLogCloseBtn.disabled = false;
 
+    maintenanceActualIssueInput.value = String(item?.actualIssueDescription || "");
+    maintenanceRepairActionInput.value = String(item?.repairAction || "");
+
+    fillSelectOptions(maintenanceResolutionSelect, [], {
+      placeholder: "Loading resolution methods...",
+      allowEmpty: true,
+      selectedValue: "",
+    });
+    fillSelectOptions(maintenanceSparePartSelect, [], {
+      placeholder: "Loading spare parts...",
+      allowEmpty: true,
+      selectedValue: "",
+    });
+    setSelectLoading(maintenanceResolutionSelect, "Loading resolution methods...");
+    setSelectLoading(maintenanceSparePartSelect, "Loading spare parts...");
+
+    maintenanceLogLastFocus = document.activeElement;
+    maintenanceLogModal.hidden = false;
+    maintenanceLogModal.classList.add("is-open");
+    maintenanceLogModal.setAttribute("aria-hidden", "false");
+
+    if (window.feather) window.feather.replace();
+
+    window.requestAnimationFrame(() => {
+      try {
+        maintenanceActualIssueInput.focus();
+      } catch {}
+    });
+
     try {
       const options = await loadMaintenanceFormOptions();
-      const item = getPrimaryMaintenanceItem(activeGroup);
-      const currentResolution = String(item?.resolutionMethod || "").trim();
-      const currentSparePartId = String(item?.sparePartsReplacedId || "").trim();
-      const currentSparePartName = String(item?.sparePartsReplacedName || "").trim();
+      if (loadToken !== maintenanceLogLoadToken || !isMaintenanceLogOpen()) return;
+
+      maintenanceResolutionSelect.disabled = false;
+      maintenanceSparePartSelect.disabled = false;
 
       fillSelectOptions(
         maintenanceResolutionSelect,
@@ -1524,28 +1753,17 @@ document.addEventListener("DOMContentLoaded", () => {
         );
       }
 
-      maintenanceActualIssueInput.value = String(item?.actualIssueDescription || "");
-      maintenanceRepairActionInput.value = String(item?.repairAction || "");
-
-      maintenanceLogLastFocus = document.activeElement;
-      maintenanceLogModal.hidden = false;
-      maintenanceLogModal.classList.add("is-open");
-      maintenanceLogModal.setAttribute("aria-hidden", "false");
-
       if (window.feather) window.feather.replace();
       if (maintenanceLogConfirmBtn) maintenanceLogConfirmBtn.disabled = false;
-
-      window.requestAnimationFrame(() => {
-        try {
-          maintenanceResolutionSelect.focus();
-        } catch {}
-      });
     } catch (e) {
+      if (loadToken !== maintenanceLogLoadToken) return;
       console.error(e);
       setMaintenanceLogError(e.message || "Failed to load maintenance form.");
       if (maintenanceLogConfirmBtn) maintenanceLogConfirmBtn.disabled = false;
       if (maintenanceLogCancelBtn) maintenanceLogCancelBtn.disabled = false;
       if (maintenanceLogCloseBtn) maintenanceLogCloseBtn.disabled = false;
+      maintenanceResolutionSelect.disabled = false;
+      maintenanceSparePartSelect.disabled = false;
       toast("error", "Failed", e.message || "Failed to load maintenance form.");
     }
   }
@@ -1566,6 +1784,70 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch {}
     }
     maintenanceLogLastFocus = null;
+  }
+
+  let maintenanceReceiptLastFocus = null;
+
+  function updateMaintenanceReceiptUI(file = null) {
+    if (maintenanceReceiptName) {
+      maintenanceReceiptName.textContent = file?.name || "Choose image";
+    }
+    if (maintenanceReceiptMeta) {
+      maintenanceReceiptMeta.textContent = file
+        ? [String(file.type || "Image").replace(/^image\//i, "").toUpperCase(), humanFileSize(file.size)].filter(Boolean).join(" • ")
+        : "PNG, JPG or WEBP";
+    }
+  }
+
+  function openMaintenanceReceiptModal() {
+    if (
+      !maintenanceReceiptModal ||
+      !maintenanceReceiptInput ||
+      !maintenanceReceiptConfirmBtn ||
+      !maintenanceReceiptCancelBtn
+    ) {
+      markArrived(activeGroup).catch(() => {});
+      return;
+    }
+
+    maintenanceReceiptLastFocus = document.activeElement;
+    maintenanceReceiptInput.value = "";
+    updateMaintenanceReceiptUI(null);
+    setMaintenanceReceiptError("");
+
+    maintenanceReceiptConfirmBtn.disabled = false;
+    maintenanceReceiptCancelBtn.disabled = false;
+    if (maintenanceReceiptCloseBtn) maintenanceReceiptCloseBtn.disabled = false;
+
+    maintenanceReceiptModal.hidden = false;
+    maintenanceReceiptModal.classList.add("is-open");
+    maintenanceReceiptModal.setAttribute("aria-hidden", "false");
+
+    if (window.feather) window.feather.replace();
+
+    window.requestAnimationFrame(() => {
+      try {
+        maintenanceReceiptChooseBtn?.focus();
+      } catch {}
+    });
+  }
+
+  function closeMaintenanceReceiptModal({ restoreFocus = true } = {}) {
+    if (!maintenanceReceiptModal) return;
+    if (!isMaintenanceReceiptOpen() && maintenanceReceiptModal.hidden) return;
+    maintenanceReceiptModal.classList.remove("is-open");
+    maintenanceReceiptModal.setAttribute("aria-hidden", "true");
+    maintenanceReceiptModal.hidden = true;
+    setMaintenanceReceiptError("");
+
+    if (restoreFocus) {
+      try {
+        if (maintenanceReceiptLastFocus && typeof maintenanceReceiptLastFocus.focus === "function") {
+          maintenanceReceiptLastFocus.focus();
+        }
+      } catch {}
+    }
+    maintenanceReceiptLastFocus = null;
   }
 
   // ---------- Actions ----------
@@ -1683,6 +1965,59 @@ document.addEventListener("DOMContentLoaded", () => {
         if (prev) pdfBtn.innerHTML = prev;
         else pdfBtn.textContent = "Download PDF";
       }
+    }
+  }
+
+  async function downloadMaintenancePdf(g) {
+    if (!g || !g.orderIds || !g.orderIds.length || !maintenancePdfBtn) return;
+
+    maintenancePdfBtn.disabled = true;
+    maintenancePdfBtn.dataset.prevHtml = maintenancePdfBtn.innerHTML;
+    maintenancePdfBtn.textContent = "Preparing...";
+
+    try {
+      const res = await fetch("/api/orders/requested/export/maintenance-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ orderIds: g.orderIds }),
+      });
+
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to export maintenance PDF");
+      }
+
+      const blob = await res.blob();
+      const cd = res.headers.get("content-disposition") || "";
+      let filename = "maintenance_receipt.pdf";
+      const m = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^;"]+)"?/i);
+      if (m) filename = decodeURIComponent(m[1] || m[2] || filename);
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      toast("success", "Downloaded", "Maintenance PDF downloaded.");
+    } catch (e) {
+      console.error(e);
+      toast("error", "Failed", e.message || "Failed to export maintenance PDF.");
+    } finally {
+      maintenancePdfBtn.disabled = false;
+      const prev = maintenancePdfBtn.dataset.prevHtml;
+      if (prev) maintenancePdfBtn.innerHTML = prev;
+      else maintenancePdfBtn.innerHTML = '<i data-feather="download"></i> Download';
+      if (window.feather) window.feather.replace();
     }
   }
 
@@ -2006,6 +2341,10 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
       writeRequestedCache(allItems);
 
       groups = buildGroups(allItems);
+      if (isMaintenanceOrder && !isMaintenancePage) {
+        currentTab = "received";
+        updateTabUI();
+      }
       render();
 
       // Keep modal open and refreshed, except maintenance orders that move to Maintenance Orders page.
@@ -2115,8 +2454,12 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     }
   }
 
-  async function markArrived(g) {
+  async function markArrived(g, extra = {}) {
     if (!g || !g.orderIds?.length) return;
+
+    const maintenanceReceiptDataUrl = String(extra?.maintenanceReceiptDataUrl || "").trim();
+    const maintenanceReceiptFilename = String(extra?.maintenanceReceiptFilename || "").trim();
+    const silent = !!extra?.silent;
 
     if (arrivedBtn) {
       arrivedBtn.disabled = true;
@@ -2125,13 +2468,19 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     }
 
     try {
-      const data = await postJson("/api/orders/requested/mark-arrived", { orderIds: g.orderIds });
+      const data = await postJson("/api/orders/requested/mark-arrived", {
+        orderIds: g.orderIds,
+        maintenanceReceiptDataUrl: maintenanceReceiptDataUrl || null,
+        maintenanceReceiptFilename: maintenanceReceiptFilename || null,
+      });
 
       const idSet = new Set(g.orderIds);
       allItems.forEach((it) => {
         if (!idSet.has(it.id)) return;
         it.status = "Arrived";
         it.statusColor = data.statusColor || it.statusColor;
+        if (data?.maintenanceReceiptUrl) it.maintenanceReceiptUrl = data.maintenanceReceiptUrl;
+        if (data?.maintenanceReceiptName) it.maintenanceReceiptName = data.maintenanceReceiptName;
       });
 
       writeRequestedCache(allItems);
@@ -2145,9 +2494,11 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
       }
 
       toast("success", "Delivered", "Marked as delivered.");
+      return data;
     } catch (e) {
       console.error(e);
-      alert(e.message || "Failed to mark as delivered.");
+      if (!silent) alert(e.message || "Failed to mark as delivered.");
+      throw e;
     } finally {
       if (arrivedBtn) {
         arrivedBtn.disabled = false;
@@ -2333,14 +2684,29 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
   maintenanceLogModal?.addEventListener("click", (e) => {
     if (e.target === maintenanceLogModal) closeMaintenanceLogModal();
   });
+  maintenanceReceiptModal?.addEventListener("click", (e) => {
+    if (e.target === maintenanceReceiptModal) closeMaintenanceReceiptModal();
+  });
 
   // Global Esc handling (close sub-modal -> dropdown -> main modal)
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
 
+    if (openModernSelect) {
+      e.preventDefault();
+      closeModernSelect(openModernSelect);
+      return;
+    }
+
     if (isMaintenanceLogOpen()) {
       e.preventDefault();
       closeMaintenanceLogModal();
+      return;
+    }
+
+    if (isMaintenanceReceiptOpen()) {
+      e.preventDefault();
+      closeMaintenanceReceiptModal();
       return;
     }
 
@@ -2386,6 +2752,11 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     closeDownloadMenu();
     downloadPdf(activeGroup);
   });
+  maintenancePdfBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeDownloadMenu();
+    downloadMaintenancePdf(activeGroup);
+  });
 
   // Request Products / Withdraw Products use the receipt modal.
   // Request Maintenance skips the receipt modal and moves directly to Shipped.
@@ -2399,7 +2770,18 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     }
     openReceiptModal();
   });
-  arrivedBtn?.addEventListener("click", () => markArrived(activeGroup));
+  arrivedBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    closeDownloadMenu();
+    const isMaintenanceOrder = isMaintenanceOrderType(activeGroup?.orderType || activeGroup?.items?.[0]?.orderType);
+    if (isMaintenanceOrder && maintenanceReceiptModal) {
+      openMaintenanceReceiptModal();
+      return;
+    }
+    try {
+      await markArrived(activeGroup);
+    } catch {}
+  });
   logMaintenanceBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
     setMaintenanceLogError("");
@@ -2483,6 +2865,54 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
       repairAction: maintenanceRepairActionInput?.value || "",
       sparePartId: maintenanceSparePartSelect?.value || "",
     });
+  });
+
+  maintenanceReceiptChooseBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    maintenanceReceiptInput?.click();
+  });
+  maintenanceReceiptInput?.addEventListener("change", () => {
+    updateMaintenanceReceiptUI(maintenanceReceiptInput.files?.[0] || null);
+    if (maintenanceReceiptError?.textContent) setMaintenanceReceiptError("");
+  });
+  maintenanceReceiptCloseBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeMaintenanceReceiptModal();
+  });
+  maintenanceReceiptCancelBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeMaintenanceReceiptModal();
+  });
+  maintenanceReceiptConfirmBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const file = maintenanceReceiptInput?.files?.[0] || null;
+    if (!file) {
+      setMaintenanceReceiptError("Please upload the maintenance receipt image.");
+      return;
+    }
+
+    setMaintenanceReceiptError("");
+    maintenanceReceiptConfirmBtn.disabled = true;
+    if (maintenanceReceiptCancelBtn) maintenanceReceiptCancelBtn.disabled = true;
+    if (maintenanceReceiptCloseBtn) maintenanceReceiptCloseBtn.disabled = true;
+    if (maintenanceReceiptChooseBtn) maintenanceReceiptChooseBtn.disabled = true;
+
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      await markArrived(activeGroup, {
+        maintenanceReceiptDataUrl: String(dataUrl || ""),
+        maintenanceReceiptFilename: file.name || "maintenance-receipt.jpg",
+        silent: true,
+      });
+      closeMaintenanceReceiptModal({ restoreFocus: false });
+    } catch (err) {
+      setMaintenanceReceiptError(err?.message || "Failed to mark as delivered.");
+    } finally {
+      maintenanceReceiptConfirmBtn.disabled = false;
+      if (maintenanceReceiptCancelBtn) maintenanceReceiptCancelBtn.disabled = false;
+      if (maintenanceReceiptCloseBtn) maintenanceReceiptCloseBtn.disabled = false;
+      if (maintenanceReceiptChooseBtn) maintenanceReceiptChooseBtn.disabled = false;
+    }
   });
 
   receiptCloseBtn?.addEventListener("click", (e) => {
