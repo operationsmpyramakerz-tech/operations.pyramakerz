@@ -10,6 +10,15 @@ let CASH_IN_FROM_OPTIONS = [];
 let IS_CASHIN_SUBMITTING = false;
 let IS_CASHOUT_SUBMITTING = false;
 
+const LOCATION_PICKER_DEFAULT = { lat: 30.0444, lng: 31.2357, zoom: 11 };
+const CASH_OUT_LOCATION_STATE = { from: null, to: null };
+let LOCATION_PICKER_MAP = null;
+let LOCATION_PICKER_MARKER = null;
+let LOCATION_PICKER_ACTIVE_FIELD = "from";
+let LOCATION_PICKER_SELECTION = null;
+let LOCATION_PICKER_SEARCH_REQUEST_ID = 0;
+let LOCATION_PICKER_REVERSE_REQUEST_ID = 0;
+
 function showSubmitLoader(text) {
   const overlay = document.getElementById("submitLoader");
   const label = document.getElementById("submitLoaderText");
@@ -27,7 +36,8 @@ function hideSubmitLoader() {
     overlay.style.display = "none";
     overlay.setAttribute("aria-hidden", "true");
   }
-
+  document.body.classList.remove("is-loading");
+}
 
 /* =============================
    MODERN TOAST (errors / info)
@@ -78,9 +88,6 @@ function showToast(message, type = "error", { duration = 4000 } = {}) {
   if (duration && duration > 0) {
     window.setTimeout(remove, duration);
   }
-}
-
-  document.body.classList.remove("is-loading");
 }
 
 /* =============================
@@ -155,8 +162,491 @@ function escapeHtml(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function truncateText(value, max = 90) {
+  const str = String(value || "").trim();
+  if (!str) return "";
+  if (str.length <= max) return str;
+  return `${str.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
+function getLocationFieldLabel(field) {
+  return String(field || "").trim().toLowerCase() === "to" ? "To" : "From";
+}
+
+function formatLocationCoords(lat, lng) {
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+  const safeLat = Number.isFinite(latNum) ? latNum.toFixed(6) : "0.000000";
+  const safeLng = Number.isFinite(lngNum) ? lngNum.toFixed(6) : "0.000000";
+  return `${safeLat}, ${safeLng}`;
+}
+
+function buildLocationDbValue(location) {
+  if (!location) return "";
+  const label = String(location.label || "").trim();
+  const coords = formatLocationCoords(location.lat, location.lng);
+  return label ? `${label} (${coords})` : coords;
+}
+
+function buildLocationSummary(location) {
+  if (!location) return "";
+  const label = String(location.label || "").trim();
+  if (label) return truncateText(label, 84);
+  return truncateText(formatLocationCoords(location.lat, location.lng), 84);
+}
+
+function normalizeLocationValue(location) {
+  if (!location) return null;
+
+  const lat = Number(location.lat);
+  const lng = Number(location.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const label = String(location.label || "").trim();
+  return {
+    lat,
+    lng,
+    label,
+    value: buildLocationDbValue({ lat, lng, label }),
+  };
+}
+
+function getCashOutLocationElements(field) {
+  const safeField = String(field || "").trim().toLowerCase() === "to" ? "to" : "from";
+  return {
+    input: document.getElementById(`co_${safeField}`),
+    text: document.getElementById(`co_${safeField}_text`),
+    clear: document.getElementById(`co_${safeField}_clear`),
+    trigger: document.getElementById(`co_${safeField}_btn`),
+  };
+}
+
+function updateLocationTriggerText(el, text, isEmpty = false) {
+  if (!el) return;
+  el.textContent = String(text || "");
+  el.classList.toggle("is-empty", !!isEmpty);
+}
+
+function setCashOutLocationValue(field, location) {
+  const safeField = String(field || "").trim().toLowerCase() === "to" ? "to" : "from";
+  const els = getCashOutLocationElements(safeField);
+  const normalized = normalizeLocationValue(location);
+
+  if (!normalized) {
+    CASH_OUT_LOCATION_STATE[safeField] = null;
+    if (els.input) {
+      els.input.value = "";
+      delete els.input.dataset.lat;
+      delete els.input.dataset.lng;
+      delete els.input.dataset.label;
+    }
+    updateLocationTriggerText(els.text, "No location selected", true);
+    if (els.clear) els.clear.hidden = true;
+    return;
+  }
+
+  CASH_OUT_LOCATION_STATE[safeField] = normalized;
+  if (els.input) {
+    els.input.value = normalized.value;
+    els.input.dataset.lat = String(normalized.lat);
+    els.input.dataset.lng = String(normalized.lng);
+    els.input.dataset.label = normalized.label;
+  }
+  updateLocationTriggerText(els.text, buildLocationSummary(normalized), false);
+  if (els.clear) els.clear.hidden = false;
+}
+
+function resetCashOutLocationFields() {
+  setCashOutLocationValue("from", null);
+  setCashOutLocationValue("to", null);
+}
+
+function setLocationSearchResultsHtml(html = "", { open = false } = {}) {
+  const box = document.getElementById("locationSearchResults");
+  if (!box) return;
+  box.innerHTML = html;
+  box.classList.toggle("is-open", !!open && !!String(html || "").trim());
+}
+
+function splitLocationLabel(label) {
+  const raw = String(label || "").trim();
+  if (!raw) return { title: "Pinned location", meta: "" };
+  const parts = raw.split(",").map((part) => part.trim()).filter(Boolean);
+  const title = parts.shift() || raw;
+  return { title, meta: parts.join(", ") };
+}
+
+function updateLocationPickedValue(location) {
+  const el = document.getElementById("locationPickedValue");
+  if (!el) return;
+  if (!location) {
+    updateLocationTriggerText(el, "No location selected yet.", true);
+    return;
+  }
+  updateLocationTriggerText(el, buildLocationDbValue(location), false);
+}
+
+function setLocationPickerSelection(location, { center = true } = {}) {
+  const normalized = normalizeLocationValue(location);
+  LOCATION_PICKER_SELECTION = normalized;
+
+  const confirmBtn = document.getElementById("locationConfirmBtn");
+  if (confirmBtn) confirmBtn.disabled = !normalized;
+
+  updateLocationPickedValue(normalized);
+
+  const map = ensureLocationPickerMap();
+  if (!map || !normalized) return normalized;
+
+  const latLng = [normalized.lat, normalized.lng];
+  if (!LOCATION_PICKER_MARKER) {
+    LOCATION_PICKER_MARKER = window.L.marker(latLng).addTo(map);
+  } else {
+    LOCATION_PICKER_MARKER.setLatLng(latLng);
+    if (!map.hasLayer(LOCATION_PICKER_MARKER)) LOCATION_PICKER_MARKER.addTo(map);
+  }
+
+  if (center) {
+    const nextZoom = Math.max(Number(map.getZoom?.() || 0), 15);
+    map.setView(latLng, nextZoom, { animate: true });
+  }
+
+  return normalized;
+}
+
+function ensureLocationPickerMap() {
+  if (!window.L) {
+    showToast("Map failed to load. Please refresh the page.", "error");
+    return null;
+  }
+
+  const mapEl = document.getElementById("locationMap");
+  if (!mapEl) return null;
+
+  if (!LOCATION_PICKER_MAP) {
+    LOCATION_PICKER_MAP = window.L.map(mapEl, {
+      zoomControl: true,
+      attributionControl: true,
+    }).setView([LOCATION_PICKER_DEFAULT.lat, LOCATION_PICKER_DEFAULT.lng], LOCATION_PICKER_DEFAULT.zoom);
+
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(LOCATION_PICKER_MAP);
+
+    LOCATION_PICKER_MAP.on("click", (e) => {
+      const lat = Number(e?.latlng?.lat);
+      const lng = Number(e?.latlng?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      handleMapLocationPick(lat, lng);
+    });
+  }
+
+  window.setTimeout(() => {
+    try { LOCATION_PICKER_MAP.invalidateSize(); } catch {}
+  }, 120);
+
+  return LOCATION_PICKER_MAP;
+}
+
+function openLocationPicker(field) {
+  const safeField = String(field || "").trim().toLowerCase() === "to" ? "to" : "from";
+  LOCATION_PICKER_ACTIVE_FIELD = safeField;
+
+  const modal = document.getElementById("locationPickerModal");
+  const fieldLabelEl = document.getElementById("locationPickerFieldLabel");
+  const titleEl = document.getElementById("locationPickerTitle");
+  const searchInput = document.getElementById("locationSearchInput");
+
+  if (fieldLabelEl) fieldLabelEl.textContent = getLocationFieldLabel(safeField);
+  if (titleEl) titleEl.textContent = `Pick ${getLocationFieldLabel(safeField)} location`;
+
+  const currentValue = CASH_OUT_LOCATION_STATE[safeField];
+  LOCATION_PICKER_SELECTION = currentValue ? { ...currentValue } : null;
+  updateLocationPickedValue(LOCATION_PICKER_SELECTION);
+
+  if (searchInput) {
+    searchInput.value = currentValue?.label || "";
+    window.setTimeout(() => {
+      try { searchInput.focus(); } catch {}
+    }, 120);
+  }
+
+  setLocationSearchResultsHtml("", { open: false });
+
+  if (modal) {
+    modal.style.display = "flex";
+    modal.setAttribute("aria-hidden", "false");
+  }
+
+  const map = ensureLocationPickerMap();
+  if (!map) return;
+
+  if (currentValue) {
+    setLocationPickerSelection(currentValue, { center: true });
+  } else {
+    const defaultLatLng = [LOCATION_PICKER_DEFAULT.lat, LOCATION_PICKER_DEFAULT.lng];
+    map.setView(defaultLatLng, LOCATION_PICKER_DEFAULT.zoom);
+    if (LOCATION_PICKER_MARKER && map.hasLayer(LOCATION_PICKER_MARKER)) {
+      map.removeLayer(LOCATION_PICKER_MARKER);
+    }
+    LOCATION_PICKER_SELECTION = null;
+    updateLocationPickedValue(null);
+    const confirmBtn = document.getElementById("locationConfirmBtn");
+    if (confirmBtn) confirmBtn.disabled = true;
+  }
+}
+
+function closeLocationPicker() {
+  const modal = document.getElementById("locationPickerModal");
+  if (modal) {
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+  }
+  setLocationSearchResultsHtml("", { open: false });
+}
+
+function renderLocationSearchResults(results) {
+  const list = Array.isArray(results) ? results : [];
+  if (!list.length) {
+    setLocationSearchResultsHtml('<div class="location-search-empty">No matching places found.</div>', { open: true });
+    return;
+  }
+
+  const html = list.map((item) => {
+    const label = String(item?.display_name || item?.label || "").trim();
+    const { title, meta } = splitLocationLabel(label);
+    const lat = Number(item?.lat);
+    const lng = Number(item?.lon ?? item?.lng);
+    return `
+      <button
+        type="button"
+        class="location-search-item"
+        data-lat="${escapeHtml(String(lat))}"
+        data-lng="${escapeHtml(String(lng))}"
+        data-label="${escapeHtml(label)}"
+      >
+        <span class="location-search-item__title">${escapeHtml(title)}</span>
+        <span class="location-search-item__meta">${escapeHtml(meta || formatLocationCoords(lat, lng))}</span>
+      </button>
+    `;
+  }).join("");
+
+  setLocationSearchResultsHtml(html, { open: true });
+
+  const box = document.getElementById("locationSearchResults");
+  if (!box) return;
+
+  Array.from(box.querySelectorAll(".location-search-item")).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const lat = Number(btn.dataset.lat);
+      const lng = Number(btn.dataset.lng);
+      const label = String(btn.dataset.label || "").trim();
+      setLocationPickerSelection({ lat, lng, label }, { center: true });
+      setLocationSearchResultsHtml("", { open: false });
+    });
+  });
+}
+
+async function searchLocationPlaces(query) {
+  const q = String(query || "").trim();
+  if (!q) return [];
+
+  const res = await fetch(`/api/location/search?q=${encodeURIComponent(q)}`);
+  const data = await res.json();
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error || "Location search failed");
+  }
+  return Array.isArray(data.results) ? data.results : [];
+}
+
+async function reverseGeocodeLocation(lat, lng) {
+  const res = await fetch(`/api/location/reverse?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
+  const data = await res.json();
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error || "Reverse geocoding failed");
+  }
+  return data?.result || null;
+}
+
+async function handleLocationSearch() {
+  const searchInput = document.getElementById("locationSearchInput");
+  const query = String(searchInput?.value || "").trim();
+  if (!query) {
+    showToast("Please enter a place or address to search.", "error");
+    return;
+  }
+
+  const requestId = ++LOCATION_PICKER_SEARCH_REQUEST_ID;
+  setLocationSearchResultsHtml('<div class="location-search-empty">Searching...</div>', { open: true });
+
+  try {
+    const results = await searchLocationPlaces(query);
+    if (requestId !== LOCATION_PICKER_SEARCH_REQUEST_ID) return;
+    renderLocationSearchResults(results);
+  } catch (err) {
+    console.error("Location search error:", err);
+    if (requestId !== LOCATION_PICKER_SEARCH_REQUEST_ID) return;
+    setLocationSearchResultsHtml('<div class="location-search-empty">Could not load locations right now.</div>', { open: true });
+    showToast("Could not search locations right now.", "error");
+  }
+}
+
+async function handleMapLocationPick(lat, lng) {
+  const coordsLabel = formatLocationCoords(lat, lng);
+  setLocationPickerSelection({ lat, lng, label: coordsLabel }, { center: true });
+
+  const requestId = ++LOCATION_PICKER_REVERSE_REQUEST_ID;
+
+  try {
+    const result = await reverseGeocodeLocation(lat, lng);
+    if (requestId !== LOCATION_PICKER_REVERSE_REQUEST_ID) return;
+    const label = String(result?.label || result?.display_name || coordsLabel).trim() || coordsLabel;
+    setLocationPickerSelection({ lat, lng, label }, { center: false });
+  } catch (err) {
+    console.warn("Reverse geocode error:", err);
+  }
+}
+
+function requestCurrentBrowserLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocation is not supported"));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0,
+    });
+  });
+}
+
+async function useCurrentLocation() {
+  const btn = document.getElementById("locationUseCurrentBtn");
+  const originalText = btn?.textContent || "Use current location";
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Locating...";
+  }
+
+  try {
+    const pos = await requestCurrentBrowserLocation();
+    const lat = Number(pos?.coords?.latitude);
+    const lng = Number(pos?.coords?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new Error("Invalid current location");
+    }
+    await handleMapLocationPick(lat, lng);
+  } catch (err) {
+    console.error("Use current location error:", err);
+    showToast("Could not access your current location.", "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+}
+
+function confirmLocationPickerSelection() {
+  if (!LOCATION_PICKER_SELECTION) {
+    showToast("Please pick a location first.", "error");
+    return;
+  }
+  setCashOutLocationValue(LOCATION_PICKER_ACTIVE_FIELD, LOCATION_PICKER_SELECTION);
+  closeLocationPicker();
+}
+
+function setupCashOutLocationPicker() {
+  const modal = document.getElementById("locationPickerModal");
+  const modalBox = modal?.querySelector(".location-modal-box");
+  const searchBtn = document.getElementById("locationSearchBtn");
+  const currentBtn = document.getElementById("locationUseCurrentBtn");
+  const confirmBtn = document.getElementById("locationConfirmBtn");
+  const cancelBtn = document.getElementById("locationCancelBtn");
+  const closeBtn = document.getElementById("locationPickerClose");
+  const searchInput = document.getElementById("locationSearchInput");
+
+  document.querySelectorAll("[data-location-target]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      openLocationPicker(btn.getAttribute("data-location-target"));
+    });
+  });
+
+  document.querySelectorAll("[data-location-clear]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const field = btn.getAttribute("data-location-clear") || "from";
+      setCashOutLocationValue(field, null);
+    });
+  });
+
+  if (searchBtn) {
+    searchBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      handleLocationSearch();
+    });
+  }
+
+  if (currentBtn) {
+    currentBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      useCurrentLocation();
+    });
+  }
+
+  if (confirmBtn) {
+    confirmBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      confirmLocationPickerSelection();
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      closeLocationPicker();
+    });
+  }
+
+  if (closeBtn) {
+    closeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      closeLocationPicker();
+    });
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleLocationSearch();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeLocationPicker();
+      }
+    });
+  }
+
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeLocationPicker();
+    });
+  }
+
+  if (modalBox) {
+    modalBox.addEventListener("click", (e) => e.stopPropagation());
+  }
+
+  resetCashOutLocationFields();
 }
 
 // ---------------------------------
@@ -503,6 +993,8 @@ function openCashOutModal() {
     if (ca) ca.value = "";
     if (typ) typ.value = "";
 
+    resetCashOutLocationFields();
+
     const kmBlock   = document.getElementById("co_km_block");
     const cashBlock = document.getElementById("co_cash_block");
     if (kmBlock)   kmBlock.style.display   = "none";
@@ -519,6 +1011,7 @@ function openCashOutModal() {
 }
 
 function closeCashOutModal() {
+    closeLocationPicker();
     const modal = document.getElementById("cashOutModal");
     if (modal) modal.style.display = "none";
 }
@@ -888,6 +1381,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     setupCashInFromSearchableSelect();
     setupScreenshotUploadUI();
+    setupCashOutLocationPicker();
 
     const cashInBtn  = document.getElementById("cashInBtn");
     const cashOutBtn = document.getElementById("cashOutBtn");
