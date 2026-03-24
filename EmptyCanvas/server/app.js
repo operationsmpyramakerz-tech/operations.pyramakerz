@@ -12990,182 +12990,6 @@ app.get(
   },
 );
 
-async function fetchLocationServiceJson(url, req) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
-
-  try {
-    const response = await fetch(String(url), {
-      method: "GET",
-      headers: {
-        "Accept": "application/json",
-        "Accept-Language": req.get("accept-language") || "en",
-        "User-Agent": "Pyramakerz-Operations/1.0",
-      },
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Location service returned ${response.status}`);
-    }
-
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-app.get(
-  "/api/location/search",
-  requireAuth,
-  requirePage("Expenses"),
-  async (req, res) => {
-    try {
-      const query = String(req.query.q || "").trim();
-      if (!query) {
-        return res.status(400).json({ success: false, error: "Missing query" });
-      }
-
-      const url = new URL("https://nominatim.openstreetmap.org/search");
-      url.searchParams.set("format", "jsonv2");
-      url.searchParams.set("limit", "6");
-      url.searchParams.set("addressdetails", "1");
-      url.searchParams.set("q", query);
-
-      const raw = await fetchLocationServiceJson(url, req);
-      const results = (Array.isArray(raw) ? raw : [])
-        .map((item) => ({
-          display_name: String(item?.display_name || "").trim(),
-          lat: Number(item?.lat),
-          lon: Number(item?.lon),
-        }))
-        .filter((item) => item.display_name && Number.isFinite(item.lat) && Number.isFinite(item.lon));
-
-      res.set("Cache-Control", "no-store");
-      return res.json({ success: true, results });
-    } catch (err) {
-      console.error("Location search error:", err?.body || err);
-      return res.status(500).json({ success: false, error: "Failed to search locations" });
-    }
-  },
-);
-
-app.get(
-  "/api/location/reverse",
-  requireAuth,
-  requirePage("Expenses"),
-  async (req, res) => {
-    try {
-      const lat = Number(req.query.lat);
-      const lng = Number(req.query.lng);
-
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return res.status(400).json({ success: false, error: "Invalid coordinates" });
-      }
-
-      const url = new URL("https://nominatim.openstreetmap.org/reverse");
-      url.searchParams.set("format", "jsonv2");
-      url.searchParams.set("lat", String(lat));
-      url.searchParams.set("lon", String(lng));
-      url.searchParams.set("zoom", "18");
-      url.searchParams.set("addressdetails", "1");
-
-      const raw = await fetchLocationServiceJson(url, req);
-      const label = String(raw?.display_name || "").trim() || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-
-      res.set("Cache-Control", "no-store");
-      return res.json({
-        success: true,
-        result: {
-          label,
-          lat,
-          lng,
-        },
-      });
-    } catch (err) {
-      console.error("Location reverse geocode error:", err?.body || err);
-      return res.status(500).json({ success: false, error: "Failed to resolve location" });
-    }
-  },
-);
-
-function buildExpenseGoogleMapsUrl(lat, lng, fallbackUrl = "") {
-  const latNum = Number(lat);
-  const lngNum = Number(lng);
-  if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
-    const coords = `${latNum.toFixed(6)}, ${lngNum.toFixed(6)}`;
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}`;
-  }
-  return String(fallbackUrl || "").trim();
-}
-
-function buildExpenseLocationRichText(rawValue, locationPayload) {
-  const fallbackRaw = String(rawValue || "").trim();
-  const lat = Number(locationPayload?.lat);
-  const lng = Number(locationPayload?.lng);
-  const explicitUrl = String(locationPayload?.url || "").trim();
-  const labelFromPayload = String(locationPayload?.label || "").trim();
-  const fallbackLooksLikeUrl = /^https?:\/\//i.test(fallbackRaw);
-  const url = explicitUrl || buildExpenseGoogleMapsUrl(lat, lng, fallbackLooksLikeUrl ? fallbackRaw : "");
-
-  let label = labelFromPayload;
-  if (!label && fallbackRaw && !fallbackLooksLikeUrl) label = fallbackRaw;
-  if (!label && Number.isFinite(lat) && Number.isFinite(lng)) label = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-  if (!label && url) label = url;
-
-  if (!label && !url) {
-    return { rich_text: [] };
-  }
-
-  const text = { content: label || url };
-  if (url) text.link = { url };
-
-  return {
-    rich_text: [{
-      type: "text",
-      text,
-    }],
-  };
-}
-
-function readExpenseLocationProp(prop) {
-  if (!prop) return { text: "", url: "" };
-
-  if (prop.type === "url") {
-    const url = String(prop.url || "").trim();
-    return { text: url, url };
-  }
-
-  const plainFromRichText = Array.isArray(prop.rich_text)
-    ? prop.rich_text.map((chunk) => chunk?.plain_text || chunk?.text?.content || "").join("").trim()
-    : "";
-
-  let url = "";
-  if (Array.isArray(prop.rich_text)) {
-    for (const chunk of prop.rich_text) {
-      const candidate = String(chunk?.href || chunk?.text?.link?.url || "").trim();
-      if (candidate) {
-        url = candidate;
-        break;
-      }
-    }
-  }
-
-  if (!url && /^https?:\/\//i.test(plainFromRichText)) {
-    url = plainFromRichText;
-  }
-
-  if (plainFromRichText || url) {
-    return { text: plainFromRichText || url, url };
-  }
-
-  const plainFromTitle = Array.isArray(prop.title)
-    ? prop.title.map((chunk) => chunk?.plain_text || chunk?.text?.content || "").join("").trim()
-    : "";
-
-  return { text: plainFromTitle, url: "" };
-}
-
 app.post("/api/expenses/cash-out", async (req, res) => {
   const {
     fundsType,
@@ -13173,8 +12997,6 @@ app.post("/api/expenses/cash-out", async (req, res) => {
     date,
     from,
     to,
-    fromLocation,
-    toLocation,
     amount,
     kilometer,
     // New (multiple uploads)
@@ -13212,9 +13034,13 @@ app.post("/api/expenses/cash-out", async (req, res) => {
         date: { start: date }
       },
 
-      "From": buildExpenseLocationRichText(from, fromLocation),
+      "From": {
+        rich_text: [{ type: "text", text: { content: from || "" }}]
+      },
 
-      "To": buildExpenseLocationRichText(to, toLocation),
+      "To": {
+        rich_text: [{ type: "text", text: { content: to || "" }}]
+      },
 
       "Cash out": {
         number: Number(amount) || 0
@@ -13634,9 +13460,6 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
       const screenshotUrl = screenshots[0]?.url || "";
       const screenshotName = screenshots[0]?.name || "";
 
-      const fromInfo = readExpenseLocationProp(props["From"]);
-      const toInfo = readExpenseLocationProp(props["To"]);
-
       return {
         id: page.id,
         // Notion created_time is used by the UI to split "recent" vs "past" (relative to last settlement).
@@ -13644,10 +13467,8 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
         date: props["Date"]?.date?.start || null,
         reason,
         fundsType: props["Funds Type"]?.select?.name || "",
-        from: fromInfo.text,
-        fromUrl: fromInfo.url,
-        to: toInfo.text,
-        toUrl: toInfo.url,
+        from: props["From"]?.rich_text?.[0]?.plain_text || "",
+        to: props["To"]?.rich_text?.[0]?.plain_text || "",
         kilometer: props["Kilometer"]?.number || 0,
         cashIn: props["Cash in"]?.number || 0,
         cashOut: props["Cash out"]?.number || 0,
@@ -13901,19 +13722,14 @@ app.get(
         const screenshotUrl = screenshots[0]?.url || "";
         const screenshotName = screenshots[0]?.name || "";
 
-        const fromInfo = readExpenseLocationProp(props["From"]);
-        const toInfo = readExpenseLocationProp(props["To"]);
-
         return {
           id: page.id,
           createdTime: page.created_time || null,
           date: props["Date"]?.date?.start || null,
           reason,
           fundsType: props["Funds Type"]?.select?.name || "",
-          from: fromInfo.text,
-          fromUrl: fromInfo.url,
-          to: toInfo.text,
-          toUrl: toInfo.url,
+          from: props["From"]?.rich_text?.[0]?.plain_text || "",
+          to: props["To"]?.rich_text?.[0]?.plain_text || "",
           kilometer: props["Kilometer"]?.number || 0,
           cashIn: props["Cash in"]?.number || 0,
           cashOut: props["Cash out"]?.number || 0,
