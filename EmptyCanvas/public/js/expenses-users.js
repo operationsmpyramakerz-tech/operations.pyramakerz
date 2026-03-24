@@ -37,6 +37,26 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
+function buildExpenseLocationAnchorHtml(label, url) {
+  const safeLabel = String(label || "").trim();
+  const safeUrl = String(url || "").trim();
+  if (!safeLabel && !safeUrl) return "";
+
+  const text = escapeHtml(safeLabel || safeUrl);
+  if (!safeUrl) return text;
+
+  return `<a class="expense-location-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${text}</a>`;
+}
+
+function buildExpenseRouteLineHtml(fromLabel, fromUrl, toLabel, toUrl, arrow = "←") {
+  const fromHtml = buildExpenseLocationAnchorHtml(fromLabel, fromUrl);
+  const toHtml = buildExpenseLocationAnchorHtml(toLabel, toUrl);
+
+  if (!fromHtml && !toHtml) return "";
+  if (fromHtml && toHtml) return `${fromHtml} ${escapeHtml(arrow)} ${toHtml}`;
+  return fromHtml || toHtml;
+}
+
 function normalizeFundsType(s) {
   return String(s || "").trim().toLowerCase();
 }
@@ -424,7 +444,7 @@ function buildExpenseItemElement(it) {
       )}</div>`;
 
   const line2 = !isIn && (it.from || it.to)
-    ? `<div class="expense-person">${escapeHtml(it.from || "")}${it.to ? " ← " + escapeHtml(it.to) : ""}</div>`
+    ? `<div class="expense-person">${buildExpenseRouteLineHtml(it.from, it.fromUrl, it.to, it.toUrl, "←")}</div>`
     : "";
 
   const screenshotHtml = !isIn ? renderReceiptImagesHtml(it) : "";
