@@ -1135,6 +1135,11 @@ body.co-modal-open{ overflow: hidden; }
   overflow: auto;
 }
 
+.co-modern-select.is-dropup .co-modern-select__panel{
+  top: auto;
+  bottom: calc(100% + 10px);
+}
+
 .co-modern-select__panel[hidden]{
   display: none;
 }
