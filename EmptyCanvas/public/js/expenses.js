@@ -8,9 +8,11 @@ let CASH_IN_FROM_OPTIONS = [];
 let EXPENSE_ORDER_OPTIONS = [];
 let EXPENSE_ORDER_OPTIONS_LOADED = false;
 let EXPENSE_ORDER_OPTIONS_REQUEST = null;
+const EXPENSE_ORDER_OTHER_REASON_ID = "__expense_other_reason__";
 let SELECTED_EXPENSE_ORDER_ID = "";
 let SELECTED_EXPENSE_ORDER_LABEL = "";
 let SELECTED_EXPENSE_ORDER_DATE = "";
+let SELECTED_EXPENSE_ORDER_REASON = "";
 let EXPENSE_ORDER_OPTIONS_LOADING = false;
 let PENDING_CASH_OUT_ITEMS = [];
 let CASH_OUT_DRAFT_SEQUENCE = 0;
@@ -485,9 +487,68 @@ function normalizeExpenseOrderTypeKey(value) {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function isOtherReasonExpenseOrderId(value) {
+  return String(value || "").trim() === EXPENSE_ORDER_OTHER_REASON_ID;
+}
+
+function isOtherReasonSelected() {
+  return isOtherReasonExpenseOrderId(SELECTED_EXPENSE_ORDER_ID);
+}
+
+function hasSelectedExpenseOrderScope() {
+  return !!String(SELECTED_EXPENSE_ORDER_ID || "").trim();
+}
+
+function getSelectedExpenseManualReason({ trimmed = true } = {}) {
+  const raw = String(SELECTED_EXPENSE_ORDER_REASON || "");
+  return trimmed ? raw.trim() : raw;
+}
+
+function getExpenseManualReasonInput() {
+  return document.getElementById("cashOutManualReason");
+}
+
+function setSelectedExpenseManualReason(value = "", { syncUI = true } = {}) {
+  SELECTED_EXPENSE_ORDER_REASON = String(value || "");
+
+  const input = getExpenseManualReasonInput();
+  if (input && input.value !== SELECTED_EXPENSE_ORDER_REASON) {
+    input.value = SELECTED_EXPENSE_ORDER_REASON;
+  }
+
+  if (syncUI) {
+    syncSelectedExpenseOrderUI();
+  }
+}
+
+function buildOtherReasonExpenseOrderOption() {
+  return {
+    id: EXPENSE_ORDER_OTHER_REASON_ID,
+    label: "Other reason",
+    orderId: "Other reason",
+    orderType: "Manual reason",
+    relationIds: [],
+    isManualReason: true,
+  };
+}
+
+function getExpenseOrderPickerOptions() {
+  return [buildOtherReasonExpenseOrderOption(), ...EXPENSE_ORDER_OPTIONS];
+}
+
 function getExpenseOrderTypeMeta(type) {
   const label = String(type || "").trim();
   const key = normalizeExpenseOrderTypeKey(type);
+
+  if (key === "manualreason" || key === "otherreason" || key === "manual") {
+    return {
+      label: label || "Manual reason",
+      icon: "edit-3",
+      bg: "#F3F4F6",
+      fg: "#111827",
+      bd: "#D1D5DB",
+    };
+  }
 
   if (key === "requestproducts" || key === "delivery") {
     return {
@@ -544,11 +605,18 @@ function buildExpenseOrderTypeChipHtml(type, { className = "order-select__chip",
 
 function buildExpenseOrderSummaryHtml(item) {
   if (!item) return "";
-  const orderId = String(item?.orderId || "").trim() || "Order";
+  const isManualReason = !!item?.isManualReason || isOtherReasonExpenseOrderId(item?.id);
+  const orderId = isManualReason
+    ? "Other reason"
+    : String(item?.orderId || "").trim() || "Order";
+  const chipLabel = isManualReason ? "Manual" : "";
   return `
     <span class="order-summary-inline">
       <span class="order-summary-inline__id">${escapeHtml(orderId)}</span>
-      ${buildExpenseOrderTypeChipHtml(item?.orderType, { className: "order-select__chip order-select__chip--selected" })}
+      ${buildExpenseOrderTypeChipHtml(item?.orderType, {
+        className: "order-select__chip order-select__chip--selected",
+        label: chipLabel,
+      })}
     </span>
   `;
 }
@@ -568,8 +636,12 @@ function formatPendingCashOutValue(item) {
 
 function formatPendingCashOutMeta(item) {
   const parts = [];
+  const reason = String(item?.reason || "").trim();
   const from = String(item?.from || "").trim();
   const to = String(item?.to || "").trim();
+  if (reason) {
+    parts.push(reason);
+  }
   if (from || to) {
     parts.push([from, to].filter(Boolean).join(from && to ? " → " : " "));
   }
@@ -610,11 +682,13 @@ function resetCashOutFormFields() {
 function syncCashOutOrderActionUI() {
   const addExpenseBtn = document.getElementById("cashOutOrderAddExpenseBtn");
   const confirmBtn = document.getElementById("cashOutOrderNextBtn");
-  const hasSelection = !!String(SELECTED_EXPENSE_ORDER_ID || "").trim();
+  const hasSelection = hasSelectedExpenseOrderScope();
   const hasDate = !!String(SELECTED_EXPENSE_ORDER_DATE || "").trim();
-  const hasOrders = !!EXPENSE_ORDER_OPTIONS.length;
+  const hasOrders = isOtherReasonSelected() || !!EXPENSE_ORDER_OPTIONS.length;
   const hasDrafts = PENDING_CASH_OUT_ITEMS.length > 0;
-  const baseDisabled = !hasSelection || !hasDate || !hasOrders || EXPENSE_ORDER_OPTIONS_LOADING || IS_CASHOUT_SUBMITTING;
+  const hasReason = !isOtherReasonSelected() || !!getSelectedExpenseManualReason();
+  const isWaitingForOrders = EXPENSE_ORDER_OPTIONS_LOADING && !isOtherReasonSelected();
+  const baseDisabled = !hasSelection || !hasDate || !hasOrders || !hasReason || isWaitingForOrders || IS_CASHOUT_SUBMITTING;
 
   if (addExpenseBtn) {
     addExpenseBtn.disabled = baseDisabled || IS_CASHOUT_DRAFTING;
@@ -670,6 +744,7 @@ function resetCashOutFlowState() {
   SELECTED_EXPENSE_ORDER_ID = "";
   SELECTED_EXPENSE_ORDER_LABEL = "";
   SELECTED_EXPENSE_ORDER_DATE = "";
+  SELECTED_EXPENSE_ORDER_REASON = "";
   clearPendingCashOutDrafts({ render: false });
   resetCashOutFormFields();
   syncSelectedExpenseOrderUI();
@@ -683,12 +758,20 @@ function clearPendingDraftsForScopeChange(message) {
 }
 
 function getSelectedExpenseOrderOption() {
+  if (isOtherReasonSelected()) {
+    return buildOtherReasonExpenseOrderOption();
+  }
+
   return EXPENSE_ORDER_OPTIONS.find(
     (item) => String(item?.id || "") === String(SELECTED_EXPENSE_ORDER_ID || ""),
   ) || null;
 }
 
 function formatExpenseOrderLabel(item) {
+  if (item?.isManualReason || isOtherReasonExpenseOrderId(item?.id)) {
+    return "Other reason";
+  }
+
   const orderId = String(item?.orderId || "").trim() || "Order";
   const orderType = String(item?.orderType || "").trim();
   return orderType ? `${orderId} - ${orderType}` : orderId;
@@ -762,25 +845,27 @@ function renderExpenseOrderDropdown() {
   const stateEl = document.getElementById("cashOutOrderDropdownState");
   if (!listEl || !stateEl) return;
 
-  if (EXPENSE_ORDER_OPTIONS_LOADING && !EXPENSE_ORDER_OPTIONS.length) {
+  const pickerOptions = getExpenseOrderPickerOptions();
+  const hasRealOrders = EXPENSE_ORDER_OPTIONS.length > 0;
+
+  if (EXPENSE_ORDER_OPTIONS_LOADING) {
     stateEl.textContent = "Loading orders...";
     stateEl.style.display = "block";
-    listEl.innerHTML = "";
-    return;
-  }
-
-  if (!EXPENSE_ORDER_OPTIONS.length) {
+  } else if (!hasRealOrders) {
     const fallback = String(document.getElementById("cashOutOrderEmpty")?.textContent || "").trim() || "No orders available right now.";
-    stateEl.textContent = fallback;
+    stateEl.textContent = `${fallback} You can still use Other reason.`;
     stateEl.style.display = "block";
-    listEl.innerHTML = "";
-    return;
+  } else {
+    stateEl.style.display = "none";
   }
 
-  stateEl.style.display = "none";
-  listEl.innerHTML = EXPENSE_ORDER_OPTIONS.map((item) => {
+  listEl.innerHTML = pickerOptions.map((item) => {
     const optionId = String(item?.id || "");
-    const orderId = String(item?.orderId || "").trim() || "Order";
+    const isManualReason = !!item?.isManualReason || isOtherReasonExpenseOrderId(optionId);
+    const orderId = isManualReason
+      ? "Other reason"
+      : String(item?.orderId || "").trim() || "Order";
+    const chipLabel = isManualReason ? "Manual" : "";
     const selected = optionId === String(SELECTED_EXPENSE_ORDER_ID || "");
     return `
       <button
@@ -794,7 +879,7 @@ function renderExpenseOrderDropdown() {
         <span class="order-select__option-main">
           <span class="order-select__option-id">${escapeHtml(orderId)}</span>
         </span>
-        ${buildExpenseOrderTypeChipHtml(item?.orderType)}
+        ${buildExpenseOrderTypeChipHtml(item?.orderType, { label: chipLabel })}
       </button>
     `;
   }).join("");
@@ -807,14 +892,19 @@ function syncSelectedExpenseOrderUI() {
   const trigger = document.getElementById("cashOutOrderTrigger");
   const triggerText = document.getElementById("cashOutOrderTriggerText");
   const emptyEl = document.getElementById("cashOutOrderEmpty");
+  const manualReasonWrap = document.getElementById("cashOutManualReasonWrap");
+  const manualReasonInput = getExpenseManualReasonInput();
   const selectedCard = document.getElementById("cashOutSelectedOrderCard");
   const selectedText = document.getElementById("cashOutSelectedOrderText");
   const selectedMeta = document.getElementById("cashOutSelectedOrderMeta");
   const dateInput = document.getElementById("cashOutOrderDate");
-  const hasSelection = !!String(SELECTED_EXPENSE_ORDER_ID || "").trim();
+  const hasSelection = hasSelectedExpenseOrderScope();
   const selected = getSelectedExpenseOrderOption();
   const label = String(SELECTED_EXPENSE_ORDER_LABEL || selected?.label || formatExpenseOrderLabel(selected) || "").trim();
   const dateLabel = formatExpenseOrderDate(SELECTED_EXPENSE_ORDER_DATE);
+  const manualReason = getSelectedExpenseManualReason();
+  const isManualReason = isOtherReasonSelected();
+  const pickerOptions = getExpenseOrderPickerOptions();
 
   if (selectEl) {
     const hasOption = Array.from(selectEl.options || []).some((opt) => String(opt.value || "") === SELECTED_EXPENSE_ORDER_ID);
@@ -839,7 +929,19 @@ function syncSelectedExpenseOrderUI() {
   }
 
   if (emptyEl) {
-    emptyEl.style.display = emptyEl.textContent.trim() ? "block" : "none";
+    emptyEl.style.display = emptyEl.textContent.trim() && !pickerOptions.length ? "block" : "none";
+  }
+
+  if (manualReasonWrap) {
+    manualReasonWrap.style.display = isManualReason ? "block" : "none";
+  }
+
+  if (manualReasonInput) {
+    if (manualReasonInput.value !== getSelectedExpenseManualReason({ trimmed: false })) {
+      manualReasonInput.value = getSelectedExpenseManualReason({ trimmed: false });
+    }
+    manualReasonInput.disabled = !isManualReason;
+    manualReasonInput.required = isManualReason;
   }
 
   if (selectedText) {
@@ -848,12 +950,19 @@ function syncSelectedExpenseOrderUI() {
   }
 
   if (selectedMeta) {
-    selectedMeta.textContent = dateLabel ? `Expense date: ${dateLabel}` : "";
-    selectedMeta.style.display = dateLabel ? "block" : "none";
+    const metaParts = [];
+    if (isManualReason && manualReason) {
+      metaParts.push(`Reason: ${manualReason}`);
+    }
+    if (dateLabel) {
+      metaParts.push(`Expense date: ${dateLabel}`);
+    }
+    selectedMeta.textContent = metaParts.join(" • ");
+    selectedMeta.style.display = metaParts.length ? "block" : "none";
   }
 
   if (selectedCard) {
-    selectedCard.style.display = label ? "block" : "none";
+    selectedCard.style.display = hasSelection ? "block" : "none";
   }
 
   renderExpenseOrderDropdown();
@@ -861,12 +970,18 @@ function syncSelectedExpenseOrderUI() {
 }
 
 function setSelectedExpenseOrder(orderId, label = "") {
+  const previousId = String(SELECTED_EXPENSE_ORDER_ID || "").trim();
   SELECTED_EXPENSE_ORDER_ID = String(orderId || "").trim();
 
   if (!SELECTED_EXPENSE_ORDER_ID) {
     SELECTED_EXPENSE_ORDER_LABEL = "";
+    SELECTED_EXPENSE_ORDER_REASON = "";
     syncSelectedExpenseOrderUI();
     return;
+  }
+
+  if (isOtherReasonExpenseOrderId(previousId) && !isOtherReasonExpenseOrderId(SELECTED_EXPENSE_ORDER_ID)) {
+    SELECTED_EXPENSE_ORDER_REASON = "";
   }
 
   const matched = getSelectedExpenseOrderOption();
@@ -887,9 +1002,11 @@ function populateExpenseOrderSelect() {
   const emptyEl = document.getElementById("cashOutOrderEmpty");
   if (!selectEl) return;
 
+  const pickerOptions = getExpenseOrderPickerOptions();
+
   selectEl.innerHTML = `<option value="">Select order...</option>`;
 
-  for (const item of EXPENSE_ORDER_OPTIONS) {
+  for (const item of pickerOptions) {
     if (!item?.id) continue;
     const opt = document.createElement("option");
     opt.value = String(item.id || "");
@@ -897,7 +1014,7 @@ function populateExpenseOrderSelect() {
     selectEl.appendChild(opt);
   }
 
-  const hasOptions = EXPENSE_ORDER_OPTIONS.length > 0;
+  const hasOptions = pickerOptions.length > 0;
   selectEl.disabled = !hasOptions;
 
   if (emptyEl) {
@@ -906,12 +1023,13 @@ function populateExpenseOrderSelect() {
   }
 
   if (SELECTED_EXPENSE_ORDER_ID) {
-    const exists = EXPENSE_ORDER_OPTIONS.some(
+    const exists = pickerOptions.some(
       (item) => String(item?.id || "") === String(SELECTED_EXPENSE_ORDER_ID || ""),
     );
     if (!exists) {
       SELECTED_EXPENSE_ORDER_ID = "";
       SELECTED_EXPENSE_ORDER_LABEL = "";
+      SELECTED_EXPENSE_ORDER_REASON = "";
       clearPendingCashOutDrafts({ render: false });
     }
   }
@@ -1007,9 +1125,16 @@ function proceedToCashOutDetails() {
   const selected = getSelectedExpenseOrderOption();
   const orderId = String(selected?.id || SELECTED_EXPENSE_ORDER_ID || "").trim();
   const dateValue = String(SELECTED_EXPENSE_ORDER_DATE || "").trim();
+  const manualReason = getSelectedExpenseManualReason();
+  const isManualReason = isOtherReasonSelected();
 
-  if (!orderId || !selected) {
+  if (!hasSelectedExpenseOrderScope() || !orderId || !selected) {
     showToast("Please select an order first.", "error");
+    return;
+  }
+
+  if (isManualReason && !manualReason) {
+    showToast("Please write the reason first.", "error");
     return;
   }
 
@@ -1049,8 +1174,14 @@ function closeCashInModal() {
 }
 
 function openCashOutModal() {
-    if (!String(SELECTED_EXPENSE_ORDER_ID || "").trim() || !String(SELECTED_EXPENSE_ORDER_DATE || "").trim()) {
+    if (!hasSelectedExpenseOrderScope() || !String(SELECTED_EXPENSE_ORDER_DATE || "").trim()) {
       showToast("Please select the order and date first.", "error");
+      openCashOutOrderModal({ resetSelection: false, resetDate: false, forceReload: false, resetDrafts: false });
+      return;
+    }
+
+    if (isOtherReasonSelected() && !getSelectedExpenseManualReason()) {
+      showToast("Please write the reason first.", "error");
       openCashOutOrderModal({ resetSelection: false, resetDate: false, forceReload: false, resetDrafts: false });
       return;
     }
@@ -1137,13 +1268,19 @@ async function submitCashIn() {
 async function buildCashOutDraftFromForm() {
   const selectedOrderId = String(SELECTED_EXPENSE_ORDER_ID || "").trim();
   const selectedOrder = getSelectedExpenseOrderOption();
+  const isManualReason = isOtherReasonSelected();
+  const manualReason = getSelectedExpenseManualReason();
   const type = String(document.getElementById("co_type")?.value || "").trim();
   const date = String(SELECTED_EXPENSE_ORDER_DATE || "").trim();
   const from = String(document.getElementById("co_from")?.value || "").trim();
   const to = String(document.getElementById("co_to")?.value || "").trim();
 
-  if (!selectedOrderId || !selectedOrder) {
+  if (!hasSelectedExpenseOrderScope() || !selectedOrderId || !selectedOrder) {
     throw new Error("Please select an order first.");
+  }
+
+  if (isManualReason && !manualReason) {
+    throw new Error("Please write the reason first.");
   }
 
   if (!type || !date) {
@@ -1155,6 +1292,7 @@ async function buildCashOutDraftFromForm() {
     fundsType: type,
     from,
     to,
+    reason: isManualReason ? manualReason : "",
     screenshots: [],
   };
 
@@ -1184,12 +1322,14 @@ async function buildCashOutDraftFromForm() {
 }
 
 function buildCashOutPayloadFromDraft(draft, selectedOrder) {
+  const isManualReason = isOtherReasonExpenseOrderId(draft?.scopeId || SELECTED_EXPENSE_ORDER_ID);
   const body = {
-    orderId: String(SELECTED_EXPENSE_ORDER_ID || "").trim(),
-    orderIds: Array.isArray(selectedOrder?.relationIds) ? selectedOrder.relationIds : [],
-    orderLabel: selectedOrder?.label || SELECTED_EXPENSE_ORDER_LABEL || "",
-    orderType: selectedOrder?.orderType || "",
-    orderDisplayId: selectedOrder?.orderId || "",
+    orderId: isManualReason ? "" : String(SELECTED_EXPENSE_ORDER_ID || "").trim(),
+    orderIds: isManualReason ? [] : (Array.isArray(selectedOrder?.relationIds) ? selectedOrder.relationIds : []),
+    orderLabel: isManualReason ? "Other reason" : (selectedOrder?.label || SELECTED_EXPENSE_ORDER_LABEL || ""),
+    orderType: isManualReason ? "Manual reason" : (selectedOrder?.orderType || ""),
+    orderDisplayId: isManualReason ? "" : (selectedOrder?.orderId || ""),
+    reason: String(draft?.reason || "").trim(),
     fundsType: String(draft?.fundsType || "").trim(),
     date: String(SELECTED_EXPENSE_ORDER_DATE || "").trim(),
     from: String(draft?.from || "").trim(),
@@ -1239,7 +1379,8 @@ async function submitCashOut() {
 
   try {
     const draft = await buildCashOutDraftFromForm();
-    PENDING_CASH_OUT_ITEMS = [...PENDING_CASH_OUT_ITEMS, draft];
+    draft.scopeId = String(SELECTED_EXPENSE_ORDER_ID || "").trim();
+    PENDING_CASH_OUT_ITEMS.push(draft);
     renderPendingCashOutDrafts();
     closeCashOutModal({ returnToPicker: true });
     showToast("Expense added. You can add another one or confirm now.", "success", { duration: 2500 });
@@ -1248,6 +1389,8 @@ async function submitCashOut() {
     showToast(err?.message || "Failed to add expense.", "error");
   } finally {
     IS_CASHOUT_DRAFTING = false;
+    syncSelectedExpenseOrderUI();
+    renderPendingCashOutDrafts();
     if (btn) {
       btn.disabled = false;
       btn.textContent = "Add Expense";
@@ -1261,9 +1404,16 @@ async function confirmCashOutDrafts() {
   const selectedOrder = getSelectedExpenseOrderOption();
   const orderId = String(selectedOrder?.id || SELECTED_EXPENSE_ORDER_ID || "").trim();
   const date = String(SELECTED_EXPENSE_ORDER_DATE || "").trim();
+  const isManualReason = isOtherReasonSelected();
+  const manualReason = getSelectedExpenseManualReason();
 
-  if (!orderId || !selectedOrder) {
+  if (!hasSelectedExpenseOrderScope() || !orderId || !selectedOrder) {
     showToast("Please select an order first.", "error");
+    return;
+  }
+
+  if (isManualReason && !manualReason) {
+    showToast("Please write the reason first.", "error");
     return;
   }
 
@@ -1542,6 +1692,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const cashOutOrderTrigger = document.getElementById("cashOutOrderTrigger");
     const cashOutOrderOptionsList = document.getElementById("cashOutOrderOptionsList");
     const cashOutOrderDate = document.getElementById("cashOutOrderDate");
+    const cashOutManualReason = document.getElementById("cashOutManualReason");
     const cashOutOrderAddExpenseBtn = document.getElementById("cashOutOrderAddExpenseBtn");
     const cashOutOrderNextBtn = document.getElementById("cashOutOrderNextBtn");
     const cashOutChangeOrderBtn = document.getElementById("cashOutChangeOrderBtn");
@@ -1567,7 +1718,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const optionBtn = e.target?.closest ? e.target.closest(".order-select__option") : null;
             if (!optionBtn) return;
             const orderId = String(optionBtn.getAttribute("data-order-id") || "").trim();
-            const selected = EXPENSE_ORDER_OPTIONS.find(
+            const selected = getExpenseOrderPickerOptions().find(
                 (item) => String(item?.id || "") === orderId,
             );
             if (orderId && orderId !== String(SELECTED_EXPENSE_ORDER_ID || "").trim()) {
@@ -1576,6 +1727,19 @@ document.addEventListener("DOMContentLoaded", () => {
             setSelectedExpenseOrder(orderId, selected?.label || formatExpenseOrderLabel(selected));
             closeExpenseOrderDropdown();
         });
+    }
+    if (cashOutManualReason) {
+        const onReasonChange = (e) => {
+            const nextReason = String(e.target?.value || "");
+            const prevReason = getSelectedExpenseManualReason({ trimmed: false });
+            if (!isOtherReasonSelected()) return;
+            setSelectedExpenseManualReason(nextReason);
+            if (nextReason.trim() !== String(prevReason || "").trim()) {
+              clearPendingDraftsForScopeChange("Added expenses were cleared because you changed the reason.");
+            }
+        };
+        cashOutManualReason.addEventListener("input", onReasonChange);
+        cashOutManualReason.addEventListener("change", onReasonChange);
     }
     if (cashOutOrderDate) {
         const onDateChange = (e) => {
