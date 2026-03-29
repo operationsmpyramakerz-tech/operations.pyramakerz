@@ -13479,8 +13479,122 @@ app.get(
   },
 );
 
+app.get(
+  "/api/expenses/orders/options",
+  requireAuth,
+  requirePage("Expenses"),
+  cachedJsonRoute(60, async (req) => {
+    const userId = await getSessionUserNotionId(req);
+    return userId
+      ? `cache:api:expenses:orders-options:${normalizeNotionId(userId)}:v1`
+      : "";
+  }),
+  async (req, res) => {
+    try {
+      if (!ordersDatabaseId || !teamMembersDatabaseId) {
+        return res.json({ success: true, options: [] });
+      }
+
+      const userId = await getSessionUserNotionId(req);
+      if (!userId) {
+        return res.json({ success: true, options: [] });
+      }
+
+      const orderProps = await getOrdersDBProps();
+      const orderGroupPropName = await detectOrderGroupIdPropName();
+      const titlePropName = firstTitlePropName(orderProps) || null;
+
+      const rows = [];
+      const productIds = new Set();
+      let hasMore = true;
+      let cursor = undefined;
+
+      while (hasMore) {
+        const response = await notion.databases.query({
+          database_id: ordersDatabaseId,
+          start_cursor: cursor,
+          page_size: 100,
+          filter: { property: "Teams Members", relation: { contains: userId } },
+          sorts: [{ timestamp: "created_time", direction: "descending" }],
+        });
+
+        for (const page of response.results || []) {
+          const props = page.properties || {};
+          const productPageId = Array.isArray(props?.Product?.relation)
+            ? props.Product.relation[0]?.id || null
+            : null;
+          if (productPageId) productIds.add(productPageId);
+
+          let orderIdText = "";
+          if (orderGroupPropName) {
+            const groupValue = _extractPropNumber(props?.[orderGroupPropName]);
+            if (Number.isFinite(Number(groupValue))) {
+              orderIdText = `ORD-${Number(groupValue)}`;
+            }
+          }
+          if (!orderIdText) {
+            for (const prop of Object.values(props || {})) {
+              if (prop?.type === "unique_id" && typeof prop?.unique_id?.number === "number") {
+                const prefix = prop.unique_id.prefix ? String(prop.unique_id.prefix).trim() : "";
+                orderIdText = prefix ? `${prefix}-${prop.unique_id.number}` : String(prop.unique_id.number);
+                break;
+              }
+            }
+          }
+
+          const statusProp = props?.Status;
+          const status = statusProp?.select?.name || statusProp?.status?.name || "";
+          const { orderType } = _extractOrderTypeInfo(props);
+          const titleText = titlePropName ? String(_extractPropText(props?.[titlePropName]) || "").trim() : "";
+
+          rows.push({
+            id: page.id,
+            orderId: orderIdText,
+            productPageId,
+            status,
+            orderType: orderType || "",
+            titleText,
+            createdTime: page.created_time,
+          });
+        }
+
+        hasMore = response.has_more;
+        cursor = response.next_cursor;
+      }
+
+      const productMap = await mapWithConcurrency(productIds, 3, getProductInfoCached);
+      const options = rows.map((row) => {
+        const productInfo = row.productPageId ? productMap.get(row.productPageId) : null;
+        const productName = String(productInfo?.name || row.titleText || "").trim();
+        const labelParts = [row.orderId, productName, row.orderType, row.status].filter(Boolean);
+        const label = labelParts.join(" • ") || row.orderId || productName || "Untitled order";
+
+        return {
+          id: row.id,
+          label,
+          orderId: row.orderId || null,
+          productName: productName || null,
+          orderType: row.orderType || null,
+          status: row.status || null,
+          createdTime: row.createdTime,
+        };
+      });
+
+      return res.json({ success: true, options });
+    } catch (err) {
+      console.error("Expense orders options error:", err?.body || err);
+      return res.status(500).json({
+        success: false,
+        options: [],
+        error: "Cannot load orders",
+      });
+    }
+  },
+);
+
 app.post("/api/expenses/cash-out", async (req, res) => {
   const {
+    orderId,
     fundsType,
     reason,
     date,
@@ -13535,6 +13649,41 @@ app.post("/api/expenses/cash-out", async (req, res) => {
         number: Number(amount) || 0
       }
     };
+
+    const selectedOrderId = String(orderId || "").trim();
+    if (selectedOrderId) {
+      let expProps = await getExpensesDBProps();
+      let ordersPropName = pickPropName(expProps, ["Orders", "Order"]);
+      let ordersProp = ordersPropName ? expProps?.[ordersPropName] : null;
+
+      if ((!ordersPropName || ordersProp?.type !== "relation") && (expensesDatabaseId || process.env.Expenses_Database)) {
+        try {
+          const freshDb = await notion.databases.retrieve({
+            database_id: expensesDatabaseId || process.env.Expenses_Database,
+          });
+          expProps = freshDb?.properties || {};
+          ordersPropName = pickPropName(expProps, ["Orders", "Order"]);
+          ordersProp = ordersPropName ? expProps?.[ordersPropName] : null;
+        } catch (schemaErr) {
+          console.warn("Expenses DB fresh schema retrieve failed:", schemaErr?.body || schemaErr);
+        }
+      }
+
+      if (!ordersPropName || ordersProp?.type !== "relation") {
+        return res.status(400).json({
+          success: false,
+          error: 'Expenses relation "Orders" is not configured',
+        });
+      }
+
+      const normalizedOrderId = looksLikeNotionId(selectedOrderId)
+        ? toHyphenatedUUID(selectedOrderId)
+        : selectedOrderId;
+
+      props[ordersPropName] = {
+        relation: [{ id: normalizedOrderId }],
+      };
+    }
 
     if (fundsType === "Own car") {
       props["Kilometer"] = {
