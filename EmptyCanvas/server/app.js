@@ -14069,88 +14069,85 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
       }
     }
 
-    for (const id of cashInFromIds) {
-      const t = await pageTitleById(id);
-      cashInFromTitleMap.set(id, t);
+    if (cashInFromIds.size) {
+      const cashInFromLookup = await mapWithConcurrency(cashInFromIds, 4, async (id) => {
+        try {
+          return await pageTitleById(id);
+        } catch {
+          return "";
+        }
+      });
+      for (const [id, title] of cashInFromLookup.entries()) {
+        if (title) cashInFromTitleMap.set(id, title);
+      }
     }
 
-    const linkedOrderPageMap = new Map();
-    const linkedOrderProductIds = new Set();
-    const orderGroupPropName = linkedOrderRelationIds.size ? await detectOrderGroupIdPropName() : null;
-
+    const linkedOrderMetaByPageId = new Map();
+    let orderGroupPropName = null;
     if (linkedOrderRelationIds.size) {
+      try {
+        orderGroupPropName = await detectOrderGroupIdPropName();
+      } catch (groupPropErr) {
+        console.warn("Expense order group detection failed:", groupPropErr?.body || groupPropErr?.message || groupPropErr);
+      }
+
       await mapWithConcurrency(linkedOrderRelationIds, 3, async (pageId) => {
+        let meta = null;
+
         try {
           const orderPage = await notion.pages.retrieve({ page_id: pageId });
-          if (!orderPage?.id) return null;
-          linkedOrderPageMap.set(pageId, orderPage);
+          const props = orderPage?.properties || {};
+          let orderIdText = "";
+          let groupKey = "";
 
-          const productPageId = Array.isArray(orderPage.properties?.Product?.relation)
-            ? orderPage.properties.Product.relation[0]?.id || null
-            : null;
-          if (productPageId) linkedOrderProductIds.add(productPageId);
+          if (orderGroupPropName) {
+            const groupValue = _extractPropNumber(props?.[orderGroupPropName]);
+            if (Number.isFinite(Number(groupValue))) {
+              orderIdText = `ORD-${Number(groupValue)}`;
+              groupKey = `group:${Number(groupValue)}`;
+            }
+          }
+
+          if (!orderIdText) {
+            for (const prop of Object.values(props || {})) {
+              if (prop?.type === "unique_id" && typeof prop?.unique_id?.number === "number") {
+                const prefix = prop.unique_id.prefix ? String(prop.unique_id.prefix).trim() : "";
+                orderIdText = prefix ? `${prefix}-${prop.unique_id.number}` : String(prop.unique_id.number);
+                groupKey = `uid:${orderIdText}`;
+                break;
+              }
+            }
+          }
+
+          if (!groupKey) groupKey = `page:${pageId}`;
+
+          const { orderType } = _extractOrderTypeInfo(props);
+          const label = [orderIdText, orderType].filter(Boolean).join(" - ") || orderIdText || "Order";
+
+          meta = {
+            pageId,
+            key: groupKey,
+            orderId: orderIdText || "Order",
+            orderType: orderType || "",
+            label,
+            trackingGroupId: pageId,
+            trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+          };
         } catch (orderErr) {
           console.warn("Expense linked order retrieve failed:", pageId, orderErr?.body || orderErr?.message || orderErr);
+          meta = {
+            pageId,
+            key: `page:${pageId}`,
+            orderId: "Order",
+            orderType: "",
+            label: "Order",
+            trackingGroupId: pageId,
+            trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+          };
         }
-        return null;
-      });
-    }
 
-    const linkedOrderProductMap = await mapWithConcurrency(linkedOrderProductIds, 3, getProductInfoCached);
-    const linkedOrderMetaByPageId = new Map();
-
-    for (const [pageId, orderPage] of linkedOrderPageMap.entries()) {
-      const props = orderPage?.properties || {};
-      let orderIdText = "";
-      let groupKey = "";
-
-      if (orderGroupPropName) {
-        const groupValue = _extractPropNumber(props?.[orderGroupPropName]);
-        if (Number.isFinite(Number(groupValue))) {
-          orderIdText = `ORD-${Number(groupValue)}`;
-          groupKey = `group:${Number(groupValue)}`;
-        }
-      }
-
-      if (!orderIdText) {
-        for (const prop of Object.values(props || {})) {
-          if (prop?.type === "unique_id" && typeof prop?.unique_id?.number === "number") {
-            const prefix = prop.unique_id.prefix ? String(prop.unique_id.prefix).trim() : "";
-            orderIdText = prefix ? `${prefix}-${prop.unique_id.number}` : String(prop.unique_id.number);
-            groupKey = `uid:${orderIdText}`;
-            break;
-          }
-        }
-      }
-
-      if (!groupKey) groupKey = `page:${pageId}`;
-
-      const { orderType } = _extractOrderTypeInfo(props);
-      const productPageId = Array.isArray(props?.Product?.relation)
-        ? props.Product.relation[0]?.id || null
-        : null;
-      const productInfo = productPageId ? linkedOrderProductMap.get(productPageId) : null;
-      const statusProp = getPropLoose(props, "Status") || props?.Status || null;
-      const quantity =
-        _extractPropNumber(getPropLoose(props, "Quantity Progress")) ??
-        _extractPropNumber(getPropLoose(props, "Quantity Requested")) ??
-        0;
-      const label = [orderIdText, orderType].filter(Boolean).join(" - ") || orderIdText || "Order";
-
-      linkedOrderMetaByPageId.set(pageId, {
-        pageId,
-        key: groupKey,
-        orderId: orderIdText || "Order",
-        orderType: orderType || "",
-        label,
-        trackingGroupId: pageId,
-        trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
-        item: {
-          pageId,
-          productName: String(productInfo?.name || "").trim() || "Order item",
-          quantity: Number(quantity) || 0,
-          status: statusProp?.select?.name || statusProp?.status?.name || "",
-        },
+        linkedOrderMetaByPageId.set(pageId, meta);
+        return meta;
       });
     }
 
@@ -14239,12 +14236,6 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
               trackingUrl: meta.trackingUrl,
               items: [],
             });
-          }
-
-          const entry = linkedOrdersMap.get(meta.key);
-          const itemPageId = String(meta.item?.pageId || "").trim();
-          if (meta.item && itemPageId && !entry.items.some((row) => String(row?.pageId || "").trim() === itemPageId)) {
-            entry.items.push(meta.item);
           }
         }
       }
