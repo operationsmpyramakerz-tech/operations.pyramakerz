@@ -846,27 +846,48 @@
     height:18px;
     color:#64748b;
     transition:transform .14s ease;
+    flex:0 0 auto;
   }
   .order-select__trigger-label{
     flex:1 1 auto;
     min-width:0;
     text-align:left;
+    display:flex;
+    align-items:center;
+    gap:0.7rem;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
   }
+  .order-summary-inline{
+    display:flex;
+    align-items:center;
+    gap:0.7rem;
+    min-width:0;
+    width:100%;
+  }
+  .order-summary-inline__id{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    color:#0f172a;
+    font-weight:800;
+    font-size:0.98rem;
+  }
   .order-select__dropdown{
-    position:absolute;
-    z-index:40;
-    top:calc(100% + 0.55rem);
+    position:fixed;
+    z-index:10050;
+    top:0;
     left:0;
-    right:0;
+    width:min(460px,calc(100vw - 32px));
     padding:0.55rem;
     border-radius:20px;
     background:#fff;
     border:1px solid rgba(219,231,255,0.95);
     box-shadow:0 22px 48px rgba(15,23,42,0.18);
     backdrop-filter:blur(12px);
+    overflow:hidden;
   }
   .order-select__dropdown[hidden]{
     display:none !important;
@@ -883,7 +904,7 @@
     display:flex;
     flex-direction:column;
     gap:0.45rem;
-    max-height:260px;
+    max-height:min(260px, calc(100vh - 140px));
     overflow:auto;
   }
   .order-select__option{
@@ -911,6 +932,13 @@
   }
   .order-select__option-main{
     min-width:0;
+    flex:1 1 auto;
+    display:flex;
+    align-items:center;
+    gap:0.7rem;
+  }
+  .order-select__option-id{
+    min-width:0;
     font-weight:800;
     color:#0f172a;
     font-size:0.98rem;
@@ -920,16 +948,28 @@
   }
   .order-select__chip{
     flex:0 0 auto;
-    max-width:55%;
+    max-width:58%;
     padding:0.45rem 0.7rem;
     border-radius:999px;
-    background:#eef2ff;
-    color:#4338ca;
+    background:var(--order-chip-bg, #eef2ff);
+    color:var(--order-chip-fg, #4338ca);
+    border:1px solid var(--order-chip-border, transparent);
     font-weight:700;
     font-size:0.82rem;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
+    display:inline-flex;
+    align-items:center;
+    gap:0.4rem;
+  }
+  .order-select__chip svg{
+    width:15px;
+    height:15px;
+    stroke-width:2.4;
+  }
+  .order-select__chip--selected{
+    max-width:100%;
   }
   .order-preview-card{
     margin-top:0.9rem;
@@ -955,6 +995,9 @@
     font-weight:700;
     line-height:1.45;
   }
+  .order-preview-text .order-summary-inline__id{
+    font-size:1.05rem;
+  }
   .order-preview-meta{
     margin-top:0.35rem;
     color:#475569;
@@ -977,6 +1020,120 @@
     font-weight:700;
     cursor:pointer;
   }
+  .ex-btn:disabled,
+  .order-change-btn:disabled{
+    opacity:0.58;
+    cursor:not-allowed;
+    transform:none !important;
+  }
+  .ex-btn--block{
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    margin:-0.1rem 0 1rem;
+  }
+  .expense-drafts{
+    margin-top:0.25rem;
+    margin-bottom:1rem;
+    padding:0.9rem;
+    border-radius:18px;
+    background:#f8fafc;
+    border:1px solid #e2e8f0;
+  }
+  .expense-drafts__header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:0.75rem;
+    margin-bottom:0.75rem;
+  }
+  .expense-drafts__title{
+    font-size:0.94rem;
+    font-weight:800;
+    color:#0f172a;
+  }
+  .expense-drafts__count{
+    min-width:28px;
+    height:28px;
+    padding:0 0.55rem;
+    border-radius:999px;
+    background:#dbeafe;
+    color:#1d4ed8;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size:0.84rem;
+    font-weight:800;
+  }
+  .expense-drafts__list{
+    display:flex;
+    flex-direction:column;
+    gap:0.65rem;
+  }
+  .expense-draft-card{
+    display:flex;
+    align-items:center;
+    gap:0.85rem;
+    padding:0.8rem 0.85rem;
+    border-radius:16px;
+    border:1px solid #e2e8f0;
+    background:#ffffff;
+    box-shadow:0 10px 22px rgba(15,23,42,0.06);
+  }
+  .expense-draft-card__main{
+    min-width:0;
+    flex:1 1 auto;
+  }
+  .expense-draft-card__title{
+    font-size:0.94rem;
+    font-weight:800;
+    color:#0f172a;
+    margin-bottom:0.2rem;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .expense-draft-card__meta{
+    font-size:0.82rem;
+    color:#64748b;
+    font-weight:600;
+    line-height:1.4;
+  }
+  .expense-draft-card__value{
+    flex:0 0 auto;
+    font-size:0.94rem;
+    font-weight:800;
+    color:#0f172a;
+    white-space:nowrap;
+  }
+  .expense-draft-card__remove{
+    flex:0 0 auto;
+    width:34px;
+    height:34px;
+    border:none;
+    border-radius:12px;
+    background:#fee2e2;
+    color:#b91c1c;
+    font-size:1rem;
+    font-weight:800;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .expense-draft-card__remove:hover{
+    background:#fecaca;
+  }
+  .ex-modal-actions {
+    display:flex;
+    justify-content:space-between;
+    gap:0.75rem;
+    margin-top:1rem;
+  }
+  .ex-btn {
+    flex:1 1 0;
+  }
   @media (max-width:640px){
     .order-select__option{
       align-items:flex-start;
@@ -984,6 +1141,27 @@
     }
     .order-select__chip{
       max-width:100%;
+    }
+    .order-summary-inline{
+      flex-wrap:wrap;
+      align-items:flex-start;
+    }
+    .order-preview-row{
+      flex-direction:column;
+    }
+    .order-change-btn{
+      width:100%;
+    }
+    .expense-draft-card{
+      align-items:flex-start;
+      flex-wrap:wrap;
+    }
+    .expense-draft-card__value{
+      order:3;
+      margin-left:0;
+    }
+    .expense-draft-card__remove{
+      margin-left:auto;
     }
   }
 </style>
@@ -1118,7 +1296,7 @@
   <div class="ex-modal-box ex-modal-box--compact">
 
     <h3 class="ex-modal-title">Choose Order</h3>
-    <p class="order-picker-hint">Select the order and date first, then continue to add the cash out details.</p>
+    <p class="order-picker-hint">Select the order and date first, then add one or more expenses before confirming.</p>
 
     <label class="field-label"><i data-feather="file-text"></i> Order <span class="req-star">*</span></label>
     <div id="cashOutOrderPicker" class="order-select">
@@ -1140,8 +1318,18 @@
     <label class="field-label"><i data-feather="calendar"></i> Date <span class="req-star">*</span></label>
     <input id="cashOutOrderDate" type="date" class="ex-input"/>
 
+    <button id="cashOutOrderAddExpenseBtn" class="ex-btn ex-primary ex-btn--block" type="button">Add Expense</button>
+
+    <div id="cashOutPendingWrap" class="expense-drafts" style="display:none;">
+      <div class="expense-drafts__header">
+        <span class="expense-drafts__title">Added expenses</span>
+        <span id="cashOutPendingCount" class="expense-drafts__count">0</span>
+      </div>
+      <div id="cashOutPendingList" class="expense-drafts__list"></div>
+    </div>
+
     <div class="ex-modal-actions">
-      <button id="cashOutOrderNextBtn" class="ex-btn ex-primary">Add Expense</button>
+      <button id="cashOutOrderNextBtn" class="ex-btn ex-primary">Confirm</button>
       <button class="ex-btn ex-danger" onclick="closeCashOutOrderModal()">Close</button>
     </div>
 
@@ -1152,7 +1340,7 @@
 <div id="cashOutModal" class="ex-modal">
   <div class="ex-modal-box">
 
-    <h3 class="ex-modal-title">Add Cash Out</h3>
+    <h3 class="ex-modal-title">Add Expense</h3>
 
 
     <div id="cashOutSelectedOrderCard" class="order-preview-card order-preview-card--inline" style="display:none;">
@@ -1202,8 +1390,8 @@
     </div>
 
     <div class="ex-modal-actions">
-      <button id="co_submit" class="ex-btn ex-primary">Submit</button>
-      <button class="ex-btn ex-danger" onclick="closeCashOutModal()">Close</button>
+      <button id="co_submit" class="ex-btn ex-primary">Add Expense</button>
+      <button class="ex-btn ex-danger" onclick="closeCashOutModal()">Back</button>
     </div>
 
   </div>
