@@ -799,6 +799,138 @@
     color:#9a3412;
     font-weight:600;
   }
+  .order-select{
+    position:relative;
+  }
+  .order-select-hidden{
+    display:none !important;
+  }
+  .order-select__trigger{
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:0.85rem;
+    padding:1rem 1rem;
+    border-radius:18px;
+    border:1px solid #dbe3f1;
+    background:linear-gradient(180deg,#ffffff 0%, #f8fbff 100%);
+    box-shadow:0 10px 24px rgba(15,23,42,0.06);
+    color:#0f172a;
+    font-weight:700;
+    font-size:0.98rem;
+    cursor:pointer;
+    transition:transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+  }
+  .order-select__trigger:hover{
+    border-color:#bfd3ff;
+    box-shadow:0 12px 28px rgba(37,99,235,0.10);
+  }
+  .order-select__trigger:focus-visible{
+    outline:none;
+    border-color:#3b82f6;
+    box-shadow:0 0 0 4px rgba(59,130,246,0.18);
+  }
+  .order-select__trigger.is-selected{
+    border-color:#c7d8ff;
+  }
+  .order-select__trigger.is-placeholder{
+    color:#64748b;
+    font-weight:600;
+  }
+  .order-select__trigger.is-open svg{
+    transform:rotate(180deg);
+  }
+  .order-select__trigger svg{
+    width:18px;
+    height:18px;
+    color:#64748b;
+    transition:transform .14s ease;
+  }
+  .order-select__trigger-label{
+    flex:1 1 auto;
+    min-width:0;
+    text-align:left;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .order-select__dropdown{
+    position:absolute;
+    z-index:40;
+    top:calc(100% + 0.55rem);
+    left:0;
+    right:0;
+    padding:0.55rem;
+    border-radius:20px;
+    background:#fff;
+    border:1px solid rgba(219,231,255,0.95);
+    box-shadow:0 22px 48px rgba(15,23,42,0.18);
+    backdrop-filter:blur(12px);
+  }
+  .order-select__dropdown[hidden]{
+    display:none !important;
+  }
+  .order-select__status{
+    padding:0.95rem 1rem;
+    border-radius:14px;
+    background:#f8fafc;
+    color:#64748b;
+    font-weight:600;
+    font-size:0.95rem;
+  }
+  .order-select__options{
+    display:flex;
+    flex-direction:column;
+    gap:0.45rem;
+    max-height:260px;
+    overflow:auto;
+  }
+  .order-select__option{
+    width:100%;
+    border:none;
+    background:#fff;
+    padding:0.9rem 0.95rem;
+    border-radius:16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:0.8rem;
+    cursor:pointer;
+    text-align:left;
+    transition:transform .12s ease, background .12s ease, box-shadow .12s ease;
+  }
+  .order-select__option:hover{
+    background:#f8fbff;
+    box-shadow:0 8px 18px rgba(37,99,235,0.10);
+    transform:translateY(-1px);
+  }
+  .order-select__option.is-selected{
+    background:#eff6ff;
+    box-shadow:inset 0 0 0 1px #bfdbfe;
+  }
+  .order-select__option-main{
+    min-width:0;
+    font-weight:800;
+    color:#0f172a;
+    font-size:0.98rem;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .order-select__chip{
+    flex:0 0 auto;
+    max-width:55%;
+    padding:0.45rem 0.7rem;
+    border-radius:999px;
+    background:#eef2ff;
+    color:#4338ca;
+    font-weight:700;
+    font-size:0.82rem;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
   .order-preview-card{
     margin-top:0.9rem;
     padding:0.95rem 1rem;
@@ -821,7 +953,13 @@
   .order-preview-text{
     color:#0f172a;
     font-weight:700;
-    line-height:1.5;
+    line-height:1.45;
+  }
+  .order-preview-meta{
+    margin-top:0.35rem;
+    color:#475569;
+    font-weight:600;
+    font-size:0.92rem;
   }
   .order-preview-row{
     display:flex;
@@ -838,6 +976,15 @@
     color:#1d4ed8;
     font-weight:700;
     cursor:pointer;
+  }
+  @media (max-width:640px){
+    .order-select__option{
+      align-items:flex-start;
+      flex-direction:column;
+    }
+    .order-select__chip{
+      max-width:100%;
+    }
   }
 </style>
 
@@ -971,19 +1118,27 @@
   <div class="ex-modal-box ex-modal-box--compact">
 
     <h3 class="ex-modal-title">Choose Order</h3>
-    <p class="order-picker-hint">Select the order first, then continue to add the cash out details.</p>
+    <p class="order-picker-hint">Select the order and date first, then continue to add the cash out details.</p>
 
     <label class="field-label"><i data-feather="file-text"></i> Order <span class="req-star">*</span></label>
-    <select id="cashOutOrderSelect" class="ex-input">
-      <option value="">Select order...</option>
-    </select>
+    <div id="cashOutOrderPicker" class="order-select">
+      <button id="cashOutOrderTrigger" type="button" class="order-select__trigger is-placeholder" aria-haspopup="listbox" aria-expanded="false">
+        <span id="cashOutOrderTriggerText" class="order-select__trigger-label">Select order...</span>
+        <i data-feather="chevron-down"></i>
+      </button>
+      <div id="cashOutOrderDropdown" class="order-select__dropdown" hidden>
+        <div id="cashOutOrderDropdownState" class="order-select__status">Loading orders...</div>
+        <div id="cashOutOrderOptionsList" class="order-select__options" role="listbox" aria-label="Orders"></div>
+      </div>
+      <select id="cashOutOrderSelect" class="ex-input order-select-hidden" aria-hidden="true" tabindex="-1">
+        <option value="">Select order...</option>
+      </select>
+    </div>
 
     <div id="cashOutOrderEmpty" class="order-picker-empty" style="display:none;"></div>
 
-    <div id="cashOutOrderPreview" class="order-preview-card" style="display:none;">
-      <div class="order-preview-label">Selected order</div>
-      <div id="cashOutOrderPreviewText" class="order-preview-text"></div>
-    </div>
+    <label class="field-label"><i data-feather="calendar"></i> Date <span class="req-star">*</span></label>
+    <input id="cashOutOrderDate" type="date" class="ex-input"/>
 
     <div class="ex-modal-actions">
       <button id="cashOutOrderNextBtn" class="ex-btn ex-primary">Add Expense</button>
@@ -1005,6 +1160,7 @@
         <div>
           <div class="order-preview-label">Selected order</div>
           <div id="cashOutSelectedOrderText" class="order-preview-text"></div>
+          <div id="cashOutSelectedOrderMeta" class="order-preview-meta" style="display:none;"></div>
         </div>
         <button id="cashOutChangeOrderBtn" type="button" class="order-change-btn">Change</button>
       </div>
@@ -1012,12 +1168,6 @@
 
     <label class="field-label"><i data-feather="tag"></i> Funds Type <span class="req-star">*</span></label>
     <select id="co_type" class="ex-input"></select>
-
-    <label class="field-label"><i data-feather="edit-3"></i> Reason <span class="req-star">*</span></label>
-    <input id="co_reason" type="text" class="ex-input"/>
-
-    <label class="field-label"><i data-feather="calendar"></i> Date <span class="req-star">*</span></label>
-    <input id="co_date" type="date" class="ex-input"/>
 
     <label class="field-label"><i data-feather="log-out"></i> From <span class="opt-tag">(Optional)</span></label>
     <input id="co_from" type="text" class="ex-input"/>
