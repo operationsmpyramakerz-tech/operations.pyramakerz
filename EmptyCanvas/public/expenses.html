@@ -780,6 +780,67 @@
   }
 </style>
 
+
+<style>
+  .ex-modal-box--compact{
+    max-width:460px;
+  }
+  .order-picker-hint{
+    margin:-0.15rem 0 1rem;
+    color:#64748b;
+    font-size:0.95rem;
+    line-height:1.5;
+  }
+  .order-picker-empty{
+    margin-top:0.85rem;
+    padding:0.9rem 1rem;
+    border-radius:14px;
+    background:#fff7ed;
+    color:#9a3412;
+    font-weight:600;
+  }
+  .order-preview-card{
+    margin-top:0.9rem;
+    padding:0.95rem 1rem;
+    border-radius:16px;
+    border:1px solid #dbeafe;
+    background:#eff6ff;
+  }
+  .order-preview-card--inline{
+    margin-top:0;
+    margin-bottom:1rem;
+  }
+  .order-preview-label{
+    font-size:0.8rem;
+    font-weight:700;
+    letter-spacing:0.03em;
+    text-transform:uppercase;
+    color:#1d4ed8;
+    margin-bottom:0.3rem;
+  }
+  .order-preview-text{
+    color:#0f172a;
+    font-weight:700;
+    line-height:1.5;
+  }
+  .order-preview-row{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:1rem;
+  }
+  .order-change-btn{
+    flex:0 0 auto;
+    border:none;
+    border-radius:12px;
+    padding:0.65rem 0.9rem;
+    background:#dbeafe;
+    color:#1d4ed8;
+    font-weight:700;
+    cursor:pointer;
+  }
+</style>
+
 </head>
 
 <body class="permissions-loading">
@@ -904,11 +965,50 @@
   </div>
 </div>
 
+
+<!-- CASH OUT ORDER PICKER MODAL -->
+<div id="cashOutOrderModal" class="ex-modal">
+  <div class="ex-modal-box ex-modal-box--compact">
+
+    <h3 class="ex-modal-title">Choose Order</h3>
+    <p class="order-picker-hint">Select the order first, then continue to add the cash out details.</p>
+
+    <label class="field-label"><i data-feather="file-text"></i> Order <span class="req-star">*</span></label>
+    <select id="cashOutOrderSelect" class="ex-input">
+      <option value="">Select order...</option>
+    </select>
+
+    <div id="cashOutOrderEmpty" class="order-picker-empty" style="display:none;"></div>
+
+    <div id="cashOutOrderPreview" class="order-preview-card" style="display:none;">
+      <div class="order-preview-label">Selected order</div>
+      <div id="cashOutOrderPreviewText" class="order-preview-text"></div>
+    </div>
+
+    <div class="ex-modal-actions">
+      <button id="cashOutOrderNextBtn" class="ex-btn ex-primary">Add Expense</button>
+      <button class="ex-btn ex-danger" onclick="closeCashOutOrderModal()">Close</button>
+    </div>
+
+  </div>
+</div>
+
 <!-- CASH OUT MODAL -->
 <div id="cashOutModal" class="ex-modal">
   <div class="ex-modal-box">
 
     <h3 class="ex-modal-title">Add Cash Out</h3>
+
+
+    <div id="cashOutSelectedOrderCard" class="order-preview-card order-preview-card--inline" style="display:none;">
+      <div class="order-preview-row">
+        <div>
+          <div class="order-preview-label">Selected order</div>
+          <div id="cashOutSelectedOrderText" class="order-preview-text"></div>
+        </div>
+        <button id="cashOutChangeOrderBtn" type="button" class="order-change-btn">Change</button>
+      </div>
+    </div>
 
     <label class="field-label"><i data-feather="tag"></i> Funds Type <span class="req-star">*</span></label>
     <select id="co_type" class="ex-input"></select>
