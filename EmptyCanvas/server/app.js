@@ -312,6 +312,7 @@ async function clearExpensesRouteCaches(req, teamMemberPageId = "") {
     const usernameKey = cacheKeySafe(req?.session?.username || "");
     const tasks = [
       cacheDel(`cache:api:expenses:${usernameKey}:v1`),
+      cacheDel(`cache:api:expenses:${usernameKey}:v2`),
       cacheDel("cache:api:expenses:users:v1"),
     ];
 
@@ -14009,7 +14010,7 @@ app.post(
 );
 
 // Fetch All Expenses — FILTER BY CURRENT USER ONLY
-app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${cacheKeySafe(req.session?.username || "")}:v1`), async (req, res) => {
+app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${cacheKeySafe(req.session?.username || "")}:v2`), async (req, res) => {
   try {
     // Get current user's Team Member relation PAGE ID
     const teamMemberPageId = await getCurrentUserRelationPage(req);
@@ -14046,21 +14047,111 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
     const cashInFromKey =
       pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
       "Cash in from";
+    const ordersKey =
+      pickPropName(expProps, ["📄 Orders", "Orders", "Order"]) ||
+      pickPropName(expProps, ["Orders", "Order"]) ||
+      null;
 
     // If Cash in from is a relation in Notion, resolve related page titles once.
     const cashInFromTitleMap = new Map();
     const cashInFromIds = new Set();
+    const linkedOrderRelationIds = new Set();
 
     for (const page of results) {
-      const p = page.properties?.[cashInFromKey];
-      if (p?.type === "relation") {
-        (p.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
+      const cashInProp = page.properties?.[cashInFromKey];
+      if (cashInProp?.type === "relation") {
+        (cashInProp.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
+      }
+
+      const ordersProp = ordersKey ? page.properties?.[ordersKey] : null;
+      if (ordersProp?.type === "relation") {
+        (ordersProp.relation || []).forEach((r) => r?.id && linkedOrderRelationIds.add(r.id));
       }
     }
 
     for (const id of cashInFromIds) {
       const t = await pageTitleById(id);
       cashInFromTitleMap.set(id, t);
+    }
+
+    const linkedOrderPageMap = new Map();
+    const linkedOrderProductIds = new Set();
+    const orderGroupPropName = linkedOrderRelationIds.size ? await detectOrderGroupIdPropName() : null;
+
+    if (linkedOrderRelationIds.size) {
+      await mapWithConcurrency(linkedOrderRelationIds, 3, async (pageId) => {
+        try {
+          const orderPage = await notion.pages.retrieve({ page_id: pageId });
+          if (!orderPage?.id) return null;
+          linkedOrderPageMap.set(pageId, orderPage);
+
+          const productPageId = Array.isArray(orderPage.properties?.Product?.relation)
+            ? orderPage.properties.Product.relation[0]?.id || null
+            : null;
+          if (productPageId) linkedOrderProductIds.add(productPageId);
+        } catch (orderErr) {
+          console.warn("Expense linked order retrieve failed:", pageId, orderErr?.body || orderErr?.message || orderErr);
+        }
+        return null;
+      });
+    }
+
+    const linkedOrderProductMap = await mapWithConcurrency(linkedOrderProductIds, 3, getProductInfoCached);
+    const linkedOrderMetaByPageId = new Map();
+
+    for (const [pageId, orderPage] of linkedOrderPageMap.entries()) {
+      const props = orderPage?.properties || {};
+      let orderIdText = "";
+      let groupKey = "";
+
+      if (orderGroupPropName) {
+        const groupValue = _extractPropNumber(props?.[orderGroupPropName]);
+        if (Number.isFinite(Number(groupValue))) {
+          orderIdText = `ORD-${Number(groupValue)}`;
+          groupKey = `group:${Number(groupValue)}`;
+        }
+      }
+
+      if (!orderIdText) {
+        for (const prop of Object.values(props || {})) {
+          if (prop?.type === "unique_id" && typeof prop?.unique_id?.number === "number") {
+            const prefix = prop.unique_id.prefix ? String(prop.unique_id.prefix).trim() : "";
+            orderIdText = prefix ? `${prefix}-${prop.unique_id.number}` : String(prop.unique_id.number);
+            groupKey = `uid:${orderIdText}`;
+            break;
+          }
+        }
+      }
+
+      if (!groupKey) groupKey = `page:${pageId}`;
+
+      const { orderType } = _extractOrderTypeInfo(props);
+      const productPageId = Array.isArray(props?.Product?.relation)
+        ? props.Product.relation[0]?.id || null
+        : null;
+      const productInfo = productPageId ? linkedOrderProductMap.get(productPageId) : null;
+      const statusProp = getPropLoose(props, "Status") || props?.Status || null;
+      const quantity =
+        _extractPropNumber(getPropLoose(props, "Quantity Progress")) ??
+        _extractPropNumber(getPropLoose(props, "Quantity Requested")) ??
+        0;
+      const label = [orderIdText, orderType].filter(Boolean).join(" - ") || orderIdText || "Order";
+
+      linkedOrderMetaByPageId.set(pageId, {
+        pageId,
+        key: groupKey,
+        orderId: orderIdText || "Order",
+        orderType: orderType || "",
+        label,
+        trackingGroupId: pageId,
+        trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+        item: {
+          pageId,
+          productName: String(productInfo?.name || "").trim() || "Order item",
+          quantity: Number(quantity) || 0,
+          status: statusProp?.select?.name || statusProp?.status?.name || "",
+        },
+      });
     }
 
     // Last settled time/date: find the most recent "Settled my account" record for this user.
@@ -14131,6 +14222,33 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
       const screenshotUrl = screenshots[0]?.url || "";
       const screenshotName = screenshots[0]?.name || "";
 
+      const linkedOrdersMap = new Map();
+      const linkedOrdersProp = ordersKey ? props?.[ordersKey] : null;
+      if (linkedOrdersProp?.type === "relation") {
+        for (const rel of linkedOrdersProp.relation || []) {
+          const meta = linkedOrderMetaByPageId.get(rel.id);
+          if (!meta) continue;
+
+          if (!linkedOrdersMap.has(meta.key)) {
+            linkedOrdersMap.set(meta.key, {
+              key: meta.key,
+              orderId: meta.orderId,
+              orderType: meta.orderType,
+              label: meta.label,
+              trackingGroupId: meta.trackingGroupId,
+              trackingUrl: meta.trackingUrl,
+              items: [],
+            });
+          }
+
+          const entry = linkedOrdersMap.get(meta.key);
+          const itemPageId = String(meta.item?.pageId || "").trim();
+          if (meta.item && itemPageId && !entry.items.some((row) => String(row?.pageId || "").trim() === itemPageId)) {
+            entry.items.push(meta.item);
+          }
+        }
+      }
+
       return {
         id: page.id,
         // Notion created_time is used by the UI to split "recent" vs "past" (relative to last settlement).
@@ -14144,6 +14262,7 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
         cashIn: props["Cash in"]?.number || 0,
         cashOut: props["Cash out"]?.number || 0,
         cashInFrom,
+        orders: Array.from(linkedOrdersMap.values()),
         screenshots,
         screenshotUrl,
         screenshotName,
