@@ -542,6 +542,7 @@
     }
 
     .ex-primary { background: #3b82f6; color: white; }
+    .ex-dark { background: #111111; color: white; }
     .ex-danger { background: #ef4444; color: white; }
 
     .section-date {
@@ -798,6 +799,9 @@
     background:#fff7ed;
     color:#9a3412;
     font-weight:600;
+  }
+  .cashout-manual-reason{
+    margin-top:0.95rem;
   }
   .order-select{
     position:relative;
@@ -1315,10 +1319,15 @@
 
     <div id="cashOutOrderEmpty" class="order-picker-empty" style="display:none;"></div>
 
+    <div id="cashOutManualReasonWrap" class="cashout-manual-reason" style="display:none;">
+      <label class="field-label"><i data-feather="edit-3"></i> Reason <span class="req-star">*</span></label>
+      <input id="cashOutManualReason" type="text" class="ex-input" placeholder="Write the reason manually"/>
+    </div>
+
     <label class="field-label"><i data-feather="calendar"></i> Date <span class="req-star">*</span></label>
     <input id="cashOutOrderDate" type="date" class="ex-input"/>
 
-    <button id="cashOutOrderAddExpenseBtn" class="ex-btn ex-primary ex-btn--block" type="button">Add Expense</button>
+    <button id="cashOutOrderAddExpenseBtn" class="ex-btn ex-dark ex-btn--block" type="button">Add Expense</button>
 
     <div id="cashOutPendingWrap" class="expense-drafts" style="display:none;">
       <div class="expense-drafts__header">
@@ -1390,7 +1399,7 @@
     </div>
 
     <div class="ex-modal-actions">
-      <button id="co_submit" class="ex-btn ex-primary">Add Expense</button>
+      <button id="co_submit" class="ex-btn ex-dark">Add Expense</button>
       <button class="ex-btn ex-danger" onclick="closeCashOutModal()">Back</button>
     </div>
 
