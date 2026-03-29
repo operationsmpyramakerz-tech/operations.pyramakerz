@@ -16,6 +16,7 @@ let SELECTED_EXPENSE_ORDER_REASON = "";
 let EXPENSE_ORDER_OPTIONS_LOADING = false;
 let PENDING_CASH_OUT_ITEMS = [];
 let CASH_OUT_DRAFT_SEQUENCE = 0;
+let LAST_EXPENSES_PAYLOAD = null;
 
 // Prevent duplicate submits
 let IS_CASHIN_SUBMITTING = false;
@@ -205,6 +206,93 @@ function renderReceiptImagesHtml(it) {
   `;
 }
 
+function buildExpenseAmountLeadingHtml(item) {
+  const shots = getReceiptImages(item);
+  const hasShots = shots.length > 0;
+  const amountLabel = formatExpenseAmountLabel(item);
+  const isOwnCar = String(item?.fundsType || "").trim() === "Own car" && !Number(item?.cashOut || 0);
+  const iconName = isOwnCar ? "truck" : (Number(item?.cashIn || 0) > 0 ? "arrow-down-circle" : "dollar-sign");
+
+  if (hasShots) {
+    const shot = shots[0] || {};
+    const shotUrl = escapeHtml(String(shot?.url || "").trim());
+    const shotName = escapeHtml(String(shot?.name || "Receipt").trim() || "Receipt");
+    const moreCount = shots.length > 1
+      ? `<span class="expense-ticket__amount-thumb-count">+${shots.length - 1}</span>`
+      : "";
+
+    return `
+      <span class="expense-ticket__amount-media expense-ticket__amount-media--thumb">
+        <span class="expense-ticket__amount-thumb-wrap">
+          <img class="expense-ticket__amount-thumb" src="${shotUrl}" alt="${shotName}" />
+          ${moreCount}
+        </span>
+        <span class="expense-ticket__amount-text">${escapeHtml(amountLabel)}</span>
+      </span>
+    `;
+  }
+
+  return `
+    <span class="expense-ticket__amount-media">
+      <span class="expense-ticket__amount-icon" aria-hidden="true">${featherIconMarkup(iconName, { width: 15, height: 15 })}</span>
+      <span class="expense-ticket__amount-text">${escapeHtml(amountLabel)}</span>
+    </span>
+  `;
+}
+
+function normalizeExpensesResponse(data) {
+  const payload = data && typeof data === "object" ? data : {};
+  return {
+    success: !!payload.success,
+    items: Array.isArray(payload.items) ? payload.items : [],
+    lastSettledAt: payload.lastSettledAt || null,
+    lastSettledDate: payload.lastSettledDate || null,
+    error: payload.error || "Cannot load expenses",
+  };
+}
+
+async function fetchExpensesPayloadWithRetry({ retries = 1, retryDelayMs = 250 } = {}) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const res = await fetch("/api/expenses", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+
+      const rawText = await res.text();
+      let parsed = {};
+      if (rawText) {
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          throw new Error("Invalid server response while loading expenses.");
+        }
+      }
+
+      const payload = normalizeExpensesResponse(parsed);
+      if (!res.ok || !payload.success) {
+        throw new Error(payload.error || `Request failed with status ${res.status}`);
+      }
+
+      LAST_EXPENSES_PAYLOAD = payload;
+      return payload;
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries) {
+        await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs));
+      }
+    }
+  }
+
+  if (LAST_EXPENSES_PAYLOAD?.success) {
+    return { ...LAST_EXPENSES_PAYLOAD, stale: true };
+  }
+
+  throw lastError || new Error("Cannot load expenses");
+}
+
 function formatLastSettledAt(iso) {
   const raw = String(iso || "").trim();
   if (!raw) return "—";
@@ -219,6 +307,97 @@ function formatLastSettledAt(iso) {
   });
 }
 
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function fetchExpensesPayload({ attempts = 2, retryDelayMs = 350 } = {}) {
+  const totalAttempts = Math.max(1, Number(attempts) || 1);
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+    try {
+      const query = attempt > 1 ? `?_=${Date.now()}-${attempt}` : "";
+      const res = await fetch(`/api/expenses${query}`, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const raw = await res.text();
+      let data = null;
+
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(`Invalid expenses response (${res.status})`);
+      }
+
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `Cannot load expenses (${res.status})`);
+      }
+
+      LAST_GOOD_EXPENSES_PAYLOAD = data;
+      return data;
+    } catch (err) {
+      lastError = err;
+      if (attempt < totalAttempts) {
+        await delay(retryDelayMs * attempt);
+      }
+    }
+  }
+
+  throw lastError || new Error("Cannot load expenses");
+}
+
+function renderExpensesLoadError(container, {
+  title = "Couldn't load expenses right now.",
+  retryLabel = "Retry",
+  retryAction = "loadExpenses()",
+} = {}) {
+  if (!container) return;
+  container.innerHTML = `
+    <div class="expenses-empty expenses-empty--error">
+      <div class="expenses-empty__title">${escapeHtml(title)}</div>
+      <button type="button" class="expenses-empty__retry" onclick="${escapeHtml(retryAction)}">${escapeHtml(retryLabel)}</button>
+    </div>
+  `;
+}
+
+function renderExpensesMainContentFromPayload(data) {
+  const container = document.getElementById("expensesContent");
+  const totalBox = document.getElementById("totalAmount");
+  if (!container || !totalBox) return;
+
+  const lastSettledEl = document.getElementById("lastSettledTime");
+  if (lastSettledEl) {
+    const ts = formatLastSettledAt(data?.lastSettledAt);
+    lastSettledEl.textContent = `Last settled time: ${ts}`;
+  }
+
+  const items = Array.isArray(data?.items) ? data.items : [];
+
+  let total = 0;
+  items.forEach((it) => {
+    if (it?.cashIn) total += Number(it.cashIn) || 0;
+    if (it?.cashOut) total -= Number(it.cashOut) || 0;
+  });
+  totalBox.textContent = `£${total.toLocaleString("en-GB")}`;
+
+  const now = new Date();
+  const oneWeekAgo = new Date(now);
+  oneWeekAgo.setDate(now.getDate() - 7);
+
+  const weeklyItems = items.filter((it) => {
+    const rawDate = String(it?.date || "").trim();
+    if (!rawDate) return false;
+    const date = new Date(`${rawDate}T00:00:00`);
+    return Number.isFinite(date.getTime()) && date >= oneWeekAgo;
+  });
+
+  container.innerHTML = buildExpensesTicketsHtml(weeklyItems, {
+    emptyMessage: "No expenses for this week.",
+  });
+}
+
 // ------------------------
 // View All (Bottom sheet): split by last settlement
 // ------------------------
@@ -227,6 +406,7 @@ let VIEW_ALL_SHOW_PAST = false;
 let VIEW_ALL_RECENT_ITEMS = [];
 let VIEW_ALL_PAST_ITEMS = [];
 let VIEW_ALL_LAST_SETTLED_AT = null;
+let LAST_GOOD_EXPENSES_PAYLOAD = null;
 
 function normalizeFundsType(s) {
   return String(s || "").trim().toLowerCase();
@@ -343,51 +523,57 @@ function buildGroupedExpenseCollections(items) {
   const source = Array.isArray(items) ? items : [];
 
   for (const item of source) {
-    const reason = getExpenseDisplayReason(item);
-    const date = String(item?.date || "").trim();
-    const key = `${date}__${normalizeExpenseGroupText(reason)}`;
+    if (!item || typeof item !== "object") continue;
 
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        key,
-        date,
-        reason: reason || "No reason",
-        items: [],
-        ordersMap: new Map(),
-        screenshots: [],
-        screenshotsSeen: new Set(),
-        createdSort: getExpenseTimeValue(item),
-        totalCashIn: 0,
-        totalCashOut: 0,
-        totalKilometer: 0,
-      });
-    }
+    try {
+      const reason = getExpenseDisplayReason(item);
+      const date = String(item?.date || "").trim();
+      const key = `${date}__${normalizeExpenseGroupText(reason)}`;
 
-    const group = grouped.get(key);
-    group.items.push(item);
-    group.totalCashIn += Number(item?.cashIn || 0);
-    group.totalCashOut += Number(item?.cashOut || 0);
-    group.totalKilometer += Number(item?.kilometer || 0);
-    group.createdSort = Math.max(group.createdSort, getExpenseTimeValue(item));
-
-    for (const order of getExpenseOrdersArray(item)) {
-      const orderKey = String(order?.key || order?.trackingGroupId || order?.label || order?.orderId || "").trim();
-      if (!orderKey) continue;
-      if (!group.ordersMap.has(orderKey)) {
-        group.ordersMap.set(orderKey, order);
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          key,
+          date,
+          reason: reason || "No reason",
+          items: [],
+          ordersMap: new Map(),
+          screenshots: [],
+          screenshotsSeen: new Set(),
+          createdSort: getExpenseTimeValue(item),
+          totalCashIn: 0,
+          totalCashOut: 0,
+          totalKilometer: 0,
+        });
       }
-    }
 
-    for (const shot of getReceiptImages(item)) {
-      const shotUrl = String(shot?.url || "").trim();
-      if (!shotUrl) continue;
-      const shotKey = `${String(shot?.name || "").trim()}__${shotUrl}`;
-      if (group.screenshotsSeen.has(shotKey)) continue;
-      group.screenshotsSeen.add(shotKey);
-      group.screenshots.push({
-        name: String(shot?.name || "").trim() || "Receipt",
-        url: shotUrl,
-      });
+      const group = grouped.get(key);
+      group.items.push(item);
+      group.totalCashIn += Number(item?.cashIn || 0);
+      group.totalCashOut += Number(item?.cashOut || 0);
+      group.totalKilometer += Number(item?.kilometer || 0);
+      group.createdSort = Math.max(group.createdSort, getExpenseTimeValue(item));
+
+      for (const order of getExpenseOrdersArray(item)) {
+        const orderKey = String(order?.key || order?.trackingGroupId || order?.label || order?.orderId || "").trim();
+        if (!orderKey) continue;
+        if (!group.ordersMap.has(orderKey)) {
+          group.ordersMap.set(orderKey, order);
+        }
+      }
+
+      for (const shot of getReceiptImages(item)) {
+        const shotUrl = String(shot?.url || "").trim();
+        if (!shotUrl) continue;
+        const shotKey = `${String(shot?.name || "").trim()}__${shotUrl}`;
+        if (group.screenshotsSeen.has(shotKey)) continue;
+        group.screenshotsSeen.add(shotKey);
+        group.screenshots.push({
+          name: String(shot?.name || "").trim() || "Receipt",
+          url: shotUrl,
+        });
+      }
+    } catch (err) {
+      console.warn("Skipping malformed expense row while grouping:", err, item);
     }
   }
 
@@ -476,32 +662,73 @@ function buildExpenseOrderActionHtml(order) {
   `;
 }
 
-function buildExpenseTicketRowHtml(item) {
-  const endpoints = getExpenseRouteEndpoints(item);
-  const typeLabel = getExpenseRowTypeLabel(item);
+function buildExpenseChargeHtml(item) {
   const amountLabel = formatExpenseAmountLabel(item);
-  const screenshotsCount = getReceiptImages(item).length;
-  const rightSubLabel = screenshotsCount > 0
-    ? `${screenshotsCount} screenshot${screenshotsCount === 1 ? "" : "s"}`
-    : (Number(item?.cashIn || 0) > 0 ? "Cash in" : "Cash out");
-  const typeClass = Number(item?.cashIn || 0) > 0 ? " expense-ticket__track-pill--in" : "";
+  const isCashIn = Number(item?.cashIn || 0) > 0;
+  const shots = getReceiptImages(item);
+  const leadShot = shots[0] || null;
+  const fundsType = String(item?.fundsType || "").trim();
+  const isKmOnly = fundsType === "Own car" && Number(item?.kilometer || 0) > 0 && !(Number(item?.cashOut || 0) > 0);
+  const iconName = isKmOnly ? "navigation" : (isCashIn ? "arrow-down-left" : "dollar-sign");
+
+  let mediaHtml = '';
+  if (leadShot?.url) {
+    mediaHtml = `
+      <a
+        class="expense-ticket__charge-media expense-ticket__charge-media--shot"
+        href="${escapeHtml(leadShot.url)}"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Open screenshot"
+      >
+        <img src="${escapeHtml(leadShot.url)}" alt="${escapeHtml(leadShot.name || 'Receipt')}" />
+      </a>
+    `;
+  } else {
+    mediaHtml = `
+      <span class="expense-ticket__charge-media${isCashIn ? ' expense-ticket__charge-media--in' : ''}" aria-hidden="true">
+        ${featherIconMarkup(iconName, { width: 14, height: 14 })}
+      </span>
+    `;
+  }
 
   return `
-    <div class="expense-ticket__route">
-      <div class="expense-ticket__point">
-        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</div>
-        <div class="expense-ticket__point-sub">${escapeHtml(amountLabel)}</div>
-      </div>
-      <div class="expense-ticket__track">
-        <span class="expense-ticket__track-line"></span>
-        <span class="expense-ticket__track-pill${typeClass}">${escapeHtml(typeLabel)}</span>
-      </div>
-      <div class="expense-ticket__point expense-ticket__point--right">
-        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</div>
-        <div class="expense-ticket__point-sub">${escapeHtml(rightSubLabel)}</div>
-      </div>
+    <div class="expense-ticket__charge${isCashIn ? ' expense-ticket__charge--in' : ''}">
+      ${mediaHtml}
+      <span class="expense-ticket__charge-amount">${escapeHtml(amountLabel)}</span>
     </div>
   `;
+}
+
+function buildExpenseTicketRowHtml(item) {
+  try {
+    const endpoints = getExpenseRouteEndpoints(item);
+    const typeLabel = getExpenseRowTypeLabel(item);
+    const typeClass = Number(item?.cashIn || 0) > 0 ? " expense-ticket__track-pill--in" : "";
+
+    return `
+      <div class="expense-ticket__route">
+        <div class="expense-ticket__route-header">
+          ${buildExpenseChargeHtml(item)}
+        </div>
+        <div class="expense-ticket__route-body">
+          <div class="expense-ticket__point">
+            <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</div>
+          </div>
+          <div class="expense-ticket__track">
+            <span class="expense-ticket__track-line" aria-hidden="true"></span>
+            <span class="expense-ticket__track-pill${typeClass}" title="${escapeHtml(typeLabel)}">${escapeHtml(typeLabel)}</span>
+          </div>
+          <div class="expense-ticket__point expense-ticket__point--right">
+            <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    console.warn("Failed to render expense route row:", err, item);
+    return '';
+  }
 }
 
 function buildExpenseTicketHtml(group, { compact = false } = {}) {
@@ -539,11 +766,32 @@ function buildExpenseTicketHtml(group, { compact = false } = {}) {
 }
 
 function buildExpensesTicketsHtml(items, { emptyMessage = "No expenses yet.", compact = false } = {}) {
-  const groups = buildGroupedExpenseCollections(items);
+  let groups = [];
+
+  try {
+    groups = buildGroupedExpenseCollections(items);
+  } catch (err) {
+    console.error("Failed to build grouped expenses:", err, items);
+    groups = [];
+  }
+
   if (!groups.length) {
     return `<div class="expenses-empty">${escapeHtml(emptyMessage)}</div>`;
   }
-  return groups.map((group) => buildExpenseTicketHtml(group, { compact })).join("");
+
+  const html = groups
+    .map((group) => {
+      try {
+        return buildExpenseTicketHtml(group, { compact });
+      } catch (err) {
+        console.warn("Skipping malformed expense group while rendering:", err, group);
+        return "";
+      }
+    })
+    .filter(Boolean)
+    .join("");
+
+  return html || `<div class="expenses-empty">${escapeHtml(emptyMessage)}</div>`;
 }
 
 function renderAllExpensesModalList(listEl) {
@@ -1802,59 +2050,28 @@ async function submitSettleAccount() {
 
 async function loadExpenses() {
     const container = document.getElementById("expensesContent");
-    const totalBox = document.getElementById("totalAmount");
 
     if (container) {
       container.innerHTML = `<div class="loader" role="status" aria-label="Loading"></div>`;
     }
 
     try {
-        const res = await fetch("/api/expenses");
-        const data = await res.json();
-
-        if (!data.success) {
-            container.innerHTML = "<p>Error loading data</p>";
-            return;
-        }
-
-        // Last settled time (under the "Settled my account" button)
-        const lastSettledEl = document.getElementById("lastSettledTime");
-        if (lastSettledEl) {
-            const ts = formatLastSettledAt(data.lastSettledAt);
-            lastSettledEl.textContent = `Last settled time: ${ts}`;
-        }
-
-        const items = Array.isArray(data.items) ? data.items : [];
-
-        // ============================
-        // TOTAL
-        // ============================
-        let total = 0;
-        items.forEach((it) => {
-            if (it.cashIn) total += Number(it.cashIn) || 0;
-            if (it.cashOut) total -= Number(it.cashOut) || 0;
-        });
-        totalBox.innerHTML = `£${total.toLocaleString()}`;
-
-        // ============================
-        // FILTER — LAST 7 DAYS ONLY
-        // ============================
-        const now = new Date();
-        const oneWeekAgo = new Date();
-        oneWeekAgo.setDate(now.getDate() - 7);
-
-        const weeklyItems = items.filter((it) => {
-            const date = new Date(it.date);
-            return date >= oneWeekAgo;
-        });
-
-        container.innerHTML = buildExpensesTicketsHtml(weeklyItems, {
-          emptyMessage: "No expenses for this week.",
-        });
-
+        const data = await fetchExpensesPayload({ attempts: 3 });
+        renderExpensesMainContentFromPayload(data);
     } catch (err) {
         console.error("Load expenses error:", err);
-        container.innerHTML = "<p>Error loading data</p>";
+
+        if (LAST_GOOD_EXPENSES_PAYLOAD?.items) {
+          renderExpensesMainContentFromPayload(LAST_GOOD_EXPENSES_PAYLOAD);
+          showToast("Couldn't refresh expenses. Showing the last loaded data.", "info", { duration: 3200 });
+          return;
+        }
+
+        renderExpensesLoadError(container, {
+          title: "Couldn't load expenses.",
+          retryLabel: "Retry",
+          retryAction: "loadExpenses()",
+        });
     }
 }
 /* =============================
@@ -2048,9 +2265,48 @@ function fileToDataURL(file) {
   });
 }
 
+async function loadAllExpensesModalContent(list) {
+    if (!list) return;
+
+    list.innerHTML = `<div class="loader" role="status" aria-label="Loading"></div>`;
+
+    try {
+      const data = await fetchExpensesPayload({ attempts: 2 });
+      const items = Array.isArray(data?.items) ? data.items : [];
+      VIEW_ALL_LAST_SETTLED_AT = data?.lastSettledAt || null;
+
+      const split = splitExpensesByLastSettlement(items, VIEW_ALL_LAST_SETTLED_AT);
+      VIEW_ALL_RECENT_ITEMS = split.recent;
+      VIEW_ALL_PAST_ITEMS = split.past;
+
+      renderAllExpensesModalList(list);
+    } catch (err) {
+      console.error("Error loading all expenses:", err);
+
+      if (LAST_GOOD_EXPENSES_PAYLOAD?.items) {
+        const items = Array.isArray(LAST_GOOD_EXPENSES_PAYLOAD.items) ? LAST_GOOD_EXPENSES_PAYLOAD.items : [];
+        VIEW_ALL_LAST_SETTLED_AT = LAST_GOOD_EXPENSES_PAYLOAD.lastSettledAt || null;
+
+        const split = splitExpensesByLastSettlement(items, VIEW_ALL_LAST_SETTLED_AT);
+        VIEW_ALL_RECENT_ITEMS = split.recent;
+        VIEW_ALL_PAST_ITEMS = split.past;
+
+        renderAllExpensesModalList(list);
+        showToast("Couldn't refresh expenses. Showing the last loaded data.", "info", { duration: 3200 });
+        return;
+      }
+
+      renderExpensesLoadError(list, {
+        title: "Couldn't load expenses.",
+        retryLabel: "Retry",
+        retryAction: "openAllExpensesModal()",
+      });
+    }
+}
+
 // OPEN iOS Bottom Sheet
 function openAllExpensesModal() {
-    const modal = document.getElementById("allExpenses");   // <-- كان allExpensesModal
+    const modal = document.getElementById("allExpenses");
     const sheet = document.getElementById("iosSheet");
     const list  = document.getElementById("allExpensesList");
 
@@ -2064,37 +2320,12 @@ function openAllExpensesModal() {
         sheet.style.transform = "translateY(0)";
     }, 10);
 
-    if (list) {
-      list.innerHTML = `<div class="loader" role="status" aria-label="Loading"></div>`;
-    }
-
-    // Reset toggle each time we open
     VIEW_ALL_SHOW_PAST = false;
     VIEW_ALL_RECENT_ITEMS = [];
     VIEW_ALL_PAST_ITEMS = [];
     VIEW_ALL_LAST_SETTLED_AT = null;
 
-    fetch("/api/expenses")
-      .then(res => res.json())
-      .then(data => {
-        if (!data?.success) {
-          if (list) list.innerHTML = "<p>Error loading expenses</p>";
-          return;
-        }
-
-        const items = Array.isArray(data.items) ? data.items : [];
-        VIEW_ALL_LAST_SETTLED_AT = data.lastSettledAt || null;
-
-        const split = splitExpensesByLastSettlement(items, VIEW_ALL_LAST_SETTLED_AT);
-        VIEW_ALL_RECENT_ITEMS = split.recent;
-        VIEW_ALL_PAST_ITEMS = split.past;
-
-        renderAllExpensesModalList(list);
-      })
-      .catch(err => {
-        console.error("Error loading all expenses:", err);
-        if (list) list.innerHTML = "<p>Error loading expenses</p>";
-      });
+    loadAllExpensesModalContent(list);
 }
 
 // CLOSE
