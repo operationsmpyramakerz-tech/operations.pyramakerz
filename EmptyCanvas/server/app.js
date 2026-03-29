@@ -13486,7 +13486,7 @@ app.get(
   cachedJsonRoute(60, async (req) => {
     const userId = await getSessionUserNotionId(req);
     return userId
-      ? `cache:api:expenses:orders-options:${normalizeNotionId(userId)}:v1`
+      ? `cache:api:expenses:orders-options:${normalizeNotionId(userId)}:v2`
       : "";
   }),
   async (req, res) => {
@@ -13504,7 +13504,7 @@ app.get(
       const orderGroupPropName = await detectOrderGroupIdPropName();
       const titlePropName = firstTitlePropName(orderProps) || null;
 
-      const rows = [];
+      const groupedRows = new Map();
       const productIds = new Set();
       let hasMore = true;
       let cursor = undefined;
@@ -13526,10 +13526,12 @@ app.get(
           if (productPageId) productIds.add(productPageId);
 
           let orderIdText = "";
+          let groupKey = "";
           if (orderGroupPropName) {
             const groupValue = _extractPropNumber(props?.[orderGroupPropName]);
             if (Number.isFinite(Number(groupValue))) {
               orderIdText = `ORD-${Number(groupValue)}`;
+              groupKey = `group:${Number(groupValue)}`;
             }
           }
           if (!orderIdText) {
@@ -13537,24 +13539,34 @@ app.get(
               if (prop?.type === "unique_id" && typeof prop?.unique_id?.number === "number") {
                 const prefix = prop.unique_id.prefix ? String(prop.unique_id.prefix).trim() : "";
                 orderIdText = prefix ? `${prefix}-${prop.unique_id.number}` : String(prop.unique_id.number);
+                groupKey = `uid:${orderIdText}`;
                 break;
               }
             }
           }
+          if (!groupKey) groupKey = `page:${page.id}`;
 
-          const statusProp = props?.Status;
-          const status = statusProp?.select?.name || statusProp?.status?.name || "";
           const { orderType } = _extractOrderTypeInfo(props);
           const titleText = titlePropName ? String(_extractPropText(props?.[titlePropName]) || "").trim() : "";
+          const existing = groupedRows.get(groupKey);
 
-          rows.push({
-            id: page.id,
+          if (existing) {
+            existing.relationIds.push(page.id);
+            if (!existing.orderId && orderIdText) existing.orderId = orderIdText;
+            if (!existing.orderType && orderType) existing.orderType = orderType || "";
+            if (!existing.productPageId && productPageId) existing.productPageId = productPageId;
+            if (!existing.titleText && titleText) existing.titleText = titleText;
+            continue;
+          }
+
+          groupedRows.set(groupKey, {
+            id: groupKey,
             orderId: orderIdText,
             productPageId,
-            status,
             orderType: orderType || "",
             titleText,
             createdTime: page.created_time,
+            relationIds: [page.id],
           });
         }
 
@@ -13563,22 +13575,25 @@ app.get(
       }
 
       const productMap = await mapWithConcurrency(productIds, 3, getProductInfoCached);
-      const options = rows.map((row) => {
-        const productInfo = row.productPageId ? productMap.get(row.productPageId) : null;
-        const productName = String(productInfo?.name || row.titleText || "").trim();
-        const labelParts = [row.orderId, productName, row.orderType, row.status].filter(Boolean);
-        const label = labelParts.join(" • ") || row.orderId || productName || "Untitled order";
+      const options = Array.from(groupedRows.values())
+        .map((row) => {
+          const productInfo = row.productPageId ? productMap.get(row.productPageId) : null;
+          const productName = String(productInfo?.name || row.titleText || "").trim();
+          const orderId = row.orderId || "Order";
+          const orderType = row.orderType || "Order";
+          const label = [orderId, orderType].filter(Boolean).join(" - ") || "Order";
 
-        return {
-          id: row.id,
-          label,
-          orderId: row.orderId || null,
-          productName: productName || null,
-          orderType: row.orderType || null,
-          status: row.status || null,
-          createdTime: row.createdTime,
-        };
-      });
+          return {
+            id: row.id,
+            label,
+            orderId: orderId || null,
+            productName: productName || null,
+            orderType: row.orderType || null,
+            createdTime: row.createdTime,
+            relationIds: Array.from(new Set((row.relationIds || []).filter(Boolean))),
+          };
+        })
+        .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
 
       return res.json({ success: true, options });
     } catch (err) {
@@ -13595,6 +13610,10 @@ app.get(
 app.post("/api/expenses/cash-out", async (req, res) => {
   const {
     orderId,
+    orderIds,
+    orderLabel,
+    orderType,
+    orderDisplayId,
     fundsType,
     reason,
     date,
@@ -13612,12 +13631,19 @@ app.post("/api/expenses/cash-out", async (req, res) => {
   try {
     const teamMemberPageId = await getCurrentUserRelationPage(req);
 
-    if (!fundsType || !reason || !date) {
+    if (!fundsType || !date) {
       return res.status(400).json({
         success: false,
         error: "Missing required fields"
       });
     }
+
+    const autoReason = String(reason || "").trim() || [
+      String(orderLabel || "").trim(),
+      String(orderDisplayId || "").trim() && !String(orderLabel || "").trim() ? String(orderDisplayId || "").trim() : "",
+      String(orderType || "").trim() && !String(orderLabel || "").trim() ? String(orderType || "").trim() : "",
+      String(fundsType || "").trim(),
+    ].filter(Boolean).join(" • ") || "Cash out";
 
     const props = {
       "Team Member": {
@@ -13628,9 +13654,9 @@ app.post("/api/expenses/cash-out", async (req, res) => {
         select: { name: fundsType }
       },
 
-      // 🔥 FIXED HERE — Reason must be title
+      // Auto-generated title for the expense page
       "Reason": {
-        title: [{ text: { content: reason }}]
+        title: [{ text: { content: autoReason } }]
       },
 
       "Date": {
@@ -13650,8 +13676,19 @@ app.post("/api/expenses/cash-out", async (req, res) => {
       }
     };
 
-    const selectedOrderId = String(orderId || "").trim();
-    if (selectedOrderId) {
+    const selectedOrderIds = Array.isArray(orderIds)
+      ? orderIds
+      : (looksLikeNotionId(orderId) ? [orderId] : []);
+    const normalizedOrderIds = Array.from(
+      new Set(
+        selectedOrderIds
+          .map((id) => String(id || "").trim())
+          .filter(Boolean)
+          .map((id) => (looksLikeNotionId(id) ? toHyphenatedUUID(id) : id)),
+      ),
+    );
+
+    if (normalizedOrderIds.length) {
       let expProps = await getExpensesDBProps();
       let ordersPropName = pickPropName(expProps, ["Orders", "Order"]);
       let ordersProp = ordersPropName ? expProps?.[ordersPropName] : null;
@@ -13676,12 +13713,8 @@ app.post("/api/expenses/cash-out", async (req, res) => {
         });
       }
 
-      const normalizedOrderId = looksLikeNotionId(selectedOrderId)
-        ? toHyphenatedUUID(selectedOrderId)
-        : selectedOrderId;
-
       props[ordersPropName] = {
-        relation: [{ id: normalizedOrderId }],
+        relation: normalizedOrderIds.map((id) => ({ id })),
       };
     }
 
