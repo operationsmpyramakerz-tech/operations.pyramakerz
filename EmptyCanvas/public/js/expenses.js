@@ -5,6 +5,11 @@
 let FUNDS_TYPES = [];
 
 let CASH_IN_FROM_OPTIONS = [];
+let EXPENSE_ORDER_OPTIONS = [];
+let EXPENSE_ORDER_OPTIONS_LOADED = false;
+let EXPENSE_ORDER_OPTIONS_REQUEST = null;
+let SELECTED_EXPENSE_ORDER_ID = "";
+let SELECTED_EXPENSE_ORDER_LABEL = "";
 
 // Prevent duplicate submits
 let IS_CASHIN_SUBMITTING = false;
@@ -27,7 +32,8 @@ function hideSubmitLoader() {
     overlay.style.display = "none";
     overlay.setAttribute("aria-hidden", "true");
   }
-
+  document.body.classList.remove("is-loading");
+}
 
 /* =============================
    MODERN TOAST (errors / info)
@@ -78,9 +84,6 @@ function showToast(message, type = "error", { duration = 4000 } = {}) {
   if (duration && duration > 0) {
     window.setTimeout(remove, duration);
   }
-}
-
-  document.body.classList.remove("is-loading");
 }
 
 /* =============================
@@ -462,6 +465,169 @@ function setupCashInFromSearchableSelect() {
 }
 
 /* =============================
+   EXPENSE ORDER PICKER
+   ============================= */
+function syncSelectedExpenseOrderUI() {
+  const selectEl = document.getElementById("cashOutOrderSelect");
+  const nextBtn = document.getElementById("cashOutOrderNextBtn");
+  const previewCard = document.getElementById("cashOutOrderPreview");
+  const previewText = document.getElementById("cashOutOrderPreviewText");
+  const selectedCard = document.getElementById("cashOutSelectedOrderCard");
+  const selectedText = document.getElementById("cashOutSelectedOrderText");
+  const hasSelection = !!String(SELECTED_EXPENSE_ORDER_ID || "").trim();
+  const label = String(SELECTED_EXPENSE_ORDER_LABEL || "").trim();
+
+  if (selectEl) {
+    const hasOption = Array.from(selectEl.options || []).some((opt) => String(opt.value || "") === SELECTED_EXPENSE_ORDER_ID);
+    selectEl.value = hasSelection && hasOption ? SELECTED_EXPENSE_ORDER_ID : "";
+  }
+
+  if (nextBtn) nextBtn.disabled = !hasSelection || !EXPENSE_ORDER_OPTIONS.length;
+  if (previewText) previewText.textContent = label;
+  if (previewCard) previewCard.style.display = label ? "block" : "none";
+  if (selectedText) selectedText.textContent = label;
+  if (selectedCard) selectedCard.style.display = label ? "block" : "none";
+}
+
+function setSelectedExpenseOrder(orderId, label = "") {
+  SELECTED_EXPENSE_ORDER_ID = String(orderId || "").trim();
+
+  if (!SELECTED_EXPENSE_ORDER_ID) {
+    SELECTED_EXPENSE_ORDER_LABEL = "";
+    syncSelectedExpenseOrderUI();
+    return;
+  }
+
+  const matched = EXPENSE_ORDER_OPTIONS.find(
+    (item) => String(item?.id || "") === SELECTED_EXPENSE_ORDER_ID,
+  );
+
+  SELECTED_EXPENSE_ORDER_LABEL = String(
+    label || matched?.label || matched?.productName || matched?.orderId || "",
+  ).trim();
+
+  syncSelectedExpenseOrderUI();
+}
+
+function populateExpenseOrderSelect() {
+  const selectEl = document.getElementById("cashOutOrderSelect");
+  const emptyEl = document.getElementById("cashOutOrderEmpty");
+  const nextBtn = document.getElementById("cashOutOrderNextBtn");
+  if (!selectEl) return;
+
+  selectEl.innerHTML = `<option value="">Select order...</option>`;
+
+  for (const item of EXPENSE_ORDER_OPTIONS) {
+    if (!item?.id) continue;
+    const opt = document.createElement("option");
+    opt.value = String(item.id || "");
+    opt.textContent = String(item.label || item.productName || item.orderId || "Untitled order");
+    selectEl.appendChild(opt);
+  }
+
+  const hasOptions = EXPENSE_ORDER_OPTIONS.length > 0;
+  selectEl.disabled = !hasOptions;
+
+  if (emptyEl) {
+    emptyEl.textContent = hasOptions ? "" : "No orders available right now.";
+    emptyEl.style.display = hasOptions ? "none" : "block";
+  }
+
+  if (nextBtn) nextBtn.disabled = !hasOptions;
+
+  syncSelectedExpenseOrderUI();
+}
+
+async function loadExpenseOrderOptions({ force = false } = {}) {
+  const selectEl = document.getElementById("cashOutOrderSelect");
+  const emptyEl = document.getElementById("cashOutOrderEmpty");
+  const nextBtn = document.getElementById("cashOutOrderNextBtn");
+
+  if (!force && EXPENSE_ORDER_OPTIONS_LOADED) {
+    populateExpenseOrderSelect();
+    return EXPENSE_ORDER_OPTIONS;
+  }
+
+  if (!force && EXPENSE_ORDER_OPTIONS_REQUEST) {
+    return EXPENSE_ORDER_OPTIONS_REQUEST;
+  }
+
+  if (selectEl) {
+    selectEl.disabled = true;
+    selectEl.innerHTML = `<option value="">Loading orders...</option>`;
+  }
+  if (emptyEl) {
+    emptyEl.textContent = "";
+    emptyEl.style.display = "none";
+  }
+  if (nextBtn) nextBtn.disabled = true;
+
+  EXPENSE_ORDER_OPTIONS_REQUEST = (async () => {
+    try {
+      const res = await fetch("/api/expenses/orders/options", {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "Failed to load orders.");
+      }
+
+      EXPENSE_ORDER_OPTIONS = Array.isArray(data.options) ? data.options : [];
+      EXPENSE_ORDER_OPTIONS_LOADED = true;
+      populateExpenseOrderSelect();
+      return EXPENSE_ORDER_OPTIONS;
+    } catch (err) {
+      console.error("Expense orders load error:", err);
+      EXPENSE_ORDER_OPTIONS = [];
+      EXPENSE_ORDER_OPTIONS_LOADED = true;
+      populateExpenseOrderSelect();
+      if (emptyEl) {
+        emptyEl.textContent = "Could not load orders right now.";
+        emptyEl.style.display = "block";
+      }
+      showToast("Failed to load orders.", "error");
+      return [];
+    } finally {
+      EXPENSE_ORDER_OPTIONS_REQUEST = null;
+    }
+  })();
+
+  return EXPENSE_ORDER_OPTIONS_REQUEST;
+}
+
+async function openCashOutOrderModal({ resetSelection = true, forceReload = true } = {}) {
+  if (resetSelection) setSelectedExpenseOrder("", "");
+  await loadExpenseOrderOptions({ force: forceReload });
+  syncSelectedExpenseOrderUI();
+
+  const modal = document.getElementById("cashOutOrderModal");
+  if (modal) modal.style.display = "flex";
+}
+
+function closeCashOutOrderModal() {
+  const modal = document.getElementById("cashOutOrderModal");
+  if (modal) modal.style.display = "none";
+}
+
+function proceedToCashOutDetails() {
+  const selectEl = document.getElementById("cashOutOrderSelect");
+  const orderId = String(selectEl?.value || "").trim();
+  const selected = EXPENSE_ORDER_OPTIONS.find(
+    (item) => String(item?.id || "") === orderId,
+  );
+
+  if (!orderId || !selected) {
+    showToast("Please select an order first.", "error");
+    return;
+  }
+
+  setSelectedExpenseOrder(orderId, selected.label || "");
+  closeCashOutOrderModal();
+  openCashOutModal();
+}
+
+/* =============================
    OPEN / CLOSE MODALS
    ============================= */
 function openCashInModal() {
@@ -487,6 +653,12 @@ function closeCashInModal() {
 }
 
 function openCashOutModal() {
+    if (!String(SELECTED_EXPENSE_ORDER_ID || "").trim()) {
+      showToast("Please select an order first.", "error");
+      openCashOutOrderModal({ resetSelection: false, forceReload: false });
+      return;
+    }
+
     const d   = document.getElementById("co_date");
     const r   = document.getElementById("co_reason");
     const f   = document.getElementById("co_from");
@@ -507,6 +679,8 @@ function openCashOutModal() {
     const cashBlock = document.getElementById("co_cash_block");
     if (kmBlock)   kmBlock.style.display   = "none";
     if (cashBlock) cashBlock.style.display = "block";
+
+    syncSelectedExpenseOrderUI();
 
     const modal = document.getElementById("cashOutModal");
     if (modal) modal.style.display = "flex";
@@ -586,11 +760,17 @@ async function submitCashIn() {
 async function submitCashOut() {
   if (IS_CASHOUT_SUBMITTING) return;
 
+  const selectedOrderId = String(SELECTED_EXPENSE_ORDER_ID || "").trim();
   const type   = String(document.getElementById("co_type")?.value || "").trim();
   const reason = String(document.getElementById("co_reason")?.value || "").trim();
   const date   = String(document.getElementById("co_date")?.value || "").trim();
   const from   = String(document.getElementById("co_from")?.value || "").trim();
   const to     = String(document.getElementById("co_to")?.value || "").trim();
+
+  if (!selectedOrderId) {
+    showToast("Please select an order first.", "error");
+    return;
+  }
 
   if (!type || !reason || !date) {
     showToast("Please fill required fields.", "error");
@@ -610,9 +790,11 @@ async function submitCashOut() {
 
   const fileInput = document.getElementById("co_screenshot");
   const fileNameEl = document.getElementById("co_screenshot_name");
+  let saved = false;
 
   try {
     const body = {
+      orderId: selectedOrderId,
       fundsType: type,
       reason,
       date,
@@ -658,6 +840,8 @@ async function submitCashOut() {
       return;
     }
 
+    saved = true;
+    setSelectedExpenseOrder("", "");
     await loadExpenses();
   } catch (err) {
     console.error("Cash-out submit error:", err);
@@ -669,6 +853,8 @@ async function submitCashOut() {
       btn.disabled = false;
       btn.textContent = "Submit";
     }
+
+    if (!saved) syncSelectedExpenseOrderUI();
 
     // Reset screenshot upload UI
     if (fileInput) fileInput.value = "";
@@ -888,11 +1074,42 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     setupCashInFromSearchableSelect();
     setupScreenshotUploadUI();
+    syncSelectedExpenseOrderUI();
 
     const cashInBtn  = document.getElementById("cashInBtn");
     const cashOutBtn = document.getElementById("cashOutBtn");
+    const cashOutOrderSelect = document.getElementById("cashOutOrderSelect");
+    const cashOutOrderNextBtn = document.getElementById("cashOutOrderNextBtn");
+    const cashOutChangeOrderBtn = document.getElementById("cashOutChangeOrderBtn");
     if (cashInBtn)  cashInBtn.addEventListener("click", openCashInModal);
-    if (cashOutBtn) cashOutBtn.addEventListener("click", openCashOutModal);
+    if (cashOutBtn) {
+        cashOutBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            openCashOutOrderModal({ resetSelection: true, forceReload: true });
+        });
+    }
+    if (cashOutOrderSelect) {
+        cashOutOrderSelect.addEventListener("change", (e) => {
+            const orderId = String(e.target?.value || "").trim();
+            const selected = EXPENSE_ORDER_OPTIONS.find(
+                (item) => String(item?.id || "") === orderId,
+            );
+            setSelectedExpenseOrder(orderId, selected?.label || "");
+        });
+    }
+    if (cashOutOrderNextBtn) {
+        cashOutOrderNextBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            proceedToCashOutDetails();
+        });
+    }
+    if (cashOutChangeOrderBtn) {
+        cashOutChangeOrderBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            closeCashOutModal();
+            openCashOutOrderModal({ resetSelection: false, forceReload: false });
+        });
+    }
     const viewAllBtn = document.getElementById("viewAllBtn");
     if (viewAllBtn) {
         // IMPORTANT:
