@@ -1170,6 +1170,297 @@
   }
 </style>
 
+<style>
+  .expenses-empty{
+    padding:1rem 1.1rem;
+    border-radius:18px;
+    background:#f8fafc;
+    border:1px solid #e2e8f0;
+    color:#64748b;
+    font-weight:700;
+    text-align:center;
+  }
+  .expenses-separator{
+    display:flex;
+    align-items:center;
+    gap:0.85rem;
+    margin:1.1rem 0 0.9rem;
+    color:#64748b;
+    font-size:0.88rem;
+    font-weight:800;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+  }
+  .expenses-separator::before,
+  .expenses-separator::after{
+    content:"";
+    flex:1 1 auto;
+    height:1px;
+    background:#dbe3ef;
+  }
+  .past-expenses-wrapper{
+    margin-top:1rem;
+    display:flex;
+    justify-content:center;
+  }
+  .past-expenses-btn{
+    border:none;
+    border-radius:999px;
+    padding:0.8rem 1.15rem;
+    background:#e2e8f0;
+    color:#0f172a;
+    font-weight:800;
+    cursor:pointer;
+    box-shadow:0 10px 24px rgba(15,23,42,0.08);
+  }
+
+  .expense-ticket{
+    position:relative;
+    background:linear-gradient(180deg,#ffffff 0%,#fcfcfd 100%);
+    border:1px solid #e5e7eb;
+    border-radius:28px;
+    padding:1.2rem 1.25rem 1.05rem;
+    margin-bottom:1rem;
+    box-shadow:0 16px 34px rgba(15,23,42,0.09);
+    overflow:hidden;
+  }
+  .expense-ticket--compact{
+    border-radius:24px;
+    padding:1rem 1rem 0.95rem;
+  }
+  .expense-ticket__top{
+    display:flex;
+    flex-direction:column;
+    gap:0.7rem;
+    margin-bottom:0.95rem;
+  }
+  .expense-ticket__reason{
+    color:#0f172a;
+    font-size:1.12rem;
+    font-weight:850;
+    line-height:1.35;
+  }
+  .expense-ticket__meta{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:0.6rem;
+  }
+  .expense-ticket__date{
+    display:inline-flex;
+    align-items:center;
+    gap:0.4rem;
+    padding:0.35rem 0.7rem;
+    border-radius:999px;
+    background:#f8fafc;
+    border:1px solid #e2e8f0;
+    color:#475569;
+    font-size:0.84rem;
+    font-weight:800;
+  }
+  .expense-ticket__order-actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:0.55rem;
+  }
+  .expense-ticket__order-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:0.45rem;
+    padding:0.55rem 0.8rem;
+    border-radius:999px;
+    background:var(--expense-order-btn-bg,#eef2ff);
+    color:var(--expense-order-btn-fg,#312e81);
+    border:1px solid var(--expense-order-btn-border,#c7d2fe);
+    font-size:0.84rem;
+    font-weight:800;
+    text-decoration:none;
+    box-shadow:0 8px 18px rgba(15,23,42,0.06);
+  }
+  .expense-ticket__order-btn svg{
+    flex:0 0 auto;
+    width:15px;
+    height:15px;
+    stroke-width:2.2;
+  }
+  .expense-ticket__order-btn--disabled{
+    opacity:0.7;
+    cursor:default;
+  }
+  .expense-ticket__legs{
+    display:flex;
+    flex-direction:column;
+    gap:0.8rem;
+  }
+  .expense-ticket__route{
+    position:relative;
+    display:flex;
+    align-items:center;
+    gap:0.9rem;
+    padding:0.95rem 0.1rem;
+  }
+  .expense-ticket__route + .expense-ticket__route{
+    border-top:1px solid rgba(226,232,240,0.75);
+  }
+  .expense-ticket__point{
+    flex:0 0 30%;
+    min-width:0;
+  }
+  .expense-ticket__point--right{
+    text-align:right;
+  }
+  .expense-ticket__point-value{
+    font-size:clamp(1.08rem, 2.3vw, 1.55rem);
+    font-weight:900;
+    color:#111827;
+    line-height:1.1;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .expense-ticket__point-sub{
+    margin-top:0.24rem;
+    font-size:0.8rem;
+    color:#64748b;
+    font-weight:700;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .expense-ticket__track{
+    position:relative;
+    flex:1 1 auto;
+    min-width:120px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0 0.2rem;
+  }
+  .expense-ticket__track-line{
+    position:absolute;
+    left:4px;
+    right:4px;
+    top:50%;
+    height:2px;
+    transform:translateY(-50%);
+    background:linear-gradient(90deg,#d1d5db 0%,#9ca3af 50%,#d1d5db 100%);
+    border-radius:999px;
+  }
+  .expense-ticket__track-line::before,
+  .expense-ticket__track-line::after{
+    content:"";
+    position:absolute;
+    top:50%;
+    width:7px;
+    height:7px;
+    border-radius:50%;
+    background:#9ca3af;
+    transform:translateY(-50%);
+  }
+  .expense-ticket__track-line::before{ left:0; }
+  .expense-ticket__track-line::after{ right:0; }
+  .expense-ticket__track-pill{
+    position:relative;
+    z-index:1;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    max-width:100%;
+    padding:0.4rem 0.78rem;
+    border-radius:999px;
+    background:#111827;
+    color:#fff;
+    font-size:0.78rem;
+    font-weight:900;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    box-shadow:0 10px 18px rgba(15,23,42,0.18);
+  }
+  .expense-ticket__track-pill--in{
+    background:#166534;
+  }
+  .expense-ticket__shots{
+    margin-top:0.8rem;
+  }
+  .expense-ticket__shots .expense-screenshots{
+    gap:0.65rem;
+    margin-top:0;
+  }
+  .expense-ticket__separator{
+    position:relative;
+    margin:1rem -1.25rem 0.95rem;
+    border-top:2px dashed #cfd8e3;
+  }
+  .expense-ticket--compact .expense-ticket__separator{
+    margin-left:-1rem;
+    margin-right:-1rem;
+  }
+  .expense-ticket__separator::before,
+  .expense-ticket__separator::after{
+    content:"";
+    position:absolute;
+    top:50%;
+    width:24px;
+    height:24px;
+    border-radius:50%;
+    background:#eef2f7;
+    transform:translateY(-50%);
+    box-shadow:inset 0 0 0 1px rgba(226,232,240,0.95);
+  }
+  .expense-ticket__separator::before{
+    left:-12px;
+  }
+  .expense-ticket__separator::after{
+    right:-12px;
+  }
+  .expense-ticket__footer{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+  }
+  .expense-ticket__footer-label{
+    color:#111827;
+    font-size:0.98rem;
+    font-weight:800;
+  }
+  .expense-ticket__footer-value{
+    color:#111827;
+    font-size:1.2rem;
+    font-weight:900;
+    letter-spacing:-0.02em;
+    white-space:nowrap;
+  }
+  .expense-ticket__footer-value.is-positive{ color:#15803d; }
+  .expense-ticket__footer-value.is-negative{ color:#b91c1c; }
+  .expense-ticket__footer-value.is-neutral{ color:#0f172a; }
+
+  @media (max-width: 640px){
+    .expense-ticket{
+      border-radius:24px;
+      padding:1rem 1rem 0.95rem;
+    }
+    .expense-ticket__route{
+      gap:0.7rem;
+    }
+    .expense-ticket__point{
+      flex-basis:32%;
+    }
+    .expense-ticket__track{
+      min-width:96px;
+    }
+    .expense-ticket__track-pill{
+      font-size:0.72rem;
+      padding:0.35rem 0.6rem;
+    }
+    .expense-ticket__separator{
+      margin-left:-1rem;
+      margin-right:-1rem;
+    }
+  }
+</style>
+
 </head>
 
 <body class="permissions-loading">
