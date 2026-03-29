@@ -3604,6 +3604,438 @@ async function _ensureDefectedPropExists({ schoolName, dateISO }) {
   return _findPropNameByNorm(schemaPropsAfter, desired) || desired;
 }
 
+
+async function _ensureStocktakingNumberPropExists(propName) {
+  if (!stocktakingDatabaseId) return null;
+  const desired = String(propName || '').trim();
+  if (!desired) return null;
+
+  const schemaPropsBefore = await _getStocktakingDBProps();
+  const existing = _findPropNameByNorm(schemaPropsBefore, desired);
+  if (existing) return existing;
+
+  await notion.databases.update({
+    database_id: stocktakingDatabaseId,
+    properties: {
+      [desired]: { number: { format: 'number' } },
+    },
+  });
+
+  try {
+    const cacheKey = `cache:notion:dbprops:stocktaking:${stocktakingDatabaseId}:v1`;
+    await cacheDel(cacheKey);
+  } catch {}
+
+  const schemaPropsAfter = await _getStocktakingDBProps();
+  return _findPropNameByNorm(schemaPropsAfter, desired) || desired;
+}
+
+function _detectStocktakingProductsPropName(schemaProps = {}) {
+  return pickPropName(schemaProps, [
+    'Products',
+    'Product',
+    'Components',
+    'Component',
+    'Items',
+    'Item',
+  ]) || null;
+}
+
+function _detectStocktakingReceiptPropName(schemaProps = {}) {
+  return pickPropName(schemaProps, [
+    'Receipt Number',
+    'Store Receipt Number',
+    'Receipt Numbers',
+    'Receipt No',
+    'Receipt #',
+    'Receipt',
+  ]) || null;
+}
+
+function _detectStocktakingTagPropName(schemaProps = {}) {
+  return pickPropName(schemaProps, [
+    'Tag',
+    'Tags',
+    'Order Type',
+    'Type',
+  ]) || null;
+}
+
+function _detectStocktakingSourceOrderPropName(schemaProps = {}) {
+  return pickPropName(schemaProps, [
+    'Source Order',
+    'Source Orders',
+    'Order Page',
+    'Order Page ID',
+    'Source Order ID',
+    'Source Order Relation',
+    'Orders Relation',
+  ]) || null;
+}
+
+async function detectOrderReceiptPropName() {
+  const props = await getOrdersDBProps();
+  return (
+    pickPropName(props, [
+      'Store Receipt Number',
+      'Receipt Number',
+      'ReceiptNumber',
+      'Receipt No',
+      'Receipt #',
+      'Receipt',
+    ]) || null
+  );
+}
+
+function _normalizeMultilineText(value) {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function _isArrivedLikeStatusName(value) {
+  const key = normKey(value);
+  return (
+    key === normKey('Arrived') ||
+    key === normKey('Delivered') ||
+    key === normKey('Received')
+  );
+}
+
+async function _resolveTeamMemberStocktakingQtyPropName(teamMemberPageId) {
+  const pageId = String(teamMemberPageId || '').trim();
+  if (!pageId) return null;
+
+  const page = await notion.pages.retrieve({ page_id: pageId });
+  const props = page?.properties || {};
+  const schoolPropName =
+    pickPropName(props, [
+      'School',
+      'Schools',
+      'Stocktaking Column',
+      'Stock Column',
+      'Done Column',
+    ]) || 'School';
+
+  const schoolProp = props?.[schoolPropName] || null;
+  let value = String(_extractPropText(schoolProp) || '').trim();
+
+  if (!value) {
+    const relId = extractFirstRelationId(schoolProp);
+    if (relId) {
+      try {
+        value = String(await pageTitleById(relId) || '').trim();
+      } catch {}
+    }
+  }
+
+  return value || null;
+}
+
+async function _buildArrivedOrderStocktakingPayload(orderPage) {
+  const page = orderPage || null;
+  const props = page?.properties || {};
+  const orderTypeInfo = _extractOrderTypeInfo(props);
+  const orderType = _canonicalOrderTypeLabel(orderTypeInfo?.orderType || '');
+  const orderTypeKey = _normKeyOrderType(orderType);
+
+  if (
+    orderTypeKey !== _normKeyOrderType('Request Products') &&
+    orderTypeKey !== _normKeyOrderType('Withdraw Products')
+  ) {
+    return null;
+  }
+
+  const ordersProps = await getOrdersDBProps();
+  const teamMembersPropName = await detectOrderTeamsMembersPropName();
+  const teamMemberId = extractFirstRelationId(props?.[teamMembersPropName]);
+  if (!teamMemberId) {
+    throw new Error('Requester team member is missing on the order row.');
+  }
+
+  const stockQtyPropName = await _resolveTeamMemberStocktakingQtyPropName(teamMemberId);
+  if (!stockQtyPropName) {
+    throw new Error('Could not determine the stocktaking quantity column from the requester team member.');
+  }
+
+  const receivedPropName =
+    ordersProps?.[REC_PROP_HARDBIND] && ordersProps[REC_PROP_HARDBIND].type === 'number'
+      ? REC_PROP_HARDBIND
+      : await detectReceivedQtyPropName();
+
+  const receivedQtyRaw = receivedPropName ? _extractPropNumber(props?.[receivedPropName]) : null;
+  const receivedQty = Number.isFinite(Number(receivedQtyRaw)) ? Number(receivedQtyRaw) : 0;
+
+  const productPropName =
+    pickPropName(props, ['Product', 'Products', 'Component', 'Components', 'Item', 'Items']) ||
+    'Product';
+  const productProp = props?.[productPropName] || null;
+  const productId = extractFirstRelationId(productProp);
+
+  let productName = String(_extractPropText(productProp) || '').trim();
+  if (!productName && productId) {
+    try {
+      productName = String(await pageTitleById(productId) || '').trim();
+    } catch {}
+  }
+  if (!productName) {
+    productName =
+      String(_extractPropText(props?.Name) || _extractPropText(props?.Reason) || 'Untitled Product').trim() ||
+      'Untitled Product';
+  }
+
+  const orderReceiptPropName = await detectOrderReceiptPropName();
+  const receiptText = _normalizeMultilineText(
+    _extractPropText(orderReceiptPropName ? props?.[orderReceiptPropName] : null) ||
+      _extractPropText(_propInsensitive(props, 'Store Receipt Number')) ||
+      _extractPropText(_propInsensitive(props, 'Receipt Number')) ||
+      '',
+  );
+
+  return {
+    orderPageId: String(page?.id || '').trim(),
+    orderType,
+    productId: String(productId || '').trim(),
+    productName,
+    receivedQty,
+    receiptText,
+    stockQtyPropName,
+  };
+}
+
+async function _queryStocktakingRowsForPayload(payload, schemaProps = {}) {
+  if (!stocktakingDatabaseId || !payload) return [];
+
+  const sourceOrderPropName = _detectStocktakingSourceOrderPropName(schemaProps);
+  const sourceOrderMeta = sourceOrderPropName ? schemaProps?.[sourceOrderPropName] || null : null;
+
+  if (sourceOrderPropName && payload.orderPageId) {
+    if (sourceOrderMeta?.type === 'relation' && normalizeNotionId(sourceOrderMeta?.relation?.database_id) === normalizeNotionId(ordersDatabaseId)) {
+      const resp = await notion.databases.query({
+        database_id: stocktakingDatabaseId,
+        page_size: 50,
+        filter: {
+          property: sourceOrderPropName,
+          relation: { contains: payload.orderPageId },
+        },
+      });
+      return resp?.results || [];
+    }
+
+    if (sourceOrderMeta?.type === 'rich_text') {
+      const resp = await notion.databases.query({
+        database_id: stocktakingDatabaseId,
+        page_size: 50,
+        filter: {
+          property: sourceOrderPropName,
+          rich_text: { equals: payload.orderPageId },
+        },
+      });
+      return resp?.results || [];
+    }
+
+    if (sourceOrderMeta?.type === 'title') {
+      const resp = await notion.databases.query({
+        database_id: stocktakingDatabaseId,
+        page_size: 50,
+        filter: {
+          property: sourceOrderPropName,
+          title: { equals: payload.orderPageId },
+        },
+      });
+      return resp?.results || [];
+    }
+  }
+
+  const productsPropName = _detectStocktakingProductsPropName(schemaProps);
+  const productsMeta = productsPropName ? schemaProps?.[productsPropName] || null : null;
+  if (productsPropName && productsMeta?.type === 'relation' && payload.productId) {
+    const resp = await notion.databases.query({
+      database_id: stocktakingDatabaseId,
+      page_size: 50,
+      filter: {
+        property: productsPropName,
+        relation: { contains: payload.productId },
+      },
+    });
+    return resp?.results || [];
+  }
+
+  const titlePropName = firstTitlePropName(schemaProps);
+  if (titlePropName && payload.productName) {
+    const resp = await notion.databases.query({
+      database_id: stocktakingDatabaseId,
+      page_size: 50,
+      filter: {
+        property: titlePropName,
+        title: { equals: payload.productName },
+      },
+    });
+    return resp?.results || [];
+  }
+
+  return [];
+}
+
+function _stocktakingRowMatchesPayload(page, payload, schemaProps = {}) {
+  const props = page?.properties || {};
+
+  const qtyPropName =
+    _findPropNameByNorm(props, payload?.stockQtyPropName || '') || String(payload?.stockQtyPropName || '').trim();
+  const pageQtyRaw = qtyPropName ? _extractPropNumber(props?.[qtyPropName]) : null;
+  const pageQty = Number.isFinite(Number(pageQtyRaw)) ? Number(pageQtyRaw) : 0;
+  if (roundOrderQty(pageQty) !== roundOrderQty(payload?.receivedQty || 0)) return false;
+
+  const tagPropName = _detectStocktakingTagPropName(schemaProps);
+  const pageTag = _canonicalOrderTypeLabel(
+    _extractPropText(tagPropName ? props?.[tagPropName] : null) || _extractPropText(props?.Tag) || '',
+  );
+  if (_normKeyOrderType(pageTag) !== _normKeyOrderType(payload?.orderType || '')) return false;
+
+  const receiptPropName = _detectStocktakingReceiptPropName(schemaProps);
+  const pageReceipt = _normalizeMultilineText(
+    _extractPropText(receiptPropName ? props?.[receiptPropName] : null) || '',
+  );
+  const wantedReceipt = _normalizeMultilineText(payload?.receiptText || '');
+  if (pageReceipt !== wantedReceipt) return false;
+
+  return true;
+}
+
+async function _createStocktakingRowFromPayload(payload) {
+  if (!stocktakingDatabaseId) {
+    throw new Error('Stocktaking database ID is not configured.');
+  }
+  if (!payload) return null;
+
+  let schemaProps = await _getStocktakingDBProps();
+  const titlePropName = firstTitlePropName(schemaProps) || 'Name';
+  const productsPropName = _detectStocktakingProductsPropName(schemaProps);
+  const receiptPropName = _detectStocktakingReceiptPropName(schemaProps);
+  const tagPropName = _detectStocktakingTagPropName(schemaProps);
+  const sourceOrderPropName = _detectStocktakingSourceOrderPropName(schemaProps);
+
+  const ensuredQtyPropName = await _ensureStocktakingNumberPropExists(payload.stockQtyPropName);
+  if (!ensuredQtyPropName) {
+    throw new Error(`Could not resolve stocktaking quantity column: ${payload.stockQtyPropName || 'Unknown'}`);
+  }
+
+  schemaProps = await _getStocktakingDBProps();
+
+  const properties = {};
+
+  const titleValue = buildWritableTextPropValue(titlePropName, 'title', payload.productName || 'Untitled Product');
+  if (titleValue) Object.assign(properties, titleValue);
+
+  if (productsPropName && productsPropName !== titlePropName) {
+    const productsMeta = schemaProps?.[productsPropName] || null;
+    const productName = String(payload.productName || '').trim();
+    const productId = String(payload.productId || '').trim();
+
+    if (productsMeta?.type === 'relation') {
+      properties[productsPropName] = { relation: productId ? [{ id: productId }] : [] };
+    } else if (productsMeta?.type === 'multi_select') {
+      properties[productsPropName] = { multi_select: productName ? [{ name: productName }] : [] };
+    } else if (productsMeta?.type === 'select') {
+      properties[productsPropName] = { select: productName ? { name: productName } : null };
+    } else if (productsMeta?.type === 'status') {
+      properties[productsPropName] = { status: productName ? { name: productName } : null };
+    } else {
+      const productPropValue = buildWritableTextPropValue(
+        productsPropName,
+        productsMeta?.type || 'rich_text',
+        productName,
+      );
+      if (productPropValue) Object.assign(properties, productPropValue);
+    }
+  }
+
+  properties[ensuredQtyPropName] = { number: Number(payload.receivedQty || 0) };
+
+  if (receiptPropName) {
+    const receiptMeta = schemaProps?.[receiptPropName] || null;
+    const receiptText = _normalizeMultilineText(payload.receiptText || '');
+
+    if (receiptMeta?.type === 'number') {
+      const firstReceiptLine = String(receiptText || '').split(/\n+/)[0] || '';
+      const parsedReceipt = Number(firstReceiptLine.replace(/[^0-9.-]/g, ''));
+      if (Number.isFinite(parsedReceipt)) {
+        properties[receiptPropName] = { number: parsedReceipt };
+      }
+    } else {
+      const receiptPropValue = buildWritableTextPropValue(
+        receiptPropName,
+        receiptMeta?.type || 'rich_text',
+        receiptText,
+      );
+      if (receiptPropValue) Object.assign(properties, receiptPropValue);
+    }
+  }
+
+  if (tagPropName) {
+    const tagMeta = schemaProps?.[tagPropName] || null;
+    const tagName = notionExactOptionName(tagMeta, payload.orderType, payload.orderType);
+
+    if (tagMeta?.type === 'multi_select') {
+      properties[tagPropName] = { multi_select: tagName ? [{ name: tagName }] : [] };
+    } else if (tagMeta?.type === 'select') {
+      properties[tagPropName] = { select: tagName ? { name: tagName } : null };
+    } else if (tagMeta?.type === 'status') {
+      properties[tagPropName] = { status: tagName ? { name: tagName } : null };
+    } else {
+      const tagPropValue = buildWritableTextPropValue(
+        tagPropName,
+        tagMeta?.type || 'rich_text',
+        tagName,
+      );
+      if (tagPropValue) Object.assign(properties, tagPropValue);
+    }
+  }
+
+  if (sourceOrderPropName) {
+    const sourceOrderMeta = schemaProps?.[sourceOrderPropName] || null;
+    const orderPageId = String(payload.orderPageId || '').trim();
+
+    if (sourceOrderMeta?.type === 'relation') {
+      if (normalizeNotionId(sourceOrderMeta?.relation?.database_id) === normalizeNotionId(ordersDatabaseId)) {
+        properties[sourceOrderPropName] = { relation: orderPageId ? [{ id: orderPageId }] : [] };
+      }
+    } else {
+      const sourceOrderValue = buildWritableTextPropValue(
+        sourceOrderPropName,
+        sourceOrderMeta?.type || 'rich_text',
+        orderPageId,
+      );
+      if (sourceOrderValue) Object.assign(properties, sourceOrderValue);
+    }
+  }
+
+  return await notion.pages.create({
+    parent: { database_id: stocktakingDatabaseId },
+    properties,
+  });
+}
+
+async function _syncArrivedOrderToStocktaking(orderPage, options = {}) {
+  const dedupe = !!options?.dedupe;
+  const payload = await _buildArrivedOrderStocktakingPayload(orderPage);
+  if (!payload) return { skipped: true, reason: 'unsupported-order-type' };
+
+  if (dedupe) {
+    const schemaProps = await _getStocktakingDBProps();
+    const candidates = await _queryStocktakingRowsForPayload(payload, schemaProps);
+    if ((candidates || []).some((candidate) => _stocktakingRowMatchesPayload(candidate, payload, schemaProps))) {
+      return { skipped: true, reason: 'already-synced' };
+    }
+  }
+
+  const created = await _createStocktakingRowFromPayload(payload);
+  return { skipped: false, createdId: created?.id || null };
+}
+
 function _boolFrom(prop) {
   if (!prop) return false;
   if (typeof prop.checkbox === "boolean") return prop.checkbox;
@@ -6999,8 +7431,15 @@ app.post(
       // Determine property type + pick the exact option name from the DB (case-insensitive)
       const dbProps = await getOrdersDBProps();
       const dbPropMeta = dbProps?.[statusProp];
+      const orderPages = await Promise.all(
+        ids.map((id) => notion.pages.retrieve({ page_id: id })),
+      );
+      const samplePage = orderPages.find(Boolean);
+      if (!samplePage) {
+        return res.status(404).json({ error: "Orders not found" });
+      }
+
       let statusType = dbPropMeta?.type;
-      const samplePage = await notion.pages.retrieve({ page_id: ids[0] });
       if (!statusType) {
         statusType = samplePage.properties?.[statusProp]?.type;
       }
@@ -7009,7 +7448,7 @@ app.post(
       const isMaintenanceOrder =
         _normKeyOrderType(orderTypeInfo?.orderType) === _normKeyOrderType("Request Maintenance");
 
-      const desiredCandidates = ["Arrived", "Delivered", "Received"]; // try these in order
+      const desiredCandidates = ["Arrived", "Delivered", "Received"];
       let arrivedName = desiredCandidates[0];
       let arrivedOptions = [];
       try {
@@ -7094,6 +7533,11 @@ app.post(
         maintenanceReceiptUrls = uploadedFiles.map((file) => file.url).filter(Boolean);
       }
 
+      const pagesBeforeUpdate = orderPages.map((page) => ({
+        page,
+        wasArrivedLike: _isArrivedLikeStatusName(_extractPropText(page?.properties?.[statusProp]) || ""),
+      }));
+
       await Promise.all(
         ids.map((id) => {
           const properties = {
@@ -7118,9 +7562,52 @@ app.post(
         }),
       );
 
+      const stocktakingSyncResults = [];
+      const stocktakingSyncErrors = [];
+
+      for (const item of pagesBeforeUpdate) {
+        try {
+          const pageOrderTypeInfo = _extractOrderTypeInfo(item?.page?.properties || {});
+          const pageOrderType = _canonicalOrderTypeLabel(pageOrderTypeInfo?.orderType || "");
+          const pageOrderTypeKey = _normKeyOrderType(pageOrderType);
+          const needsStocktakingSync =
+            pageOrderTypeKey === _normKeyOrderType("Request Products") ||
+            pageOrderTypeKey === _normKeyOrderType("Withdraw Products");
+
+          if (!needsStocktakingSync) continue;
+
+          const syncResult = await _syncArrivedOrderToStocktaking(item.page, {
+            dedupe: item.wasArrivedLike,
+          });
+          stocktakingSyncResults.push({
+            orderId: String(item?.page?.id || "").trim() || null,
+            ...syncResult,
+          });
+        } catch (syncErr) {
+          stocktakingSyncErrors.push({
+            orderId: String(item?.page?.id || "").trim() || null,
+            message: String(syncErr?.message || "Failed to sync stocktaking row.").trim(),
+          });
+        }
+      }
+
       await cacheDel("cache:api:orders:requested:v7");
 
-      res.json({
+      if (stocktakingSyncErrors.length) {
+        return res.status(500).json({
+          error: "Status updated but failed to sync some stocktaking rows.",
+          statusUpdated: true,
+          status: arrivedName,
+          statusColor: arrivedColor,
+          maintenanceReceiptNames,
+          maintenanceReceiptName: maintenanceReceiptNames[0] || null,
+          maintenanceReceiptUrls,
+          maintenanceReceiptUrl: maintenanceReceiptUrls[0] || null,
+          stocktakingSyncErrors,
+        });
+      }
+
+      return res.json({
         success: true,
         status: arrivedName,
         statusColor: arrivedColor,
@@ -7128,10 +7615,12 @@ app.post(
         maintenanceReceiptName: maintenanceReceiptNames[0] || null,
         maintenanceReceiptUrls,
         maintenanceReceiptUrl: maintenanceReceiptUrls[0] || null,
+        stocktakingSyncedCount: stocktakingSyncResults.filter((item) => item && item.skipped === false).length,
+        stocktakingSkippedCount: stocktakingSyncResults.filter((item) => item && item.skipped === true).length,
       });
     } catch (e) {
       console.error("mark-arrived error:", e.body || e);
-      res.status(500).json({ error: "Failed to update status" });
+      return res.status(500).json({ error: "Failed to update status" });
     }
   },
 );
