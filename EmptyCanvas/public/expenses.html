@@ -77,10 +77,19 @@
   border-radius: 10px;
 }
     .expenses-layout {
-      max-width: 560px;
+      width: min(100%, 1080px);
+      max-width: 1080px;
       margin: 0 auto;
-      padding: 1.5rem 1rem;
+      padding: 1.65rem 1.35rem 2.4rem;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .expenses-header,
+    .expense-buttons,
+    #expensesContent {
+      width: min(100%, 920px);
+      margin-left: auto;
+      margin-right: auto;
     }
 
     /* ===== Expenses Header Above Cards ===== */
@@ -289,7 +298,8 @@
       padding: 2rem 1.8rem;
       text-align: center;
       box-shadow: 0 20px 40px rgba(0,0,0,0.2);
-      margin-bottom: 2rem;
+      margin: 0 auto 2rem;
+      max-width: 460px;
       position: relative;
       overflow: hidden;
     }
@@ -424,6 +434,8 @@
     .expense-buttons {
       display: flex;
       justify-content: space-between;
+      max-width: 560px;
+      gap: 1rem;
       margin-bottom: 2rem;
     }
 
@@ -439,8 +451,8 @@
       transition: 0.2s;
     }
 
-    .cash-in { background: linear-gradient(135deg, #22c55e, #16a34a); margin-right: 0.7rem; }
-    .cash-out { background: linear-gradient(135deg, #ef4444, #dc2626); margin-left: 0.7rem; }
+    .cash-in { background: linear-gradient(135deg, #22c55e, #16a34a); }
+    .cash-out { background: linear-gradient(135deg, #ef4444, #dc2626); }
 
     .cash-btn:hover { transform: scale(1.05); }
 
@@ -1219,68 +1231,69 @@
     background:linear-gradient(180deg,#ffffff 0%,#fcfcfd 100%);
     border:1px solid #e5e7eb;
     border-radius:28px;
-    padding:1.2rem 1.25rem 1.05rem;
+    padding:1.15rem 1.22rem 1rem;
     margin-bottom:1rem;
-    box-shadow:0 16px 34px rgba(15,23,42,0.09);
+    box-shadow:0 14px 30px rgba(15,23,42,0.08);
     overflow:hidden;
   }
   .expense-ticket--compact{
     border-radius:24px;
-    padding:1rem 1rem 0.95rem;
+    padding:1rem 1rem 0.92rem;
   }
   .expense-ticket__top{
     display:flex;
     flex-direction:column;
-    gap:0.7rem;
-    margin-bottom:0.95rem;
+    gap:0.62rem;
+    margin-bottom:0.82rem;
   }
   .expense-ticket__reason{
     color:#0f172a;
-    font-size:1rem;
-    font-weight:820;
-    line-height:1.4;
+    font-size:0.94rem;
+    font-weight:780;
+    line-height:1.42;
+    letter-spacing:-0.01em;
   }
   .expense-ticket__meta{
     display:flex;
     flex-direction:column;
     align-items:flex-start;
-    gap:0.6rem;
+    gap:0.52rem;
   }
   .expense-ticket__date{
     display:inline-flex;
     align-items:center;
-    gap:0.4rem;
-    padding:0.35rem 0.7rem;
+    gap:0.38rem;
+    padding:0.32rem 0.68rem;
     border-radius:999px;
     background:#f8fafc;
     border:1px solid #e2e8f0;
     color:#475569;
-    font-size:0.84rem;
-    font-weight:800;
+    font-size:0.8rem;
+    font-weight:780;
   }
   .expense-ticket__order-actions{
     display:flex;
     flex-wrap:wrap;
-    gap:0.55rem;
+    gap:0.5rem;
   }
   .expense-ticket__order-btn{
     display:inline-flex;
     align-items:center;
-    gap:0.45rem;
-    padding:0.55rem 0.8rem;
+    gap:0.42rem;
+    padding:0.48rem 0.74rem;
     border-radius:999px;
     background:var(--expense-order-btn-bg,#eef2ff);
     color:var(--expense-order-btn-fg,#312e81);
     border:1px solid var(--expense-order-btn-border,#c7d2fe);
-    font-size:0.84rem;
-    font-weight:800;
+    font-size:0.78rem;
+    font-weight:780;
     text-decoration:none;
-    box-shadow:0 8px 18px rgba(15,23,42,0.06);
+    box-shadow:0 6px 14px rgba(15,23,42,0.05);
   }
   .expense-ticket__order-btn svg{
     flex:0 0 auto;
-    width:15px;
-    height:15px;
+    width:14px;
+    height:14px;
     stroke-width:2.2;
   }
   .expense-ticket__order-btn--disabled{
@@ -1290,15 +1303,15 @@
   .expense-ticket__legs{
     display:flex;
     flex-direction:column;
-    gap:0.8rem;
+    gap:0.68rem;
   }
   .expense-ticket__route{
     position:relative;
     display:flex;
     flex-direction:column;
     align-items:stretch;
-    gap:0.78rem;
-    padding:0.95rem 0.1rem;
+    gap:0.66rem;
+    padding:0.78rem 0.1rem;
   }
   .expense-ticket__route + .expense-ticket__route{
     border-top:1px solid rgba(226,232,240,0.75);
@@ -1310,22 +1323,22 @@
   .expense-ticket__amount-chip{
     display:inline-flex;
     align-items:center;
-    gap:0.55rem;
-    min-height:40px;
-    padding:0.36rem 0.7rem 0.36rem 0.36rem;
+    gap:0.46rem;
+    min-height:36px;
+    padding:0.28rem 0.62rem 0.28rem 0.28rem;
     border-radius:999px;
     background:#ffffff;
     border:1px solid #e2e8f0;
     color:#0f172a;
     text-decoration:none;
-    box-shadow:0 8px 18px rgba(15,23,42,0.06);
+    box-shadow:0 6px 14px rgba(15,23,42,0.05);
   }
   .expense-ticket__amount-chip--link:hover{
     transform:translateY(-1px);
   }
   .expense-ticket__amount-icon{
-    width:28px;
-    height:28px;
+    width:26px;
+    height:26px;
     border-radius:50%;
     display:inline-flex;
     align-items:center;
@@ -1335,61 +1348,62 @@
     color:#ffffff;
   }
   .expense-ticket__amount-icon svg{
-    width:14px;
-    height:14px;
+    width:13px;
+    height:13px;
     stroke-width:2.2;
   }
   .expense-ticket__amount-thumb{
-    width:28px;
-    height:28px;
+    width:26px;
+    height:26px;
     border-radius:50%;
     object-fit:cover;
     flex:0 0 auto;
     border:1px solid #e2e8f0;
   }
   .expense-ticket__amount-chip-text{
-    font-size:0.82rem;
-    font-weight:900;
+    font-size:0.78rem;
+    font-weight:860;
     white-space:nowrap;
   }
   .expense-ticket__route-main{
-    display:flex;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) minmax(170px, 220px) minmax(0, 1fr);
     align-items:center;
-    gap:0.8rem;
+    column-gap:0.95rem;
     width:100%;
   }
   .expense-ticket__point{
-    flex:0 0 29%;
     min-width:0;
   }
   .expense-ticket__point--right{
     text-align:right;
+    justify-self:end;
   }
   .expense-ticket__point-value{
-    font-size:clamp(0.98rem, 1.95vw, 1.32rem);
-    font-weight:820;
+    font-size:clamp(0.88rem, 1.15vw, 1.08rem);
+    font-weight:760;
     color:#111827;
-    line-height:1.2;
+    line-height:1.3;
     white-space:normal;
     overflow:visible;
     text-overflow:clip;
-    overflow-wrap:anywhere;
+    overflow-wrap:break-word;
+    word-break:normal;
   }
   .expense-ticket__point-sub{
     display:none;
   }
   .expense-ticket__track{
     position:relative;
-    flex:1 1 auto;
-    min-width:120px;
+    min-width:0;
     display:flex;
     align-items:center;
     justify-content:center;
-    padding:0 1.55rem 0 0.35rem;
+    padding:0 1.35rem 0 0.25rem;
   }
   .expense-ticket__track-line{
     position:absolute;
-    left:6px;
+    left:8px;
     right:18px;
     top:50%;
     height:2px;
@@ -1415,7 +1429,7 @@
     transform:translateY(-54%);
     z-index:1;
     color:#64748b;
-    font-size:1.75rem;
+    font-size:1.62rem;
     line-height:1;
     font-weight:300;
   }
@@ -1425,21 +1439,23 @@
     display:inline-flex;
     align-items:center;
     justify-content:center;
-    width:fit-content;
-    max-width:min(100%, 172px);
-    padding:0.42rem 0.86rem;
+    width:auto;
+    max-width:min(100%, 148px);
+    min-height:32px;
+    padding:0.38rem 0.8rem;
     border-radius:999px;
     background:#111827;
     color:#fff;
-    font-size:0.74rem;
+    font-size:0.7rem;
     font-weight:800;
     line-height:1.18;
     text-align:center;
     white-space:normal;
     overflow:visible;
     text-overflow:clip;
-    word-break:break-word;
-    box-shadow:0 10px 18px rgba(15,23,42,0.18);
+    overflow-wrap:break-word;
+    word-break:normal;
+    box-shadow:0 10px 18px rgba(15,23,42,0.16);
   }
   .expense-ticket__track-pill--in{
     background:#166534;
@@ -1453,7 +1469,7 @@
   }
   .expense-ticket__separator{
     position:relative;
-    margin:1rem -1.25rem 0.95rem;
+    margin:0.92rem -1.22rem 0.88rem;
     border-top:2px dashed #cfd8e3;
   }
   .expense-ticket--compact .expense-ticket__separator{
@@ -1486,13 +1502,13 @@
   }
   .expense-ticket__footer-label{
     color:#111827;
-    font-size:0.98rem;
-    font-weight:800;
+    font-size:0.94rem;
+    font-weight:780;
   }
   .expense-ticket__footer-value{
     color:#111827;
-    font-size:1.2rem;
-    font-weight:900;
+    font-size:1.12rem;
+    font-weight:880;
     letter-spacing:-0.02em;
     white-space:nowrap;
   }
@@ -1500,40 +1516,62 @@
   .expense-ticket__footer-value.is-negative{ color:#b91c1c; }
   .expense-ticket__footer-value.is-neutral{ color:#0f172a; }
 
+  @media (max-width: 1024px){
+    .expenses-layout {
+      width: min(100%, 860px);
+      max-width: 860px;
+      padding-left: 1.1rem;
+      padding-right: 1.1rem;
+    }
+
+    .expenses-header,
+    .expense-buttons,
+    #expensesContent {
+      width: 100%;
+    }
+  }
+
   @media (max-width: 640px){
+    .expenses-layout {
+      width: 100%;
+      max-width: 560px;
+      padding: 1.35rem 0.95rem 2rem;
+    }
+
+    .total-card {
+      max-width: none;
+    }
+
     .expense-ticket{
       border-radius:24px;
-      padding:1rem 1rem 0.95rem;
+      padding:1rem 1rem 0.92rem;
     }
     .expense-ticket__reason{
-      font-size:0.95rem;
+      font-size:0.88rem;
     }
     .expense-ticket__route{
-      gap:0.68rem;
+      gap:0.58rem;
     }
     .expense-ticket__route-main{
-      gap:0.62rem;
+      grid-template-columns:minmax(0, 1fr) minmax(94px, 116px) minmax(0, 1fr);
+      column-gap:0.58rem;
     }
     .expense-ticket__amount-chip-text{
-      font-size:0.78rem;
-    }
-    .expense-ticket__point{
-      flex-basis:30%;
+      font-size:0.75rem;
     }
     .expense-ticket__point-value{
-      font-size:0.92rem;
+      font-size:0.86rem;
     }
     .expense-ticket__track{
-      min-width:92px;
-      padding-right:1.3rem;
+      padding-right:1.18rem;
     }
     .expense-ticket__track-pill{
-      max-width:126px;
-      font-size:0.68rem;
-      padding:0.35rem 0.58rem;
+      max-width:112px;
+      font-size:0.64rem;
+      padding:0.32rem 0.5rem;
     }
     .expense-ticket__track-arrow{
-      font-size:1.55rem;
+      font-size:1.35rem;
     }
     .expense-ticket__separator{
       margin-left:-1rem;
