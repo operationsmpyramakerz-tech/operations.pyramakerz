@@ -517,18 +517,17 @@ function buildExpenseTicketRowHtml(item) {
       <div class="expense-ticket__route-meta">
         ${buildExpenseAmountChipHtml(item)}
       </div>
-      <div class="expense-ticket__route-main">
-        <div class="expense-ticket__point">
-          <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</div>
-        </div>
-        <div class="expense-ticket__track">
-          <span class="expense-ticket__track-line"></span>
-          <span class="expense-ticket__track-pill${typeClass}">${escapeHtml(typeLabel)}</span>
-          <span class="expense-ticket__track-arrow" aria-hidden="true">→</span>
-        </div>
-        <div class="expense-ticket__point expense-ticket__point--right">
-          <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</div>
-        </div>
+      <div class="expense-ticket__point expense-ticket__point--from">
+        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</div>
+      </div>
+      <div class="expense-ticket__track">
+        <span class="expense-ticket__track-segment expense-ticket__track-segment--left"></span>
+        <span class="expense-ticket__track-pill${typeClass}">${escapeHtml(typeLabel)}</span>
+        <span class="expense-ticket__track-segment expense-ticket__track-segment--right"></span>
+        <span class="expense-ticket__track-arrow" aria-hidden="true">${featherIconMarkup("arrow-right", { width: 19, height: 19 })}</span>
+      </div>
+      <div class="expense-ticket__point expense-ticket__point--right">
+        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</div>
       </div>
     </div>
   `;
@@ -545,11 +544,14 @@ function buildExpenseTicketHtml(group, { compact = false } = {}) {
   return `
     <article class="expense-ticket${compact ? " expense-ticket--compact" : ""}">
       <div class="expense-ticket__top">
-        <div class="expense-ticket__reason">${escapeHtml(group?.reason || "No reason")}</div>
-        <div class="expense-ticket__meta">
-          <span class="expense-ticket__date">${escapeHtml(formatExpenseGroupDateLabel(group?.date))}</span>
-          ${ordersHtml}
+        <div class="expense-ticket__header-row">
+          <div class="expense-ticket__meta">
+            <span class="expense-ticket__date">${escapeHtml(formatExpenseGroupDateLabel(group?.date))}</span>
+          </div>
+          <div class="expense-ticket__reason">${escapeHtml(group?.reason || "No reason")}</div>
         </div>
+        ${ordersHtml}
+        <div class="expense-ticket__header-divider" aria-hidden="true"></div>
       </div>
       <div class="expense-ticket__legs">
         ${rows.map(buildExpenseTicketRowHtml).join("")}
