@@ -972,6 +972,45 @@ body.co-modal-open{ overflow: hidden; }
   gap: 10px;
 }
 
+.co-submodal-input-row{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.co-submodal-input-row .co-submodal-input{
+  flex: 1 1 auto;
+}
+
+.co-submodal-input-remove{
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  border: 1px solid #E5E7EB;
+  background: #FFFFFF;
+  color: #111827;
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+
+.co-submodal-input-remove:hover{
+  background: #F9FAFB;
+  border-color: #D1D5DB;
+}
+
+.co-submodal-input-remove:focus{
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(17,24,39,.10);
+  border-color: rgba(17,24,39,.55);
+}
+
 .co-submodal-add{
   margin-top: 10px;
   align-self: flex-start;
