@@ -1527,6 +1527,9 @@
     text-overflow:clip;
     overflow-wrap:anywhere;
   }
+  .expense-ticket--compact .expense-ticket__point-value{
+    font-size:clamp(0.98rem, 1.6vw, 1.12rem);
+  }
   .expense-ticket__point-sub{
     display:none;
   }
@@ -1690,6 +1693,9 @@
     .expense-ticket__point-value{
       font-size:0.86rem;
     }
+    .expense-ticket--compact .expense-ticket__point-value{
+      font-size:0.94rem;
+    }
     .expense-ticket__track{
       gap:0.28rem;
       padding-inline:0.9rem;
@@ -1750,7 +1756,7 @@
         <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
         <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">Orders Review</span></a></li>
         <li><a class="nav-link active" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
-        <li><a class="nav-link" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses by User</span></a></li>
+        <li><a class="nav-link" href="/expenses/users"><i data-feather="credit-card"></i><span class="nav-label">Expenses by User</span></a></li>
 </ul>
     </nav>
 

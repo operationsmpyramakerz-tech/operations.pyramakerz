@@ -218,98 +218,228 @@
 .user-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.3rem;
+  gap: 1.25rem;
   justify-content: center;
   margin: 2rem auto 2.8rem;
-  max-width: 900px;
+  max-width: 1080px;
 }
 
-/* Modern Card Tab */
 .user-tab {
-  min-width: 260px;
-  padding: 1.4rem 1.8rem;
-  border-radius: 22px;
-  background: linear-gradient(145deg, #ffffff, #f4f4f7);
-  border: 2px solid #e5e7eb;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #374151;
-
+  width: min(100%, 300px);
+  min-width: 270px;
+  padding: 1rem 1.05rem 1rem;
+  border-radius: 28px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  color: #0f172a;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-
+  gap: 0.85rem;
+  text-align: left;
   cursor: pointer;
   position: relative;
   overflow: hidden;
-
-  box-shadow: 0 8px 20px rgba(0,0,0,0.05);
-  transition:
-    transform 0.3s cubic-bezier(.25,.8,.25,1),
-    box-shadow 0.3s cubic-bezier(.25,.8,.25,1),
-    border-color 0.25s,
-    background 0.25s,
-    color 0.25s;
-
-  /* Animation entrance */
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
   opacity: 0;
-  transform: translateY(20px) scale(.95);
-  animation: userTabPop .45s cubic-bezier(.25,.8,.25,1) forwards;
+  transform: translateY(20px) scale(0.96);
+  animation: userTabPop 0.42s cubic-bezier(.25, .8, .25, 1) forwards;
 }
 
-/* Stagger effect */
-.user-tab:nth-child(2) { animation-delay: .05s; }
-.user-tab:nth-child(3) { animation-delay: .1s; }
-.user-tab:nth-child(4) { animation-delay: .15s; }
-.user-tab:nth-child(5) { animation-delay: .2s; }
+.user-tab::after {
+  content: "";
+  position: absolute;
+  right: -22px;
+  bottom: -28px;
+  width: 140px;
+  height: 140px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, rgba(59, 130, 246, 0) 72%);
+  pointer-events: none;
+}
+
+.user-tab:nth-child(2) { animation-delay: 0.05s; }
+.user-tab:nth-child(3) { animation-delay: 0.1s; }
+.user-tab:nth-child(4) { animation-delay: 0.15s; }
+.user-tab:nth-child(5) { animation-delay: 0.2s; }
 
 @keyframes userTabPop {
-  0%   { opacity:0; transform: translateY(20px) scale(.93); }
-  100% { opacity:1; transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translateY(20px) scale(0.93); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Hover effect */
 .user-tab:hover {
-  transform: translateY(-8px) scale(1.04);
-  border-color: #6366f1;
-  box-shadow: 0 16px 40px rgba(99,102,241,0.18);
+  transform: translateY(-4px);
+  border-color: #cbd5e1;
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.12);
 }
 
-/* Activated tab (selected) */
 .user-tab.active {
-  background: linear-gradient(135deg, #6366f1, #818cf8);
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
   color: #ffffff;
-  border-color: #6366f1;
-  box-shadow: 0 20px 50px rgba(99,102,241,0.35);
-  transform: translateY(-6px) scale(1.03);
+  border-color: #0f172a;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.22);
+  transform: translateY(-3px);
 }
 
-/* Glow effect inside active card */
 .user-tab.active::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at top left,
-      rgba(255,255,255,0.25),
-      rgba(255,255,255,0) 70%);
-  opacity: 1;
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 70%);
+  pointer-events: none;
 }
 
-/* Text inside card */
-.user-total {
-  font-size: 1.55rem;
+.user-tab.active::after {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0) 72%);
+}
+
+.user-tab__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.user-tab__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  padding: 0.34rem 0.72rem;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 0.79rem;
   font-weight: 800;
-  color: #4f46e5;
+  white-space: nowrap;
+}
+
+.user-tab__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 1.1rem;
+  font-weight: 820;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.user-tab__divider {
+  width: 100%;
+  border-top: 2px dashed #d6dee8;
+}
+
+.user-tab__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  text-align: center;
+  padding: 0.1rem 0.15rem 0;
+}
+
+.user-tab__label {
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #64748b;
+}
+
+.user-total {
+  font-size: 2.15rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.user-tab.has-negative .user-total {
+  color: #b91c1c;
+}
+
+.user-tab.has-positive .user-total {
+  color: #15803d;
+}
+
+.user-tab__footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+  padding-top: 0.1rem;
+}
+
+.user-tab__footer-label {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.user-settled {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.user-tab.active .user-tab__name,
+.user-tab.active .user-tab__label,
+.user-tab.active .user-tab__footer-label,
+.user-tab.active .user-settled,
+.user-tab.active .user-tab__count {
+  color: #ffffff;
+}
+
+.user-tab.active .user-tab__count {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 .user-tab.active .user-total {
-  color: #fff;
+  color: #ffffff;
 }
 
-.user-count {
-  font-size: 0.9rem;
-  opacity: 0.8;
+@media (max-width: 640px) {
+  .user-tabs {
+    gap: 1rem;
+    margin: 1.3rem auto 2rem;
+  }
+
+  .user-tab {
+    width: 100%;
+    min-width: 0;
+    padding: 0.92rem 0.92rem 0.95rem;
+    border-radius: 24px;
+  }
+
+  .user-tab__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .user-tab__name {
+    text-align: left;
+    font-size: 1.05rem;
+  }
+
+  .user-total {
+    font-size: 1.9rem;
+  }
+
+  .user-tab__footer {
+    flex-direction: column;
+    gap: 0.22rem;
+  }
+
+  .user-settled {
+    text-align: left;
+  }
 }
 
     /* Modal (bottom sheet style) */
@@ -871,7 +1001,7 @@
         <li><a class="nav-link" href="/stocktaking"><i data-feather="archive"></i><span class="nav-label">Stocktaking</span></a></li>
         <li><a class="nav-link" href="/orders/sv-orders"><i data-feather="award"></i><span class="nav-label">Orders Review</span></a></li>
         <li><a class="nav-link" href="/expenses"><i data-feather="dollar-sign"></i><span class="nav-label">Expenses</span></a></li>
-        <li><a class="nav-link active" href="/expenses/users"><i data-feather="users"></i><span class="nav-label">Expenses by User</span></a></li>
+        <li><a class="nav-link active" href="/expenses/users"><i data-feather="credit-card"></i><span class="nav-label">Expenses by User</span></a></li>
 </ul>
     </nav>
 
