@@ -124,6 +124,89 @@ function renderReceiptImagesHtml(it) {
   `;
 }
 
+function featherIconMarkup(name, attrs = {}) {
+  try {
+    if (!name || !window.feather?.icons?.[name]) return "";
+    return window.feather.icons[name].toSvg(attrs);
+  } catch (err) {
+    return "";
+  }
+}
+
+function formatExpenseNumber(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return "0";
+  return num.toLocaleString("en-GB", { maximumFractionDigits: 2 });
+}
+
+function formatExpenseGroupDateLabel(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "No date";
+  const date = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function normalizeGroupText(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function isOwnCarFundsType(value) {
+  return normalizeFundsType(value) === "own car";
+}
+
+function getExpenseDisplayReason(item) {
+  const rawReason = String(item?.reason || "").trim();
+  if (rawReason) return rawReason;
+  if (Number(item?.cashIn || 0) > 0) return "Cash In";
+  return String(item?.fundsType || "").trim() || "Cash Out";
+}
+
+function getExpenseRouteEndpoints(item) {
+  const isCashIn = Number(item?.cashIn || 0) > 0;
+  let from = String(item?.from || "").trim();
+  let to = String(item?.to || "").trim();
+
+  if (isCashIn) {
+    if (!from) from = String(item?.cashInFrom || "").trim() || "Cash in";
+    if (!to) to = "Wallet";
+  }
+
+  return {
+    from: from || "—",
+    to: to || "—",
+  };
+}
+
+function formatExpenseAmountLabel(item) {
+  const isCashIn = Number(item?.cashIn || 0) > 0;
+  if (isCashIn) return `+£${formatExpenseNumber(item?.cashIn || 0)}`;
+
+  const fundsType = String(item?.fundsType || "").trim();
+  const kilometer = Number(item?.kilometer || 0);
+  const cashOut = Number(item?.cashOut || 0);
+
+  if (isOwnCarFundsType(fundsType) && kilometer > 0 && !cashOut) {
+    return `${formatExpenseNumber(kilometer)} km`;
+  }
+
+  return `-£${formatExpenseNumber(cashOut)}`;
+}
+
+function getExpenseRowTypeLabel(item) {
+  if (Number(item?.cashIn || 0) > 0) return "Cash In";
+  return String(item?.fundsType || "").trim() || "Cash Out";
+}
+
+function getExpensePrimaryScreenshot(item) {
+  const shots = getReceiptImages(item);
+  return shots.length ? shots[0] : null;
+}
+
 // ------------------------
 // SPLIT BY LAST SETTLEMENT
 // ------------------------
@@ -237,26 +320,15 @@ async function loadExpenseUsers() {
       btn.classList.toggle("has-negative", totalValue < 0);
       btn.classList.toggle("has-positive", totalValue > 0);
 
-      const itemCount = Number(u.count || 0);
-      const itemCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
-      const lastSettledValue = u.lastSettledDate
-        ? escapeHtml(formatDateDisplay(u.lastSettledDate))
-        : "—";
+      const lastSettledLabel = u.lastSettledDate
+        ? `Last settled: ${escapeHtml(formatDateDisplay(u.lastSettledDate))}`
+        : "Last settled: —";
 
       btn.innerHTML = `
-        <div class="user-tab__header">
-          <span class="user-tab__count">${escapeHtml(itemCountLabel)}</span>
-          <span class="user-tab__name">${escapeHtml(u.name)}</span>
-        </div>
-        <div class="user-tab__divider" aria-hidden="true"></div>
-        <div class="user-tab__body">
-          <span class="user-tab__label">Current balance</span>
-          <span class="user-total">${totalStr}</span>
-        </div>
-        <div class="user-tab__footer">
-          <span class="user-tab__footer-label">Last settled</span>
-          <span class="user-settled">${lastSettledValue}</span>
-        </div>
+        <span class="user-name">${escapeHtml(u.name)}</span>
+        <span class="user-total">${totalStr}</span>
+        <span class="user-count">(${u.count} items)</span>
+        <span class="user-settled">${lastSettledLabel}</span>
       `;
 
       btn.addEventListener("click", () => {
@@ -298,7 +370,7 @@ async function openUserExpensesModal(userId, userName) {
   titleEl.textContent = `Expenses — ${userName}`;
   totalEl.textContent = formatGBP(0);
   setTotalBalanceCard(0);
-  listEl.innerHTML = "Loading...";
+  listEl.innerHTML = '<div class="expenses-empty">Loading expenses…</div>';
 
   modal.style.display = "flex";
   setTimeout(() => (sheet.style.transform = "translateY(0)"), 10);
@@ -411,65 +483,181 @@ function applyFiltersAndSorting() {
 // RENDER EXPENSES LIST (GROUPED)
 // ---------------------------
 
-function buildExpenseItemElement(it) {
-  const cashIn = Number(it.cashIn || 0);
-  const cashOut = Number(it.cashOut || 0);
+function buildGroupedExpenseCollections(items) {
+  const grouped = new Map();
+  const source = Array.isArray(items) ? items : [];
 
-  const isIn = cashIn > 0;
-  const arrow = isIn
-    ? `<span class="arrow-icon arrow-in">↙</span>`
-    : `<span class="arrow-icon arrow-out">↗</span>`;
+  for (const item of source) {
+    const reason = getExpenseDisplayReason(item);
+    const date = String(item?.date || "").trim();
+    const key = `${date}__${normalizeGroupText(reason)}`;
 
-  const title = isIn ? "Cash In" : it.fundsType || "Cash Out";
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        key,
+        date,
+        reason: reason || "No reason",
+        items: [],
+        totalCashIn: 0,
+        totalCashOut: 0,
+        totalKilometer: 0,
+        createdSort: getTimeValue(item),
+      });
+    }
 
-  const dateLine = it.date
-    ? `<div class="expense-person"><strong>Date:</strong> ${escapeHtml(it.date)}</div>`
-    : "";
+    const group = grouped.get(key);
+    group.items.push(item);
+    group.totalCashIn += Number(item?.cashIn || 0);
+    group.totalCashOut += Number(item?.cashOut || 0);
+    group.totalKilometer += Number(item?.kilometer || 0);
+    group.createdSort = Math.max(group.createdSort || 0, getTimeValue(item));
+  }
 
-  const line1 = isIn
-    ? `<div class="expense-person"><strong>Cash in from:</strong> ${escapeHtml(
-        it.cashInFrom || "-"
-      )}</div>`
-    : `<div class="expense-person"><strong>Reason:</strong> ${escapeHtml(
-        it.reason || ""
-      )}</div>`;
+  const sortType = document.getElementById("sortSelect")?.value || "newest";
+  const groups = Array.from(grouped.values());
 
-  const line2 = !isIn && (it.from || it.to)
-    ? `<div class="expense-person">${escapeHtml(it.from || "")}${it.to ? " ← " + escapeHtml(it.to) : ""}</div>`
-    : "";
+  groups.sort((a, b) => {
+    const timeA = Number.isFinite(new Date(`${a?.date || ""}T00:00:00`).getTime())
+      ? new Date(`${a?.date || ""}T00:00:00`).getTime()
+      : Number(a?.createdSort || 0);
+    const timeB = Number.isFinite(new Date(`${b?.date || ""}T00:00:00`).getTime())
+      ? new Date(`${b?.date || ""}T00:00:00`).getTime()
+      : Number(b?.createdSort || 0);
+    const netA = Number(a?.totalCashIn || 0) - Number(a?.totalCashOut || 0);
+    const netB = Number(b?.totalCashIn || 0) - Number(b?.totalCashOut || 0);
 
-  const screenshotHtml = !isIn ? renderReceiptImagesHtml(it) : "";
+    switch (sortType) {
+      case "oldest":
+        return timeA - timeB;
+      case "high":
+        return netB - netA;
+      case "low":
+        return netA - netB;
+      case "newest":
+      default:
+        return timeB - timeA;
+    }
+  });
 
-  const div = document.createElement("div");
-  div.className = "expense-item";
+  return groups;
+}
 
-  div.innerHTML = `
-      <div class="expense-icon">${arrow}</div>
+function getExpenseGroupTotalDisplay(group) {
+  const cashNet = Number(group?.totalCashIn || 0) - Number(group?.totalCashOut || 0);
+  const kilometerTotal = Number(group?.totalKilometer || 0);
+  const hasCash =
+    Math.abs(Number(group?.totalCashIn || 0)) > 1e-9 ||
+    Math.abs(Number(group?.totalCashOut || 0)) > 1e-9;
 
-      <div class="expense-details">
-        <div class="expense-title">${escapeHtml(title)}</div>
-        ${dateLine}
-        ${line1}
-        ${line2}
-        ${screenshotHtml}
-      </div>
+  if (!hasCash && kilometerTotal > 0) {
+    return { text: `${formatExpenseNumber(kilometerTotal)} km`, className: "is-neutral" };
+  }
 
-      <div class="expense-amount">
-        ${cashIn ? `<span class="amount-in">+£${cashIn.toLocaleString()}</span>` : ""}
-        ${cashOut ? `<span class="amount-out">-£${cashOut.toLocaleString()}</span>` : ""}
-      </div>
+  if (cashNet > 0) {
+    return { text: `+£${formatExpenseNumber(cashNet)}`, className: "is-positive" };
+  }
+
+  if (cashNet < 0) {
+    return { text: `-£${formatExpenseNumber(Math.abs(cashNet))}`, className: "is-negative" };
+  }
+
+  return { text: `£${formatExpenseNumber(0)}`, className: "is-neutral" };
+}
+
+function buildExpenseAmountChipHtml(item) {
+  const amountLabel = formatExpenseAmountLabel(item);
+  const primaryShot = getExpensePrimaryScreenshot(item);
+
+  const chipInner = `
+    ${primaryShot?.url
+      ? `<img class="expense-ticket__amount-thumb" src="${escapeHtml(primaryShot.url)}" alt="${escapeHtml(primaryShot.name || "Receipt")}" />`
+      : `<span class="expense-ticket__amount-icon" aria-hidden="true">${featherIconMarkup("dollar-sign", { width: 14, height: 14 })}</span>`}
+    <span class="expense-ticket__amount-chip-text">${escapeHtml(amountLabel)}</span>
+  `;
+
+  if (primaryShot?.url) {
+    return `
+      <a class="expense-ticket__amount-chip expense-ticket__amount-chip--link" href="${escapeHtml(primaryShot.url)}" target="_blank" rel="noopener noreferrer">
+        ${chipInner}
+      </a>
     `;
+  }
 
-  return div;
+  return `
+    <span class="expense-ticket__amount-chip">
+      ${chipInner}
+    </span>
+  `;
+}
+
+function buildExpenseTicketRowHtml(item) {
+  const endpoints = getExpenseRouteEndpoints(item);
+  const typeLabel = getExpenseRowTypeLabel(item);
+  const typeClass = Number(item?.cashIn || 0) > 0 ? " expense-ticket__track-pill--in" : "";
+
+  return `
+    <div class="expense-ticket__route">
+      <div class="expense-ticket__route-meta">
+        ${buildExpenseAmountChipHtml(item)}
+      </div>
+      <div class="expense-ticket__point expense-ticket__point--from">
+        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</div>
+      </div>
+      <div class="expense-ticket__track">
+        <span class="expense-ticket__track-segment expense-ticket__track-segment--left"></span>
+        <span class="expense-ticket__track-pill${typeClass}">${escapeHtml(typeLabel)}</span>
+        <span class="expense-ticket__track-segment expense-ticket__track-segment--right"></span>
+        <span class="expense-ticket__track-arrow" aria-hidden="true">${featherIconMarkup("arrow-right", { width: 19, height: 19 })}</span>
+      </div>
+      <div class="expense-ticket__point expense-ticket__point--right">
+        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function buildUserExpenseTicketHtml(group, { compact = false } = {}) {
+  const total = getExpenseGroupTotalDisplay(group);
+  const rows = [...(Array.isArray(group?.items) ? group.items : [])].sort(
+    (a, b) => getTimeValue(a) - getTimeValue(b)
+  );
+  const reason = String(group?.reason || "No reason").trim() || "No reason";
+
+  return `
+    <article class="expense-ticket${compact ? " expense-ticket--compact" : ""}">
+      <div class="expense-ticket__top">
+        <div class="expense-ticket__header-row">
+          <div class="expense-ticket__meta">
+            <span class="expense-ticket__date">${escapeHtml(formatExpenseGroupDateLabel(group?.date))}</span>
+          </div>
+          <div class="expense-ticket__reason">${escapeHtml(reason)}</div>
+        </div>
+        <div class="expense-ticket__header-divider" aria-hidden="true"></div>
+      </div>
+      <div class="expense-ticket__legs">
+        ${rows.map(buildExpenseTicketRowHtml).join("")}
+      </div>
+      <div class="expense-ticket__separator" aria-hidden="true"></div>
+      <div class="expense-ticket__footer">
+        <span class="expense-ticket__footer-label">Total</span>
+        <span class="expense-ticket__footer-value ${total.className}">${escapeHtml(total.text)}</span>
+      </div>
+    </article>
+  `;
+}
+
+function buildUserExpensesTicketsHtml(items, { emptyMessage = "No expenses yet.", compact = false } = {}) {
+  const groups = buildGroupedExpenseCollections(items);
+  if (!groups.length) {
+    return `<div class="expenses-empty">${escapeHtml(emptyMessage)}</div>`;
+  }
+  return groups.map((group) => buildUserExpenseTicketHtml(group, { compact })).join("");
 }
 
 function renderUserExpensesGrouped(recentItems, pastItems, totalEl, listEl) {
   const recent = Array.isArray(recentItems) ? recentItems : [];
   const past = Array.isArray(pastItems) ? pastItems : [];
 
-  listEl.innerHTML = "";
-
-  // Always compute balance from RECENT (after last settle)
   let total = 0;
   for (const it of recent) {
     total += Number(it.cashIn || 0) - Number(it.cashOut || 0);
@@ -478,36 +666,24 @@ function renderUserExpensesGrouped(recentItems, pastItems, totalEl, listEl) {
   totalEl.textContent = formatGBP(total);
   setTotalBalanceCard(total);
 
-  // Empty state for recent
+  let html = "";
+
   if (recent.length === 0) {
-    // If user has old history, guide them to "Show past expenses"
     if (PAST_USER_ITEMS.length > 0) {
-      const hint = document.createElement("p");
-      hint.style.color = "#9ca3af";
-      hint.style.marginTop = "0.5rem";
-      hint.textContent = "No expenses since the last settlement.";
-      listEl.appendChild(hint);
+      html += '<div class="expenses-empty">No expenses since the last settlement.</div>';
     } else {
-      const empty = document.createElement("p");
-      empty.style.color = "#9ca3af";
-      empty.style.marginTop = "0.5rem";
-      empty.textContent = "No expenses for this user.";
-      listEl.appendChild(empty);
+      html += '<div class="expenses-empty">No expenses for this user.</div>';
     }
   } else {
-    recent.forEach((it) => listEl.appendChild(buildExpenseItemElement(it)));
+    html += buildUserExpensesTicketsHtml(recent);
   }
 
-  // Past section (optional)
   if (SHOW_PAST_EXPENSES && past.length > 0) {
-    // Divider line between recent and past
-    const sep = document.createElement("div");
-    sep.className = "expenses-separator";
-    sep.innerHTML = "<span>Past expenses</span>";
-    listEl.appendChild(sep);
-
-    past.forEach((it) => listEl.appendChild(buildExpenseItemElement(it)));
+    html += '<div class="expenses-separator"><span>Past expenses</span></div>';
+    html += buildUserExpensesTicketsHtml(past);
   }
+
+  listEl.innerHTML = html;
 }
 
 // ---------------------------
