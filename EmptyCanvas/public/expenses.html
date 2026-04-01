@@ -1524,10 +1524,12 @@
   .expense-ticket__track{
     grid-area:track;
     min-width:0;
+    position:relative;
     display:flex;
     align-items:center;
     justify-content:center;
     gap:0.42rem;
+    padding-inline:1.15rem;
   }
   .expense-ticket__track-segment{
     display:block;
@@ -1550,13 +1552,16 @@
     transform:translate(-2px,-50%);
   }
   .expense-ticket__track-arrow{
+    position:absolute;
+    inset-inline-end:0;
+    top:50%;
+    transform:translateY(-50%);
     flex:0 0 auto;
     display:inline-flex;
     align-items:center;
     justify-content:center;
     color:#64748b;
     line-height:1;
-    margin-inline-start:0.02rem;
   }
   .expense-ticket__track-arrow svg{
     width:18px;
@@ -1678,6 +1683,7 @@
     }
     .expense-ticket__track{
       gap:0.28rem;
+      padding-inline:0.9rem;
     }
     .expense-ticket__track-segment{
       min-width:10px;
@@ -1925,7 +1931,7 @@
     </div>
 
     <div id="co_cash_block">
-      <label class="field-label"><i data-feather="minus-circle"></i> Cash out <span class="opt-tag">(Optional)</span></label>
+      <label class="field-label"><i data-feather="minus-circle"></i> Cash out <span id="co_cash_indicator" class="req-text">(Required)</span></label>
       <input id="co_cash" type="number" class="ex-input"/>
     </div>
 
