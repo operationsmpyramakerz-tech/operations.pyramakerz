@@ -121,6 +121,7 @@ function pipeDeliveryReceiptPDF(
     headerColorKey = null,
     documentTitle = "Delivery Receipt",
     recipientLabelLeft = "Delivered to",
+    thirdSignatureLabel = null,
   },
   stream,
 ) {
@@ -200,11 +201,15 @@ function pipeDeliveryReceiptPDF(
     doc.fillColor(COLORS.text).font("Helvetica-Bold").fontSize(FOOTER.titleFont);
     doc.text("Handover confirmation", mL, titleY, { width: contentW, align: "left" });
 
+    const signatureLabels = [String(recipientLabelLeft || "Delivered to"), "Operations"];
+    if (String(thirdSignatureLabel || "").trim()) {
+      signatureLabels.push(String(thirdSignatureLabel).trim());
+    }
+
     const gap = 16;
-    const boxW = (contentW - gap) / 2;
+    const boxCount = signatureLabels.length;
+    const boxW = (contentW - gap * Math.max(0, boxCount - 1)) / boxCount;
     const boxH = FOOTER.boxH;
-    const leftX = mL;
-    const rightX = mL + boxW + gap;
 
     function drawSignatureBox(title, x, y) {
       doc.roundedRect(x, y, boxW, boxH, 10).lineWidth(1).strokeColor(COLORS.border).stroke();
@@ -233,8 +238,10 @@ function pipeDeliveryReceiptPDF(
         .stroke();
     }
 
-    drawSignatureBox(String(recipientLabelLeft || "Delivered to"), leftX, boxesY);
-    drawSignatureBox("Operations", rightX, boxesY);
+    signatureLabels.forEach((label, index) => {
+      const x = mL + index * (boxW + gap);
+      drawSignatureBox(label, x, boxesY);
+    });
 
     doc.restore();
     doc.y = prevY;

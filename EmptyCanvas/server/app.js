@@ -1044,6 +1044,7 @@ function _receiptPresentationForOrderType(orderType) {
     documentTitle: isWithdraw ? "Withdrawal Receipt" : "Delivery Receipt",
     filePrefix: isWithdraw ? "withdrawal_receipt" : "delivery_receipt",
     recipientLabelLeft: isWithdraw ? "Received from" : "Delivered to",
+    thirdSignatureLabel: isWithdraw ? "Store keeper" : null,
   };
 }
 
@@ -7467,6 +7468,12 @@ app.post(
     try {
       const {
         orderIds,
+        orderReceiptDataUrl,
+        orderReceiptFilename,
+        orderReceiptDataUrls,
+        orderReceiptFilenames,
+        receiptNumber,
+        receiptNumbers,
         maintenanceReceiptDataUrl,
         maintenanceReceiptFilename,
         maintenanceReceiptDataUrls,
@@ -7504,6 +7511,8 @@ app.post(
       const orderTypeInfo = _extractOrderTypeInfo(samplePage?.properties || {});
       const isMaintenanceOrder =
         _normKeyOrderType(orderTypeInfo?.orderType) === _normKeyOrderType("Request Maintenance");
+      const isWithdrawalOrder =
+        _normKeyOrderType(orderTypeInfo?.orderType) === _normKeyOrderType("Withdraw Products");
 
       const desiredCandidates = ["Arrived", "Delivered", "Received"];
       let arrivedName = desiredCandidates[0];
@@ -7535,59 +7544,199 @@ app.post(
           ? { status: { name: arrivedName } }
           : { select: { name: arrivedName } };
 
+      const normalizedOrderReceiptDataUrls = (
+        Array.isArray(orderReceiptDataUrls) && orderReceiptDataUrls.length
+          ? orderReceiptDataUrls
+          : Array.isArray(maintenanceReceiptDataUrls) && maintenanceReceiptDataUrls.length
+            ? maintenanceReceiptDataUrls
+            : [orderReceiptDataUrl ?? maintenanceReceiptDataUrl]
+      )
+        .map((item) => String(item || "").trim())
+        .filter(Boolean);
+
+      const normalizedOrderReceiptFilenames = (
+        Array.isArray(orderReceiptFilenames) && orderReceiptFilenames.length
+          ? orderReceiptFilenames
+          : Array.isArray(maintenanceReceiptFilenames) && maintenanceReceiptFilenames.length
+            ? maintenanceReceiptFilenames
+            : [orderReceiptFilename ?? maintenanceReceiptFilename]
+      )
+        .map((item) => String(item || "").trim())
+        .filter(Boolean);
+
+      if (!normalizedOrderReceiptDataUrls.length) {
+        return res.status(400).json({ error: "Please upload at least one signed report image." });
+      }
+
+      const normalizeReceiptNumberEntries = (value) => {
+        const source = Array.isArray(value) ? value : [value];
+        const seen = new Set();
+        const values = [];
+
+        source.forEach((entry) => {
+          String(entry ?? "")
+            .replace(/\r\n/g, "\n")
+            .split(/[\n,]+/)
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .forEach((item) => {
+              if (seen.has(item)) return;
+              seen.add(item);
+              values.push(item);
+            });
+        });
+
+        return values;
+      };
+
+      const normalizedReceiptNumbers = normalizeReceiptNumberEntries(
+        Array.isArray(receiptNumbers) && receiptNumbers.length ? receiptNumbers : receiptNumber,
+      );
+
+      if (isWithdrawalOrder) {
+        if (!normalizedReceiptNumbers.length) {
+          return res.status(400).json({ error: "Store receipt number is required." });
+        }
+        if (normalizedReceiptNumbers.some((item) => !/^\d+$/.test(String(item || "").trim()))) {
+          return res.status(400).json({ error: "Please enter valid store receipt numbers." });
+        }
+      }
+
+      const orderReceiptPropName = await detectOrderReceiptFilesPropName();
+      const orderReceiptPropMeta = orderReceiptPropName ? dbProps?.[orderReceiptPropName] || null : null;
+      const orderReceiptPropType = String(orderReceiptPropMeta?.type || "").trim();
+
+      if (!orderReceiptPropName || !["files", "url"].includes(orderReceiptPropType)) {
+        return res.status(400).json({ error: "Order receipt property is missing in Notion." });
+      }
+
+      if (orderReceiptPropType === "url" && normalizedOrderReceiptDataUrls.length > 1) {
+        return res.status(400).json({ error: "Order receipt property only accepts one file link. Please change it to Files & media in Notion." });
+      }
+
+      let maintenanceReceiptPropName = null;
+      if (isMaintenanceOrder) {
+        maintenanceReceiptPropName = await detectMaintenanceReceiptPropName();
+        if (maintenanceReceiptPropName && dbProps?.[maintenanceReceiptPropName]?.type !== "files") {
+          maintenanceReceiptPropName = null;
+        }
+      }
+
+      const receiptNumberPropName = isWithdrawalOrder ? await detectOrderReceiptPropName() : null;
+      const receiptNumberPropMeta = receiptNumberPropName ? dbProps?.[receiptNumberPropName] || null : null;
+
+      if (isWithdrawalOrder && !receiptNumberPropName) {
+        return res.status(400).json({ error: "Store receipt number property is missing in Notion." });
+      }
+
+      if (
+        isWithdrawalOrder &&
+        receiptNumberPropMeta?.type === "number" &&
+        normalizedReceiptNumbers.length > 1
+      ) {
+        return res.status(400).json({ error: "Store receipt number column must be text to save multiple numbers." });
+      }
+
+      if (
+        isWithdrawalOrder &&
+        receiptNumberPropMeta?.type &&
+        !["rich_text", "title", "number"].includes(String(receiptNumberPropMeta.type || ""))
+      ) {
+        return res.status(400).json({ error: "Store receipt number column type is not supported." });
+      }
+
+      const propPlainText = (prop) => {
+        if (!prop) return "";
+        if (prop.type === "rich_text") {
+          return (prop.rich_text || []).map((t) => t.plain_text).join("");
+        }
+        if (prop.type === "title") {
+          return (prop.title || []).map((t) => t.plain_text).join("");
+        }
+        if (prop.type === "number") {
+          return prop.number === null || prop.number === undefined ? "" : String(prop.number);
+        }
+        return "";
+      };
+
+      const appendReceiptLine = (existing, next) => {
+        const out = [];
+        const seen = new Set();
+
+        const pushLines = (value) => {
+          String(value || "")
+            .replace(/\r\n/g, "\n")
+            .split(/\n+/)
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .forEach((line) => {
+              if (seen.has(line)) return;
+              seen.add(line);
+              out.push(line);
+            });
+        };
+
+        pushLines(existing);
+        pushLines(next);
+        return out.join("\n");
+      };
+
+      const receiptNumbersText = normalizedReceiptNumbers.join("\n").trim();
+      const receiptNumberAsNumber = /^\d+$/.test(receiptNumbersText)
+        ? Math.floor(Number(receiptNumbersText))
+        : null;
+
+      const uploadedFiles = [];
+      for (let index = 0; index < normalizedOrderReceiptDataUrls.length; index += 1) {
+        const reportDataUrl = String(normalizedOrderReceiptDataUrls[index] || "").trim();
+        if (!reportDataUrl) continue;
+
+        const defaultName = isMaintenanceOrder
+          ? `maintenance-report-${index + 1}.jpg`
+          : isWithdrawalOrder
+            ? `withdrawal-report-${index + 1}.jpg`
+            : `delivery-report-${index + 1}.jpg`;
+
+        const rawFileName = String(
+          normalizedOrderReceiptFilenames[index] || normalizedOrderReceiptFilenames[0] || defaultName,
+        ).trim() || defaultName;
+        const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || defaultName;
+        const extMatch = cleanFileName.match(/\.([a-zA-Z0-9]+)$/);
+        const safeExt = extMatch?.[1] ? extMatch[1].toLowerCase() : "jpg";
+        const blobFolder = isMaintenanceOrder
+          ? "maintenance-receipts"
+          : isWithdrawalOrder
+            ? "withdrawal-receipts"
+            : "delivery-receipts";
+        const blobName = `${blobFolder}/${Date.now()}-${index + 1}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
+
+        try {
+          const publicUrl = await uploadToBlobFromBase64(reportDataUrl, blobName);
+          uploadedFiles.push({
+            name: cleanFileName,
+            url: publicUrl,
+          });
+        } catch (uploadErr) {
+          const uploadMessage =
+            String(uploadErr?.message || "").trim() === "BLOB_TOKEN_MISSING"
+              ? "Order receipt upload is not configured."
+              : "Failed to upload order receipt.";
+          return res.status(500).json({ error: uploadMessage });
+        }
+      }
+
+      const orderReceiptNames = uploadedFiles.map((file) => file.name).filter(Boolean);
+      const orderReceiptUrls = uploadedFiles.map((file) => file.url).filter(Boolean);
+      if (!orderReceiptUrls.length) {
+        return res.status(400).json({ error: "Please upload at least one signed report image." });
+      }
+
       let maintenanceReceiptNames = [];
       let maintenanceReceiptUrls = [];
-      let maintenanceReceiptPropName = null;
-
-      if (isMaintenanceOrder) {
-        const receiptDataUrls = (Array.isArray(maintenanceReceiptDataUrls) && maintenanceReceiptDataUrls.length
-          ? maintenanceReceiptDataUrls
-          : [maintenanceReceiptDataUrl])
-          .map((item) => String(item || "").trim())
-          .filter(Boolean);
-        const receiptFilenames = (Array.isArray(maintenanceReceiptFilenames) && maintenanceReceiptFilenames.length
-          ? maintenanceReceiptFilenames
-          : [maintenanceReceiptFilename])
-          .map((item) => String(item || "").trim())
-          .filter(Boolean);
-
-        if (!receiptDataUrls.length) {
-          return res.status(400).json({ error: "At least one maintenance receipt image is required." });
-        }
-
-        maintenanceReceiptPropName = await detectMaintenanceReceiptPropName();
-        if (!maintenanceReceiptPropName || dbProps?.[maintenanceReceiptPropName]?.type !== "files") {
-          return res.status(400).json({ error: "Maintenance receipt property is missing in Notion." });
-        }
-
-        const uploadedFiles = [];
-        for (let index = 0; index < receiptDataUrls.length; index += 1) {
-          const receiptDataUrl = String(receiptDataUrls[index] || "").trim();
-          if (!receiptDataUrl) continue;
-
-          const rawFileName = String(receiptFilenames[index] || receiptFilenames[0] || `maintenance-receipt-${index + 1}.jpg`).trim() || `maintenance-receipt-${index + 1}.jpg`;
-          const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || `maintenance-receipt-${index + 1}.jpg`;
-          const extMatch = cleanFileName.match(/\.([a-zA-Z0-9]+)$/);
-          const safeExt = extMatch?.[1] ? extMatch[1].toLowerCase() : "jpg";
-          const blobName = `maintenance-receipts/${Date.now()}-${index + 1}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
-
-          try {
-            const publicUrl = await uploadToBlobFromBase64(receiptDataUrl, blobName);
-            uploadedFiles.push({
-              name: cleanFileName,
-              url: publicUrl,
-            });
-          } catch (uploadErr) {
-            const uploadMessage =
-              String(uploadErr?.message || "").trim() === "BLOB_TOKEN_MISSING"
-                ? "Maintenance receipt upload is not configured."
-                : "Failed to upload maintenance receipt.";
-            return res.status(500).json({ error: uploadMessage });
-          }
-        }
-
-        maintenanceReceiptNames = uploadedFiles.map((file) => file.name).filter(Boolean);
-        maintenanceReceiptUrls = uploadedFiles.map((file) => file.url).filter(Boolean);
+      let receiptToReturn = null;
+      if (isMaintenanceOrder && maintenanceReceiptPropName) {
+        maintenanceReceiptNames = orderReceiptNames.slice();
+        maintenanceReceiptUrls = orderReceiptUrls.slice();
       }
 
       const pagesBeforeUpdate = orderPages.map((page) => ({
@@ -7596,10 +7745,27 @@ app.post(
       }));
 
       await Promise.all(
-        ids.map((id) => {
+        orderPages.map((page) => {
+          const id = page?.id;
+          const pageProps = page?.properties || {};
           const properties = {
             [statusProp]: value,
           };
+
+          if (orderReceiptPropType === "files") {
+            properties[orderReceiptPropName] = {
+              files: orderReceiptUrls.map((url, index) => (
+                makeExternalFile(
+                  orderReceiptNames[index] || `order-receipt-${index + 1}.jpg`,
+                  url,
+                )
+              )),
+            };
+          } else if (orderReceiptPropType === "url") {
+            properties[orderReceiptPropName] = {
+              url: orderReceiptUrls[0] || null,
+            };
+          }
 
           if (isMaintenanceOrder && maintenanceReceiptPropName && maintenanceReceiptUrls.length) {
             properties[maintenanceReceiptPropName] = {
@@ -7610,6 +7776,33 @@ app.post(
                 )
               )),
             };
+          }
+
+          if (isWithdrawalOrder && receiptNumberPropName && receiptNumbersText) {
+            const actualType = pageProps?.[receiptNumberPropName]?.type || receiptNumberPropMeta?.type || null;
+
+            if (actualType === "rich_text" || !actualType) {
+              const existing = propPlainText(pageProps[receiptNumberPropName]);
+              const merged = appendReceiptLine(existing, receiptNumbersText);
+              properties[receiptNumberPropName] = {
+                rich_text: [{ text: { content: merged } }],
+              };
+              if (receiptToReturn === null) receiptToReturn = merged;
+            } else if (actualType === "title") {
+              const existing = propPlainText(pageProps[receiptNumberPropName]);
+              const merged = appendReceiptLine(existing, receiptNumbersText);
+              properties[receiptNumberPropName] = {
+                title: [{ text: { content: merged } }],
+              };
+              if (receiptToReturn === null) receiptToReturn = merged;
+            } else if (actualType === "number" && receiptNumberAsNumber !== null) {
+              properties[receiptNumberPropName] = { number: receiptNumberAsNumber };
+              if (receiptToReturn === null) receiptToReturn = receiptNumberAsNumber;
+            } else if (actualType === "number") {
+              return Promise.reject(new Error("Store receipt number column must be text to save multiple numbers."));
+            } else {
+              return Promise.reject(new Error("Store receipt number column type is not supported."));
+            }
           }
 
           return notion.pages.update({
@@ -7656,10 +7849,18 @@ app.post(
           statusUpdated: true,
           status: arrivedName,
           statusColor: arrivedColor,
+          orderReceiptNames,
+          orderReceiptName: orderReceiptNames[0] || null,
+          orderReceiptUrls,
+          orderReceiptUrl: orderReceiptUrls[0] || null,
           maintenanceReceiptNames,
           maintenanceReceiptName: maintenanceReceiptNames[0] || null,
           maintenanceReceiptUrls,
           maintenanceReceiptUrl: maintenanceReceiptUrls[0] || null,
+          receiptNumber:
+            receiptToReturn !== null && receiptToReturn !== undefined
+              ? receiptToReturn
+              : receiptNumbersText || null,
           stocktakingSyncErrors,
         });
       }
@@ -7668,10 +7869,18 @@ app.post(
         success: true,
         status: arrivedName,
         statusColor: arrivedColor,
+        orderReceiptNames,
+        orderReceiptName: orderReceiptNames[0] || null,
+        orderReceiptUrls,
+        orderReceiptUrl: orderReceiptUrls[0] || null,
         maintenanceReceiptNames,
         maintenanceReceiptName: maintenanceReceiptNames[0] || null,
         maintenanceReceiptUrls,
         maintenanceReceiptUrl: maintenanceReceiptUrls[0] || null,
+        receiptNumber:
+          receiptToReturn !== null && receiptToReturn !== undefined
+            ? receiptToReturn
+            : receiptNumbersText || null,
         stocktakingSyncedCount: stocktakingSyncResults.filter((item) => item && item.skipped === false).length,
         stocktakingSkippedCount: stocktakingSyncResults.filter((item) => item && item.skipped === true).length,
       });
@@ -8495,6 +8704,7 @@ app.post(
           showCosts: !hideCosts,
           documentTitle: receiptView.documentTitle,
           recipientLabelLeft: receiptView.recipientLabelLeft,
+          thirdSignatureLabel: receiptView.thirdSignatureLabel,
         },
         res,
       );
@@ -9558,6 +9768,7 @@ app.post(
           headerColorKey: groupReason,
           documentTitle: receiptView.documentTitle,
           recipientLabelLeft: receiptView.recipientLabelLeft,
+          thirdSignatureLabel: receiptView.thirdSignatureLabel,
         },
         res,
       );
