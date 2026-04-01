@@ -1198,7 +1198,7 @@ if (document.querySelector('.sidebar')) {
   ensureLink({ href: '/home', label: 'Home', icon: 'home', prepend: true });
 ensureLink({ href: '/orders/sv-orders', label: 'Orders Review', icon: 'award' });
   ensureLink({ href: '/orders/maintenance-orders', label: 'Maintenance Orders', icon: 'tool' });
-  ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'users' });
+  ensureLink({ href: '/expenses/users', label: 'Expenses by User', icon: 'credit-card' });
   ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
   ensureLink({ href: '/tasks', label: 'Tasks', icon: 'check-square' });
 
