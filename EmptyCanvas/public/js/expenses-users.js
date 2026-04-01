@@ -320,15 +320,26 @@ async function loadExpenseUsers() {
       btn.classList.toggle("has-negative", totalValue < 0);
       btn.classList.toggle("has-positive", totalValue > 0);
 
-      const lastSettledLabel = u.lastSettledDate
-        ? `Last settled: ${escapeHtml(formatDateDisplay(u.lastSettledDate))}`
-        : "Last settled: —";
+      const itemCount = Number(u.count || 0);
+      const itemCountLabel = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
+      const lastSettledValue = u.lastSettledDate
+        ? escapeHtml(formatDateDisplay(u.lastSettledDate))
+        : "—";
 
       btn.innerHTML = `
-        <span class="user-name">${escapeHtml(u.name)}</span>
-        <span class="user-total">${totalStr}</span>
-        <span class="user-count">(${u.count} items)</span>
-        <span class="user-settled">${lastSettledLabel}</span>
+        <div class="user-tab__header">
+          <span class="user-tab__count">${escapeHtml(itemCountLabel)}</span>
+          <span class="user-tab__name">${escapeHtml(u.name)}</span>
+        </div>
+        <div class="user-tab__divider" aria-hidden="true"></div>
+        <div class="user-tab__body">
+          <span class="user-tab__label">Current balance</span>
+          <span class="user-total">${totalStr}</span>
+        </div>
+        <div class="user-tab__footer">
+          <span class="user-tab__footer-label">Last settled</span>
+          <span class="user-settled">${lastSettledValue}</span>
+        </div>
       `;
 
       btn.addEventListener("click", () => {
