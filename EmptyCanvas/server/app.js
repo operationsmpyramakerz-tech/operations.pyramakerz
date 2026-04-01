@@ -7743,38 +7743,44 @@ app.post(
         page,
         wasArrivedLike: _isArrivedLikeStatusName(_extractPropText(page?.properties?.[statusProp]) || ""),
       }));
+      const primaryReceiptPageId = orderPages?.[0]?.id || null;
 
       await Promise.all(
-        orderPages.map((page) => {
+        orderPages.map((page, pageIndex) => {
           const id = page?.id;
           const pageProps = page?.properties || {};
           const properties = {
             [statusProp]: value,
           };
+          const shouldAttachOrderReceipts = pageIndex === 0;
 
           if (orderReceiptPropType === "files") {
             properties[orderReceiptPropName] = {
-              files: orderReceiptUrls.map((url, index) => (
-                makeExternalFile(
-                  orderReceiptNames[index] || `order-receipt-${index + 1}.jpg`,
-                  url,
-                )
-              )),
+              files: shouldAttachOrderReceipts
+                ? orderReceiptUrls.map((url, index) => (
+                    makeExternalFile(
+                      orderReceiptNames[index] || `order-receipt-${index + 1}.jpg`,
+                      url,
+                    )
+                  ))
+                : [],
             };
           } else if (orderReceiptPropType === "url") {
             properties[orderReceiptPropName] = {
-              url: orderReceiptUrls[0] || null,
+              url: shouldAttachOrderReceipts ? (orderReceiptUrls[0] || null) : null,
             };
           }
 
-          if (isMaintenanceOrder && maintenanceReceiptPropName && maintenanceReceiptUrls.length) {
+          if (isMaintenanceOrder && maintenanceReceiptPropName) {
             properties[maintenanceReceiptPropName] = {
-              files: maintenanceReceiptUrls.map((url, index) => (
-                makeExternalFile(
-                  maintenanceReceiptNames[index] || `maintenance-receipt-${index + 1}.jpg`,
-                  url,
-                )
-              )),
+              files: shouldAttachOrderReceipts && maintenanceReceiptUrls.length
+                ? maintenanceReceiptUrls.map((url, index) => (
+                    makeExternalFile(
+                      maintenanceReceiptNames[index] || `maintenance-receipt-${index + 1}.jpg`,
+                      url,
+                    )
+                  ))
+                : [],
             };
           }
 
@@ -7853,6 +7859,7 @@ app.post(
           orderReceiptName: orderReceiptNames[0] || null,
           orderReceiptUrls,
           orderReceiptUrl: orderReceiptUrls[0] || null,
+          primaryReceiptPageId,
           maintenanceReceiptNames,
           maintenanceReceiptName: maintenanceReceiptNames[0] || null,
           maintenanceReceiptUrls,
@@ -7873,6 +7880,7 @@ app.post(
         orderReceiptName: orderReceiptNames[0] || null,
         orderReceiptUrls,
         orderReceiptUrl: orderReceiptUrls[0] || null,
+        primaryReceiptPageId,
         maintenanceReceiptNames,
         maintenanceReceiptName: maintenanceReceiptNames[0] || null,
         maintenanceReceiptUrls,
