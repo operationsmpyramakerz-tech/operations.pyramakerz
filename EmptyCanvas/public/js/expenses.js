@@ -6,7 +6,8 @@ let FUNDS_TYPES = [];
 let FUNDS_TYPES_LOADED = false;
 let FUNDS_TYPES_LOADING = false;
 
-const HIDDEN_FUNDS_TYPE_KEYS = new Set(["settledmyaccount"]);
+const EXTRA_FUNDS_TYPES = ["نقل", "توكتوك", "مشال", "مصروفات"];
+const HIDDEN_FUNDS_TYPE_KEYS = new Set(["settledmyaccount", "cashreceipt", "cashreciept"]);
 const REQUIRED_SCREENSHOT_FUNDS_TYPE_KEYS = new Set([
   "owncar",
   "swvl",
@@ -455,7 +456,7 @@ function buildExpenseOrderActionHtml(order) {
   if (!order) return "";
 
   const meta = getExpenseOrderTypeMeta(order?.orderType || "");
-  const href = String(order?.trackingUrl || "").trim();
+  const href = String(order?.receiptViewerUrl || order?.trackingUrl || "").trim();
   const orderLabel = [
     String(order?.orderId || "").trim(),
     String(order?.orderType || "").trim(),
@@ -553,6 +554,7 @@ function buildExpenseTicketHtml(group, { compact = false } = {}) {
   const rows = [...(Array.isArray(group?.items) ? group.items : [])].sort(
     (a, b) => getExpenseTimeValue(a) - getExpenseTimeValue(b),
   );
+  const hideReason = shouldHideExpenseGroupReason(group);
   const ordersHtml = Array.isArray(group?.orders) && group.orders.length
     ? `<div class="expense-ticket__order-actions">${group.orders.map(buildExpenseOrderActionHtml).join("")}</div>`
     : "";
@@ -563,7 +565,7 @@ function buildExpenseTicketHtml(group, { compact = false } = {}) {
           <div class="expense-ticket__meta">
             <span class="expense-ticket__date">${escapeHtml(formatExpenseGroupDateLabel(group?.date))}</span>
           </div>
-          <div class="expense-ticket__reason">${escapeHtml(group?.reason || "No reason")}</div>
+          ${hideReason ? "" : `<div class="expense-ticket__reason">${escapeHtml(group?.reason || "No reason")}</div>`}
         </div>
         ${ordersHtml}
         <div class="expense-ticket__header-divider" aria-hidden="true"></div>
@@ -755,12 +757,25 @@ function featherIconMarkup(name, attrs = {}) {
 }
 
 function normalizeFundsTypeKey(value) {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+
+  const asciiKey = raw.replace(/[^a-z0-9]/g, "");
+  if (asciiKey) return asciiKey;
+
+  try {
+    return raw
+      .normalize("NFKC")
+      .replace(/[\u064B-\u065F\u0610-\u061A\u06D6-\u06ED]/g, "")
+      .replace(/[^a-z0-9\u0600-\u06FF]+/g, "");
+  } catch {
+    return raw.replace(/\s+/g, "");
+  }
 }
 
 function getVisibleFundsTypes() {
   const seen = new Set();
-  return (Array.isArray(FUNDS_TYPES) ? FUNDS_TYPES : [])
+  return [...(Array.isArray(FUNDS_TYPES) ? FUNDS_TYPES : []), ...EXTRA_FUNDS_TYPES]
     .map((type) => String(type || "").trim())
     .filter(Boolean)
     .filter((type) => {
@@ -966,6 +981,8 @@ function syncCashOutFormTypeState({ showOwnCarInfo = false } = {}) {
   const triggerText = document.getElementById("fundsTypeTriggerText");
   const kmBlock = document.getElementById("co_km_block");
   const cashBlock = document.getElementById("co_cash_block");
+  const cashInput = document.getElementById("co_cash");
+  const cashIndicator = document.getElementById("co_cash_indicator");
   const screenshotInput = document.getElementById("co_screenshot");
   const screenshotWrap = document.getElementById("co_screenshot_wrap");
   const screenshotIndicator = document.getElementById("co_screenshot_indicator");
@@ -976,6 +993,15 @@ function syncCashOutFormTypeState({ showOwnCarInfo = false } = {}) {
 
   if (kmBlock) kmBlock.style.display = ownCar ? "block" : "none";
   if (cashBlock) cashBlock.style.display = ownCar ? "none" : "block";
+
+  if (cashInput) {
+    cashInput.required = !ownCar;
+  }
+
+  if (cashIndicator) {
+    cashIndicator.textContent = ownCar ? "" : "(Required)";
+    cashIndicator.className = ownCar ? "opt-tag" : "req-text";
+  }
 
   if (triggerText) {
     if (selectedType) triggerText.innerHTML = buildFundsTypeSummaryHtml(selectedType);
@@ -1189,6 +1215,18 @@ function formatExpenseNumber(value) {
   const num = Number(value || 0);
   if (!Number.isFinite(num)) return "0";
   return num.toLocaleString("en-GB", { maximumFractionDigits: 2 });
+}
+
+function shouldHideExpenseGroupReason(group) {
+  const reason = normalizeExpenseGroupText(group?.reason);
+  const orders = Array.isArray(group?.orders) ? group.orders : [];
+  if (!reason || !orders.length) return false;
+
+  return orders.some((order) => {
+    const label = normalizeExpenseGroupText(order?.label);
+    const orderId = normalizeExpenseGroupText(order?.orderId);
+    return (!!label && reason === label) || (!!orderId && reason === orderId);
+  });
 }
 
 function formatPendingCashOutValue(item) {
@@ -1864,6 +1902,9 @@ async function buildCashOutDraftFromForm() {
     draft.kilometer = Number(document.getElementById("co_km")?.value || 0);
   } else {
     draft.amount = Number(document.getElementById("co_cash")?.value || 0);
+    if (!Number.isFinite(draft.amount) || draft.amount <= 0) {
+      throw new Error("Cash out amount is required.");
+    }
   }
 
   const fileInput = document.getElementById("co_screenshot");
