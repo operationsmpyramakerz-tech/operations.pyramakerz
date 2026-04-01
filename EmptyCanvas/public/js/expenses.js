@@ -3,6 +3,21 @@
    ============================= */
 
 let FUNDS_TYPES = [];
+let FUNDS_TYPES_LOADED = false;
+let FUNDS_TYPES_LOADING = false;
+
+const HIDDEN_FUNDS_TYPE_KEYS = new Set(["settledmyaccount"]);
+const REQUIRED_SCREENSHOT_FUNDS_TYPE_KEYS = new Set([
+  "owncar",
+  "swvl",
+  "gobus",
+  "bybus",
+  "train",
+  "indrive",
+  "uber",
+  "uper",
+  "didi",
+]);
 
 let CASH_IN_FROM_OPTIONS = [];
 let EXPENSE_ORDER_OPTIONS = [];
@@ -321,7 +336,7 @@ function formatExpenseAmountLabel(item) {
   const kilometer = Number(item?.kilometer || 0);
   const cashOut = Number(item?.cashOut || 0);
 
-  if (fundsType === "Own car" && kilometer > 0 && !cashOut) {
+  if (isOwnCarFundsType(fundsType) && kilometer > 0 && !cashOut) {
     return `${formatExpenseNumber(kilometer)} km`;
   }
 
@@ -633,36 +648,26 @@ function renderAllExpensesModalList(listEl) {
    LOAD FUNDS TYPES FROM SERVER
    ============================= */
 async function loadFundsTypes() {
+    FUNDS_TYPES_LOADING = true;
+
     try {
         const res = await fetch("/api/expenses/types");
         const data = await res.json();
-        if (data.success) {
+        if (data.success && Array.isArray(data.options)) {
             FUNDS_TYPES = data.options;
+        } else {
+            FUNDS_TYPES = [];
         }
     } catch (err) {
         console.error("Funds Type Load Error", err);
         FUNDS_TYPES = [];
+    } finally {
+        FUNDS_TYPES_LOADED = true;
+        FUNDS_TYPES_LOADING = false;
     }
 
-    // Fill select inside Cash Out modal
-    const sel = document.getElementById("co_type");
-    if (sel) {
-        sel.innerHTML = `<option value="">Select funds type...</option>`;
-        FUNDS_TYPES.forEach(t => {
-            sel.innerHTML += `<option value="${t}">${t}</option>`;
-        });
-
-        // KM logic
-        sel.addEventListener("change", () => {
-            const v = sel.value;
-            const kmBlock   = document.getElementById("co_km_block");
-            const cashBlock = document.getElementById("co_cash_block");
-            if (kmBlock && cashBlock) {
-                kmBlock.style.display  = v === "Own car" ? "block" : "none";
-                cashBlock.style.display = v === "Own car" ? "none"  : "block";
-            }
-        });
-    }
+    syncFundsTypeHiddenSelect();
+    syncCashOutFormTypeState({ showOwnCarInfo: false });
 }
 
 /* =============================
@@ -747,6 +752,299 @@ function featherIconMarkup(name, attrs = {}) {
   } catch {
     return "";
   }
+}
+
+function normalizeFundsTypeKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getVisibleFundsTypes() {
+  const seen = new Set();
+  return (Array.isArray(FUNDS_TYPES) ? FUNDS_TYPES : [])
+    .map((type) => String(type || "").trim())
+    .filter(Boolean)
+    .filter((type) => {
+      const key = normalizeFundsTypeKey(type);
+      if (!key || HIDDEN_FUNDS_TYPE_KEYS.has(key) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function isOwnCarFundsType(value) {
+  return normalizeFundsTypeKey(value) === "owncar";
+}
+
+function isScreenshotRequiredForFundsType(value) {
+  return REQUIRED_SCREENSHOT_FUNDS_TYPE_KEYS.has(normalizeFundsTypeKey(value));
+}
+
+function getFundsTypeOptionNote(value) {
+  if (isOwnCarFundsType(value)) {
+    return "Google Maps screenshot required";
+  }
+
+  if (isScreenshotRequiredForFundsType(value)) {
+    return "Screenshot is required for this ride";
+  }
+
+  return "Screenshot upload is optional";
+}
+
+function getFundsTypeChipMeta(value) {
+  if (isOwnCarFundsType(value)) {
+    return {
+      label: "Maps required",
+      icon: "navigation",
+      bg: "#ede9fe",
+      fg: "#6d28d9",
+      bd: "#c4b5fd",
+    };
+  }
+
+  if (isScreenshotRequiredForFundsType(value)) {
+    return {
+      label: "Required",
+      icon: "image",
+      bg: "#fff7ed",
+      fg: "#c2410c",
+      bd: "#fdba74",
+    };
+  }
+
+  return {
+    label: "Optional",
+    icon: "check-circle",
+    bg: "#f8fafc",
+    fg: "#475569",
+    bd: "#cbd5e1",
+  };
+}
+
+function buildFundsTypeStatusChipHtml(value, { className = "order-select__chip" } = {}) {
+  const meta = getFundsTypeChipMeta(value);
+  return `
+    <span
+      class="${className}"
+      style="--order-chip-bg:${meta.bg};--order-chip-fg:${meta.fg};--order-chip-border:${meta.bd};"
+    >
+      ${featherIconMarkup(meta.icon, { width: 15, height: 15 })}
+      <span>${escapeHtml(meta.label)}</span>
+    </span>
+  `;
+}
+
+function buildFundsTypeSummaryHtml(value) {
+  const type = String(value || "").trim();
+  if (!type) return "";
+  return `
+    <span class="funds-type-summary">
+      <span class="funds-type-summary__name">${escapeHtml(type)}</span>
+      ${buildFundsTypeStatusChipHtml(type, { className: "order-select__chip order-select__chip--selected" })}
+    </span>
+  `;
+}
+
+function syncFundsTypeHiddenSelect() {
+  const selectEl = document.getElementById("co_type");
+  if (!selectEl) return;
+
+  const currentValue = String(selectEl.value || "").trim();
+  const visibleTypes = getVisibleFundsTypes();
+
+  selectEl.innerHTML = `<option value="">Select funds type...</option>`;
+  visibleTypes.forEach((type) => {
+    const opt = document.createElement("option");
+    opt.value = type;
+    opt.textContent = type;
+    selectEl.appendChild(opt);
+  });
+
+  if (currentValue && visibleTypes.includes(currentValue)) {
+    selectEl.value = currentValue;
+  } else if (currentValue) {
+    selectEl.value = "";
+  }
+}
+
+function positionFundsTypeDropdown() {
+  const trigger = document.getElementById("fundsTypeTrigger");
+  const dropdown = document.getElementById("fundsTypeDropdown");
+  if (!trigger || !dropdown || dropdown.hidden) return;
+
+  const rect = trigger.getBoundingClientRect();
+  const viewportPad = 16;
+  const width = Math.min(rect.width, window.innerWidth - viewportPad * 2);
+  const left = Math.min(Math.max(viewportPad, rect.left), window.innerWidth - viewportPad - width);
+  const spaceBelow = Math.max(120, window.innerHeight - rect.bottom - viewportPad);
+  const spaceAbove = Math.max(120, rect.top - viewportPad);
+  const placeAbove = spaceBelow < 220 && spaceAbove > spaceBelow;
+  const availableSpace = placeAbove ? spaceAbove : spaceBelow;
+  const optionsList = document.getElementById("fundsTypeOptionsList");
+
+  dropdown.style.left = `${left}px`;
+  dropdown.style.width = `${width}px`;
+  dropdown.style.maxHeight = `${Math.min(360, availableSpace)}px`;
+  if (optionsList) {
+    optionsList.style.maxHeight = `${Math.max(120, Math.min(260, availableSpace - 24))}px`;
+  }
+
+  if (placeAbove) {
+    dropdown.style.top = "auto";
+    dropdown.style.bottom = `${Math.max(viewportPad, window.innerHeight - rect.top + 8)}px`;
+  } else {
+    dropdown.style.bottom = "auto";
+    dropdown.style.top = `${Math.min(window.innerHeight - viewportPad, rect.bottom + 8)}px`;
+  }
+}
+
+function openFundsTypeDropdown() {
+  const trigger = document.getElementById("fundsTypeTrigger");
+  const dropdown = document.getElementById("fundsTypeDropdown");
+  if (!trigger || !dropdown) return;
+  dropdown.hidden = false;
+  trigger.classList.add("is-open");
+  trigger.setAttribute("aria-expanded", "true");
+  renderFundsTypeDropdown();
+  window.requestAnimationFrame(positionFundsTypeDropdown);
+}
+
+function closeFundsTypeDropdown() {
+  const trigger = document.getElementById("fundsTypeTrigger");
+  const dropdown = document.getElementById("fundsTypeDropdown");
+  if (!trigger || !dropdown) return;
+  dropdown.hidden = true;
+  trigger.classList.remove("is-open");
+  trigger.setAttribute("aria-expanded", "false");
+}
+
+function renderFundsTypeDropdown() {
+  const listEl = document.getElementById("fundsTypeOptionsList");
+  const stateEl = document.getElementById("fundsTypeDropdownState");
+  const selectEl = document.getElementById("co_type");
+  if (!listEl || !stateEl || !selectEl) return;
+
+  const visibleTypes = getVisibleFundsTypes();
+  const selectedValue = String(selectEl.value || "").trim();
+
+  if (FUNDS_TYPES_LOADING && !FUNDS_TYPES_LOADED) {
+    stateEl.textContent = "Loading funds types...";
+    stateEl.style.display = "block";
+  } else if (!visibleTypes.length) {
+    stateEl.textContent = "No funds types available right now.";
+    stateEl.style.display = "block";
+  } else {
+    stateEl.style.display = "none";
+  }
+
+  listEl.innerHTML = visibleTypes.map((type) => {
+    const selected = type === selectedValue;
+    return `
+      <button
+        type="button"
+        class="order-select__option${selected ? " is-selected" : ""}"
+        data-funds-type="${escapeHtml(type)}"
+        role="option"
+        aria-selected="${selected ? "true" : "false"}"
+        title="${escapeHtml(type)}"
+      >
+        <span class="funds-select__option-main">
+          <span class="order-select__option-id">${escapeHtml(type)}</span>
+          <span class="funds-select__option-note">${escapeHtml(getFundsTypeOptionNote(type))}</span>
+        </span>
+        ${buildFundsTypeStatusChipHtml(type)}
+      </button>
+    `;
+  }).join("");
+
+  window.requestAnimationFrame(positionFundsTypeDropdown);
+}
+
+function syncCashOutFormTypeState({ showOwnCarInfo = false } = {}) {
+  const selectEl = document.getElementById("co_type");
+  const trigger = document.getElementById("fundsTypeTrigger");
+  const triggerText = document.getElementById("fundsTypeTriggerText");
+  const kmBlock = document.getElementById("co_km_block");
+  const cashBlock = document.getElementById("co_cash_block");
+  const screenshotInput = document.getElementById("co_screenshot");
+  const screenshotWrap = document.getElementById("co_screenshot_wrap");
+  const screenshotIndicator = document.getElementById("co_screenshot_indicator");
+  const screenshotHelp = document.getElementById("co_screenshot_help");
+  const selectedType = String(selectEl?.value || "").trim();
+  const ownCar = isOwnCarFundsType(selectedType);
+  const screenshotRequired = isScreenshotRequiredForFundsType(selectedType);
+
+  if (kmBlock) kmBlock.style.display = ownCar ? "block" : "none";
+  if (cashBlock) cashBlock.style.display = ownCar ? "none" : "block";
+
+  if (triggerText) {
+    if (selectedType) triggerText.innerHTML = buildFundsTypeSummaryHtml(selectedType);
+    else triggerText.textContent = "Select funds type...";
+  }
+
+  if (trigger) {
+    trigger.classList.toggle("is-placeholder", !selectedType);
+    trigger.classList.toggle("is-selected", !!selectedType);
+  }
+
+  if (screenshotInput) {
+    screenshotInput.required = screenshotRequired;
+  }
+
+  if (screenshotIndicator) {
+    screenshotIndicator.textContent = screenshotRequired ? "(Required)" : "(Optional)";
+    screenshotIndicator.className = screenshotRequired ? "req-text" : "opt-tag";
+  }
+
+  if (screenshotWrap) {
+    screenshotWrap.classList.toggle("is-required", screenshotRequired);
+  }
+
+  if (screenshotHelp) {
+    if (ownCar) {
+      screenshotHelp.textContent = "Upload a Google Maps screenshot showing the distance between the starting point and destination.";
+    } else if (screenshotRequired) {
+      screenshotHelp.textContent = "Upload a screenshot or receipt for this funds type.";
+    } else {
+      screenshotHelp.textContent = "Upload receipt screenshots (JPG/PNG).";
+    }
+    screenshotHelp.classList.toggle("is-emphasis", ownCar || screenshotRequired);
+  }
+
+  renderFundsTypeDropdown();
+
+  if (showOwnCarInfo && ownCar) {
+    openOwnCarInfoModal();
+  } else if (!ownCar) {
+    closeOwnCarInfoModal();
+  }
+}
+
+function setFundsTypeSelection(value = "", { showOwnCarInfo = false } = {}) {
+  const selectEl = document.getElementById("co_type");
+  if (!selectEl) return;
+
+  const nextValue = String(value || "").trim();
+  selectEl.value = nextValue;
+  if (selectEl.value !== nextValue) {
+    selectEl.value = "";
+  }
+
+  syncCashOutFormTypeState({ showOwnCarInfo });
+}
+
+function openOwnCarInfoModal() {
+  const modal = document.getElementById("ownCarInfoModal");
+  if (!modal) return;
+  modal.style.display = "flex";
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeOwnCarInfoModal() {
+  const modal = document.getElementById("ownCarInfoModal");
+  if (!modal) return;
+  modal.style.display = "none";
+  modal.setAttribute("aria-hidden", "true");
 }
 
 function normalizeExpenseOrderTypeKey(value) {
@@ -894,7 +1192,7 @@ function formatExpenseNumber(value) {
 }
 
 function formatPendingCashOutValue(item) {
-  if (String(item?.fundsType || "").trim() === "Own car") {
+  if (isOwnCarFundsType(item?.fundsType)) {
     return `${formatExpenseNumber(item?.kilometer)} km`;
   }
   return `£${formatExpenseNumber(item?.amount)}`;
@@ -928,21 +1226,19 @@ function resetCashOutFormFields() {
   const toInput = document.getElementById("co_to");
   const kmInput = document.getElementById("co_km");
   const cashInput = document.getElementById("co_cash");
-  const typeSelect = document.getElementById("co_type");
   const fileInput = document.getElementById("co_screenshot");
   const fileNameEl = document.getElementById("co_screenshot_name");
-  const kmBlock = document.getElementById("co_km_block");
-  const cashBlock = document.getElementById("co_cash_block");
 
   if (fromInput) fromInput.value = "";
   if (toInput) toInput.value = "";
   if (kmInput) kmInput.value = "";
   if (cashInput) cashInput.value = "";
-  if (typeSelect) typeSelect.value = "";
   if (fileInput) fileInput.value = "";
   if (fileNameEl) fileNameEl.textContent = "No file chosen";
-  if (kmBlock) kmBlock.style.display = "none";
-  if (cashBlock) cashBlock.style.display = "block";
+
+  closeFundsTypeDropdown();
+  closeOwnCarInfoModal();
+  setFundsTypeSelection("", { showOwnCarInfo: false });
 }
 
 function syncCashOutOrderActionUI() {
@@ -1452,7 +1748,7 @@ function openCashOutModal() {
       return;
     }
 
-    if (!FUNDS_TYPES.length) {
+    if (!FUNDS_TYPES_LOADED && !FUNDS_TYPES_LOADING) {
       void loadFundsTypes();
     }
 
@@ -1564,7 +1860,7 @@ async function buildCashOutDraftFromForm() {
     screenshots: [],
   };
 
-  if (type === "Own car") {
+  if (isOwnCarFundsType(type)) {
     draft.kilometer = Number(document.getElementById("co_km")?.value || 0);
   } else {
     draft.amount = Number(document.getElementById("co_cash")?.value || 0);
@@ -1586,6 +1882,13 @@ async function buildCashOutDraftFromForm() {
     }
   }
 
+  if (isScreenshotRequiredForFundsType(type) && !draft.screenshots.length) {
+    if (isOwnCarFundsType(type)) {
+      throw new Error("A Google Maps screenshot is required for Own car.");
+    }
+    throw new Error("Screenshot is required for this funds type.");
+  }
+
   return draft;
 }
 
@@ -1604,7 +1907,7 @@ function buildCashOutPayloadFromDraft(draft, selectedOrder) {
     to: String(draft?.to || "").trim(),
   };
 
-  if (body.fundsType === "Own car") {
+  if (isOwnCarFundsType(body.fundsType)) {
     body.kilometer = Number(draft?.kilometer || 0);
   } else {
     body.amount = Number(draft?.amount || 0);
@@ -1891,10 +2194,17 @@ document.addEventListener("DOMContentLoaded", () => {
     setupCashInFromSearchableSelect();
     setupScreenshotUploadUI();
     syncSelectedExpenseOrderUI();
+    syncCashOutFormTypeState({ showOwnCarInfo: false });
     renderPendingCashOutDrafts();
 
     const cashInBtn  = document.getElementById("cashInBtn");
     const cashOutBtn = document.getElementById("cashOutBtn");
+    const fundsTypePicker = document.getElementById("fundsTypePicker");
+    const fundsTypeTrigger = document.getElementById("fundsTypeTrigger");
+    const fundsTypeOptionsList = document.getElementById("fundsTypeOptionsList");
+    const ownCarInfoModal = document.getElementById("ownCarInfoModal");
+    const ownCarInfoCard = ownCarInfoModal?.querySelector ? ownCarInfoModal.querySelector(".mini-info-modal__card") : null;
+    const ownCarInfoCloseBtn = document.getElementById("ownCarInfoCloseBtn");
     const cashOutOrderPicker = document.getElementById("cashOutOrderPicker");
     const cashOutOrderTrigger = document.getElementById("cashOutOrderTrigger");
     const cashOutOrderOptionsList = document.getElementById("cashOutOrderOptionsList");
@@ -1912,12 +2222,29 @@ document.addEventListener("DOMContentLoaded", () => {
             openCashOutOrderModal({ resetSelection: true, resetDate: true, forceReload: false, resetDrafts: true });
         });
     }
+    if (fundsTypeTrigger) {
+        fundsTypeTrigger.addEventListener("click", (e) => {
+            e.preventDefault();
+            const dropdown = document.getElementById("fundsTypeDropdown");
+            if (dropdown?.hidden) openFundsTypeDropdown();
+            else closeFundsTypeDropdown();
+        });
+    }
     if (cashOutOrderTrigger) {
         cashOutOrderTrigger.addEventListener("click", (e) => {
             e.preventDefault();
             const dropdown = document.getElementById("cashOutOrderDropdown");
             if (dropdown?.hidden) openExpenseOrderDropdown();
             else closeExpenseOrderDropdown();
+        });
+    }
+    if (fundsTypeOptionsList) {
+        fundsTypeOptionsList.addEventListener("click", (e) => {
+            const optionBtn = e.target?.closest ? e.target.closest(".order-select__option") : null;
+            if (!optionBtn) return;
+            const fundsType = String(optionBtn.getAttribute("data-funds-type") || "").trim();
+            setFundsTypeSelection(fundsType, { showOwnCarInfo: true });
+            closeFundsTypeDropdown();
         });
     }
     if (cashOutOrderOptionsList) {
@@ -1960,16 +2287,28 @@ document.addEventListener("DOMContentLoaded", () => {
         cashOutOrderDate.addEventListener("change", onDateChange);
     }
     document.addEventListener("click", (e) => {
-        if (!cashOutOrderPicker || cashOutOrderPicker.contains(e.target)) return;
-        closeExpenseOrderDropdown();
+        if (!cashOutOrderPicker || !cashOutOrderPicker.contains(e.target)) {
+          closeExpenseOrderDropdown();
+        }
+        if (!fundsTypePicker || !fundsTypePicker.contains(e.target)) {
+          closeFundsTypeDropdown();
+        }
     });
     document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeExpenseOrderDropdown();
+        if (e.key === "Escape") {
+          closeExpenseOrderDropdown();
+          closeFundsTypeDropdown();
+          closeOwnCarInfoModal();
+        }
     });
     document.addEventListener("scroll", () => {
         positionExpenseOrderDropdown();
+        positionFundsTypeDropdown();
     }, true);
-    window.addEventListener("resize", positionExpenseOrderDropdown);
+    window.addEventListener("resize", () => {
+        positionExpenseOrderDropdown();
+        positionFundsTypeDropdown();
+    });
     if (cashOutOrderAddExpenseBtn) {
         cashOutOrderAddExpenseBtn.addEventListener("click", (e) => {
             e.preventDefault();
@@ -1998,6 +2337,21 @@ document.addEventListener("DOMContentLoaded", () => {
             renderPendingCashOutDrafts();
         });
     }
+    if (ownCarInfoCloseBtn) {
+      ownCarInfoCloseBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        closeOwnCarInfoModal();
+      });
+    }
+    if (ownCarInfoModal) {
+      ownCarInfoModal.addEventListener("click", (e) => {
+        if (e.target === ownCarInfoModal) closeOwnCarInfoModal();
+      });
+    }
+    if (ownCarInfoCard) {
+      ownCarInfoCard.addEventListener("click", (e) => e.stopPropagation());
+    }
+
     const viewAllBtn = document.getElementById("viewAllBtn");
     if (viewAllBtn) {
         // IMPORTANT:
