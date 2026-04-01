@@ -13405,7 +13405,9 @@ app.get("/api/expenses/types", cachedJsonRoute(20 * 60, () => "cache:api:expense
     });
 
     const options = response.properties["Funds Type"].select.options
-      .map(opt => opt.name);
+      .map(opt => opt.name)
+      .filter((name) => String(name || "").trim())
+      .filter((name) => String(name || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "") !== "settledmyaccount");
 
     res.json({ success: true, options });
   } catch (err) {
@@ -13484,20 +13486,10 @@ app.get(
   "/api/expenses/orders/options",
   requireAuth,
   requirePage("Expenses"),
-  cachedJsonRoute(60, async (req) => {
-    const userId = await getSessionUserNotionId(req);
-    return userId
-      ? `cache:api:expenses:orders-options:${normalizeNotionId(userId)}:v2`
-      : "";
-  }),
+  cachedJsonRoute(60, () => "cache:api:expenses:orders-options:all:v3"),
   async (req, res) => {
     try {
-      if (!ordersDatabaseId || !teamMembersDatabaseId) {
-        return res.json({ success: true, options: [] });
-      }
-
-      const userId = await getSessionUserNotionId(req);
-      if (!userId) {
+      if (!ordersDatabaseId) {
         return res.json({ success: true, options: [] });
       }
 
@@ -13515,7 +13507,6 @@ app.get(
           database_id: ordersDatabaseId,
           start_cursor: cursor,
           page_size: 100,
-          filter: { property: "Teams Members", relation: { contains: userId } },
           sorts: [{ timestamp: "created_time", direction: "descending" }],
         });
 
@@ -13639,6 +13630,31 @@ app.post("/api/expenses/cash-out", async (req, res) => {
       });
     }
 
+    const normalizedFundsTypeKey = String(fundsType || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    const screenshotRequiredFundsTypes = new Set([
+      "owncar",
+      "swvl",
+      "gobus",
+      "bybus",
+      "train",
+      "indrive",
+      "uber",
+      "uper",
+      "didi",
+    ]);
+    const hasScreenshotPayload =
+      (Array.isArray(screenshots) && screenshots.some((shot) => String(shot?.dataUrl || shot?.screenshotDataUrl || "").trim())) ||
+      !!String(screenshotDataUrl || "").trim();
+
+    if (screenshotRequiredFundsTypes.has(normalizedFundsTypeKey) && !hasScreenshotPayload) {
+      return res.status(400).json({
+        success: false,
+        error: normalizedFundsTypeKey === "owncar"
+          ? "A Google Maps screenshot is required for Own car"
+          : "Screenshot is required for this funds type",
+      });
+    }
+
     const autoReason = String(reason || "").trim() || [
       String(orderLabel || "").trim(),
       String(orderDisplayId || "").trim() && !String(orderLabel || "").trim() ? String(orderDisplayId || "").trim() : "",
@@ -13719,7 +13735,7 @@ app.post("/api/expenses/cash-out", async (req, res) => {
       };
     }
 
-    if (fundsType === "Own car") {
+    if (normalizedFundsTypeKey === "owncar") {
       props["Kilometer"] = {
         number: Number(kilometer) || 0
       };
