@@ -103,10 +103,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const maintenanceReceiptCloseBtn = document.getElementById("reqMaintenanceReceiptClose");
   const maintenanceReceiptCancelBtn = document.getElementById("reqMaintenanceReceiptCancel");
   const maintenanceReceiptConfirmBtn = document.getElementById("reqMaintenanceReceiptConfirm");
+  const maintenanceReceiptTitle = document.getElementById("reqMaintenanceReceiptTitle");
+  const maintenanceReceiptSub = document.getElementById("reqMaintenanceReceiptSub");
+  const maintenanceReceiptLabel = document.getElementById("reqMaintenanceReceiptLabel");
   const maintenanceReceiptInput = document.getElementById("reqMaintenanceReceiptInput");
   const maintenanceReceiptChooseBtn = document.getElementById("reqMaintenanceReceiptChooseBtn");
   const maintenanceReceiptName = document.getElementById("reqMaintenanceReceiptName");
   const maintenanceReceiptMeta = document.getElementById("reqMaintenanceReceiptMeta");
+  const maintenanceReceiptNumbersField = document.getElementById("reqMaintenanceReceiptNumbersField");
+  const maintenanceReceiptNumbersWrap = document.getElementById("reqMaintenanceReceiptNumbers");
+  const maintenanceReceiptNumberInput = document.getElementById("reqMaintenanceReceiptNumberInput");
+  const maintenanceAddReceiptBtn = document.getElementById("reqMaintenanceAddReceiptBtn");
   const maintenanceReceiptError = document.getElementById("reqMaintenanceReceiptError");
 
   // ---------- Utils ----------
@@ -192,6 +199,83 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function collectReceiptNumbers() {
     const values = getReceiptInputs()
+      .map((input) => String(input?.value || "").trim())
+      .filter(Boolean);
+
+    if (!values.length) {
+      return { error: "Store receipt number is required.", values: [] };
+    }
+
+    if (values.some((value) => !/^\d+$/.test(value))) {
+      return { error: "Please enter valid store receipt numbers.", values: [] };
+    }
+
+    return { error: "", values: normalizeReceiptNumbers(values) };
+  }
+
+  const DELIVERY_RECEIPT_INPUT_SELECTOR = ".req-delivery-receipt-input";
+
+  function getDeliveryReceiptInputs() {
+    if (!maintenanceReceiptNumbersWrap) return [];
+    return Array.from(maintenanceReceiptNumbersWrap.querySelectorAll(DELIVERY_RECEIPT_INPUT_SELECTOR));
+  }
+
+  function createDeliveryReceiptInput(value = "") {
+    const input = document.createElement("input");
+    input.className = "co-submodal-input req-delivery-receipt-input";
+    input.type = "text";
+    input.inputMode = "numeric";
+    input.pattern = "[0-9]*";
+    input.autocomplete = "off";
+    input.placeholder = "e.g. 12345";
+    input.value = String(value || "");
+    return input;
+  }
+
+  function resetDeliveryReceiptInputs(values = [""]) {
+    if (!maintenanceReceiptNumbersWrap) return;
+
+    const nextValues = Array.isArray(values) && values.length ? values : [""];
+    maintenanceReceiptNumbersWrap.innerHTML = "";
+
+    nextValues.forEach((value, idx) => {
+      const input = idx === 0 && maintenanceReceiptNumberInput
+        ? maintenanceReceiptNumberInput
+        : createDeliveryReceiptInput();
+      const inputId = idx === 0 ? "reqMaintenanceReceiptNumberInput" : `reqMaintenanceReceiptNumberInput${idx + 1}`;
+      input.id = inputId;
+      input.value = String(value || "");
+      input.setAttribute(
+        "aria-label",
+        idx === 0 ? "Store Receipt Number" : `Store Receipt Number ${idx + 1}`,
+      );
+      maintenanceReceiptNumbersWrap.appendChild(input);
+    });
+  }
+
+  function addDeliveryReceiptInput(value = "", { focus = true } = {}) {
+    if (!maintenanceReceiptNumbersWrap) return null;
+
+    const input = createDeliveryReceiptInput(value);
+    const nextIndex = getDeliveryReceiptInputs().length + 1;
+    input.id = `reqMaintenanceReceiptNumberInput${nextIndex}`;
+    input.setAttribute("aria-label", `Store Receipt Number ${nextIndex}`);
+    maintenanceReceiptNumbersWrap.appendChild(input);
+
+    if (focus) {
+      window.requestAnimationFrame(() => {
+        try {
+          input.focus();
+          input.select();
+        } catch {}
+      });
+    }
+
+    return input;
+  }
+
+  function collectDeliveryReceiptNumbers() {
+    const values = getDeliveryReceiptInputs()
       .map((input) => String(input?.value || "").trim())
       .filter(Boolean);
 
@@ -934,6 +1018,39 @@ document.addEventListener("DOMContentLoaded", () => {
     return orderTypeKey(type) === "requestmaintenance";
   }
 
+  function isWithdrawalOrderType(type) {
+    return orderTypeKey(type) === "withdrawproducts";
+  }
+
+  function getDeliveryProofModalConfig(type) {
+    const key = orderTypeKey(type);
+
+    if (key === "requestmaintenance") {
+      return {
+        title: "Upload Signed Maintenance Report",
+        sub: "Please upload the maintenance report after it has been signed.",
+        fileLabel: "Signed maintenance report images",
+        requireReceiptNumbers: false,
+      };
+    }
+
+    if (key === "withdrawproducts") {
+      return {
+        title: "Upload Signed Withdrawal Report",
+        sub: "Please upload the withdrawal report after the store keeper signs it.",
+        fileLabel: "Signed withdrawal report images",
+        requireReceiptNumbers: true,
+      };
+    }
+
+    return {
+      title: "Upload Signed Delivery Report",
+      sub: "Please upload the delivery report after the receiver signs it.",
+      fileLabel: "Signed delivery report images",
+      requireReceiptNumbers: false,
+    };
+  }
+
   function getDeliveredRepeatActionConfig(group, fallbackItem = null) {
     const typeKey = orderTypeKey(group?.orderType || fallbackItem?.orderType);
     if (typeKey === "requestproducts") {
@@ -1516,6 +1633,7 @@ document.addEventListener("DOMContentLoaded", () => {
     closeReceiptModal({ restoreFocus: false });
     closeTechVisitModal({ restoreFocus: false });
     closeMaintenanceLogModal({ restoreFocus: false });
+    closeMaintenanceReceiptModal({ restoreFocus: false });
 
     const all = (g.items || []).slice().sort(compareItemsByProductName);
     const stage = g.stage || computeStage(all);
@@ -1769,6 +1887,7 @@ document.addEventListener("DOMContentLoaded", () => {
     closeReceiptModal({ restoreFocus: false });
     closeTechVisitModal({ restoreFocus: false });
     closeMaintenanceLogModal({ restoreFocus: false });
+    closeMaintenanceReceiptModal({ restoreFocus: false });
     closeDownloadMenu();
 
     orderModal.classList.remove("is-open");
@@ -2095,18 +2214,30 @@ document.addEventListener("DOMContentLoaded", () => {
       !maintenanceReceiptConfirmBtn ||
       !maintenanceReceiptCancelBtn
     ) {
-      markArrived(activeGroup).catch(() => {});
+      alert("Receipt upload form is unavailable.");
       return;
     }
+
+    const orderType = activeGroup?.orderType || activeGroup?.items?.[0]?.orderType;
+    const modalConfig = getDeliveryProofModalConfig(orderType);
+    const needReceiptNumbers = !!modalConfig.requireReceiptNumbers;
 
     maintenanceReceiptLastFocus = document.activeElement;
     maintenanceReceiptInput.value = "";
     updateMaintenanceReceiptUI([]);
+    resetDeliveryReceiptInputs([""]);
     setMaintenanceReceiptError("");
+
+    if (maintenanceReceiptTitle) maintenanceReceiptTitle.textContent = modalConfig.title;
+    if (maintenanceReceiptSub) maintenanceReceiptSub.textContent = modalConfig.sub;
+    if (maintenanceReceiptLabel) maintenanceReceiptLabel.textContent = modalConfig.fileLabel;
+    if (maintenanceReceiptNumbersField) maintenanceReceiptNumbersField.hidden = !needReceiptNumbers;
+    if (maintenanceAddReceiptBtn) maintenanceAddReceiptBtn.style.display = needReceiptNumbers ? "inline-flex" : "none";
 
     maintenanceReceiptConfirmBtn.disabled = false;
     maintenanceReceiptCancelBtn.disabled = false;
     if (maintenanceReceiptCloseBtn) maintenanceReceiptCloseBtn.disabled = false;
+    if (maintenanceAddReceiptBtn) maintenanceAddReceiptBtn.disabled = false;
 
     maintenanceReceiptModal.hidden = false;
     maintenanceReceiptModal.classList.add("is-open");
@@ -2116,7 +2247,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.requestAnimationFrame(() => {
       try {
-        maintenanceReceiptChooseBtn?.focus();
+        if (needReceiptNumbers) {
+          (getDeliveryReceiptInputs()[0] || maintenanceReceiptNumberInput)?.focus();
+        } else {
+          maintenanceReceiptChooseBtn?.focus();
+        }
       } catch {}
     });
   }
@@ -2749,11 +2884,14 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
   async function markArrived(g, extra = {}) {
     if (!g || !g.orderIds?.length) return;
 
-    const maintenanceReceiptDataUrls = toStringArray(
-      extra?.maintenanceReceiptDataUrls ?? extra?.maintenanceReceiptDataUrl,
+    const orderReceiptDataUrls = toStringArray(
+      extra?.orderReceiptDataUrls ?? extra?.orderReceiptDataUrl ?? extra?.maintenanceReceiptDataUrls ?? extra?.maintenanceReceiptDataUrl,
     );
-    const maintenanceReceiptFilenames = toStringArray(
-      extra?.maintenanceReceiptFilenames ?? extra?.maintenanceReceiptFilename,
+    const orderReceiptFilenames = toStringArray(
+      extra?.orderReceiptFilenames ?? extra?.orderReceiptFilename ?? extra?.maintenanceReceiptFilenames ?? extra?.maintenanceReceiptFilename,
+    );
+    const receiptNumbers = normalizeReceiptNumbers(
+      extra?.receiptNumbers ?? extra?.receiptNumber,
     );
     const silent = !!extra?.silent;
 
@@ -2766,8 +2904,9 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     try {
       const data = await postJson("/api/orders/requested/mark-arrived", {
         orderIds: g.orderIds,
-        maintenanceReceiptDataUrls,
-        maintenanceReceiptFilenames,
+        orderReceiptDataUrls,
+        orderReceiptFilenames,
+        receiptNumbers,
       });
 
       const idSet = new Set(g.orderIds);
@@ -2775,10 +2914,17 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
         if (!idSet.has(it.id)) return;
         it.status = "Arrived";
         it.statusColor = data.statusColor || it.statusColor;
+        it.orderReceiptUrls = toStringArray(data?.orderReceiptUrls ?? data?.orderReceiptUrl);
+        it.orderReceiptNames = toStringArray(data?.orderReceiptNames ?? data?.orderReceiptName);
+        it.orderReceiptUrl = it.orderReceiptUrls[0] || null;
+        it.orderReceiptName = it.orderReceiptNames[0] || null;
         it.maintenanceReceiptUrls = toStringArray(data?.maintenanceReceiptUrls ?? data?.maintenanceReceiptUrl);
         it.maintenanceReceiptNames = toStringArray(data?.maintenanceReceiptNames ?? data?.maintenanceReceiptName);
         it.maintenanceReceiptUrl = it.maintenanceReceiptUrls[0] || null;
         it.maintenanceReceiptName = it.maintenanceReceiptNames[0] || null;
+        if (data?.receiptNumber !== null && data?.receiptNumber !== undefined) {
+          it.receiptNumber = data.receiptNumber;
+        }
       });
 
       writeRequestedCache(allItems);
@@ -3056,14 +3202,20 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     downloadMaintenancePdf(activeGroup);
   });
 
-  // Request Products / Withdraw Products use the receipt modal.
+  // Request Products use the receipt modal.
+  // Withdraw Products moves the store receipt step to the Delivered modal.
   // Request Maintenance skips the receipt modal and moves directly to Shipped.
-  shippedBtn?.addEventListener("click", (e) => {
+  shippedBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
     closeDownloadMenu();
-    const isMaintenanceOrder = isMaintenanceOrderType(activeGroup?.orderType || activeGroup?.items?.[0]?.orderType);
+    const orderType = activeGroup?.orderType || activeGroup?.items?.[0]?.orderType;
+    const isMaintenanceOrder = isMaintenanceOrderType(orderType);
     if (isMaintenanceOrder) {
       openTechVisitModal();
+      return;
+    }
+    if (isWithdrawalOrderType(orderType)) {
+      await markReceivedByOperations(activeGroup, null);
       return;
     }
     openReceiptModal();
@@ -3071,14 +3223,11 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
   arrivedBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
     closeDownloadMenu();
-    const isMaintenanceOrder = isMaintenanceOrderType(activeGroup?.orderType || activeGroup?.items?.[0]?.orderType);
-    if (isMaintenanceOrder && maintenanceReceiptModal) {
+    if (maintenanceReceiptModal) {
       openMaintenanceReceiptModal();
       return;
     }
-    try {
-      await markArrived(activeGroup);
-    } catch {}
+    alert("Receipt upload form is unavailable.");
   });
   logMaintenanceBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
@@ -3174,6 +3323,22 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     updateMaintenanceReceiptUI(Array.from(maintenanceReceiptInput.files || []));
     if (maintenanceReceiptError?.textContent) setMaintenanceReceiptError("");
   });
+  maintenanceReceiptNumbersWrap?.addEventListener("keydown", (e) => {
+    const target = e.target;
+    if (!target || !target.matches(DELIVERY_RECEIPT_INPUT_SELECTOR)) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      maintenanceReceiptConfirmBtn?.click();
+    }
+  });
+  maintenanceReceiptNumbersWrap?.addEventListener("input", () => {
+    if (maintenanceReceiptError?.textContent) setMaintenanceReceiptError("");
+  });
+  maintenanceAddReceiptBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    setMaintenanceReceiptError("");
+    addDeliveryReceiptInput("");
+  });
   maintenanceReceiptCloseBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     closeMaintenanceReceiptModal();
@@ -3185,8 +3350,17 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
   maintenanceReceiptConfirmBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
     const files = Array.from(maintenanceReceiptInput?.files || []).filter(Boolean);
+    const orderType = activeGroup?.orderType || activeGroup?.items?.[0]?.orderType;
+    const isWithdrawalOrder = isWithdrawalOrderType(orderType);
+    const receiptNumbers = isWithdrawalOrder ? collectDeliveryReceiptNumbers() : { error: "", values: [] };
+
     if (!files.length) {
-      setMaintenanceReceiptError("Please upload at least one maintenance receipt image.");
+      setMaintenanceReceiptError("Please upload at least one signed report image.");
+      return;
+    }
+
+    if (receiptNumbers.error) {
+      setMaintenanceReceiptError(receiptNumbers.error);
       return;
     }
 
@@ -3195,12 +3369,14 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     if (maintenanceReceiptCancelBtn) maintenanceReceiptCancelBtn.disabled = true;
     if (maintenanceReceiptCloseBtn) maintenanceReceiptCloseBtn.disabled = true;
     if (maintenanceReceiptChooseBtn) maintenanceReceiptChooseBtn.disabled = true;
+    if (maintenanceAddReceiptBtn) maintenanceAddReceiptBtn.disabled = true;
 
     try {
       const dataUrls = await Promise.all(files.map((file) => fileToDataUrl(file)));
       await markArrived(activeGroup, {
-        maintenanceReceiptDataUrls: dataUrls.map((item) => String(item || "")).filter(Boolean),
-        maintenanceReceiptFilenames: files.map((file) => file.name || "maintenance-receipt.jpg"),
+        orderReceiptDataUrls: dataUrls.map((item) => String(item || "")).filter(Boolean),
+        orderReceiptFilenames: files.map((file) => file.name || "order-receipt.jpg"),
+        receiptNumbers: receiptNumbers.values,
         silent: true,
       });
       closeMaintenanceReceiptModal({ restoreFocus: false });
@@ -3211,6 +3387,7 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
       if (maintenanceReceiptCancelBtn) maintenanceReceiptCancelBtn.disabled = false;
       if (maintenanceReceiptCloseBtn) maintenanceReceiptCloseBtn.disabled = false;
       if (maintenanceReceiptChooseBtn) maintenanceReceiptChooseBtn.disabled = false;
+      if (maintenanceAddReceiptBtn) maintenanceAddReceiptBtn.disabled = false;
     }
   });
 
