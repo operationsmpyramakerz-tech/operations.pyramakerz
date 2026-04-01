@@ -555,19 +555,27 @@ function buildExpenseTicketHtml(group, { compact = false } = {}) {
     (a, b) => getExpenseTimeValue(a) - getExpenseTimeValue(b),
   );
   const hideReason = shouldHideExpenseGroupReason(group);
-  const ordersHtml = Array.isArray(group?.orders) && group.orders.length
+  const hasOrders = Array.isArray(group?.orders) && group.orders.length > 0;
+  const ordersHtml = hasOrders
     ? `<div class="expense-ticket__order-actions">${group.orders.map(buildExpenseOrderActionHtml).join("")}</div>`
+    : "";
+  const reasonHtml = hideReason
+    ? ""
+    : `<div class="expense-ticket__reason">${escapeHtml(group?.reason || "No reason")}</div>`;
+  const headerSideHtml = hasOrders ? ordersHtml : reasonHtml;
+  const secondaryReasonHtml = hasOrders && reasonHtml
+    ? `<div class="expense-ticket__reason expense-ticket__reason--block">${escapeHtml(group?.reason || "No reason")}</div>`
     : "";
   return `
     <article class="expense-ticket${compact ? " expense-ticket--compact" : ""}">
       <div class="expense-ticket__top">
-        <div class="expense-ticket__header-row">
+        <div class="expense-ticket__header-row${hasOrders ? " expense-ticket__header-row--with-order" : ""}">
           <div class="expense-ticket__meta">
             <span class="expense-ticket__date">${escapeHtml(formatExpenseGroupDateLabel(group?.date))}</span>
           </div>
-          ${hideReason ? "" : `<div class="expense-ticket__reason">${escapeHtml(group?.reason || "No reason")}</div>`}
+          ${headerSideHtml}
         </div>
-        ${ordersHtml}
+        ${secondaryReasonHtml}
         <div class="expense-ticket__header-divider" aria-hidden="true"></div>
       </div>
       <div class="expense-ticket__legs">
