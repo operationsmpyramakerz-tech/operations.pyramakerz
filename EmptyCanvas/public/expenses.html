@@ -1357,6 +1357,9 @@
     justify-content:space-between;
     gap:0.85rem;
   }
+  .expense-ticket__header-row--with-order{
+    align-items:center;
+  }
   .expense-ticket__reason{
     flex:1 1 auto;
     min-width:0;
@@ -1388,10 +1391,16 @@
     white-space:nowrap;
   }
   .expense-ticket__order-actions{
+    flex:1 1 auto;
+    min-width:0;
     display:flex;
     flex-wrap:wrap;
+    align-items:center;
     justify-content:flex-end;
     gap:0.45rem;
+  }
+  .expense-ticket__reason--block{
+    width:100%;
   }
   .expense-ticket__order-btn{
     display:inline-flex;
