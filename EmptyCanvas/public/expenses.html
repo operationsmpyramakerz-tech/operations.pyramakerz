@@ -246,6 +246,24 @@
       font-weight:700;
       color:#94a3b8;
     }
+    .req-text{
+      margin-left:6px;
+      font-size:0.82rem;
+      font-weight:800;
+      color:#ef4444;
+    }
+    .field-label--compact{
+      font-size:0.95rem;
+      gap:0.42rem;
+      margin-top:0.45rem;
+    }
+    .field-label--compact svg{
+      width:14px;
+      height:14px;
+    }
+    .field-label--compact .opt-tag{
+      font-size:0.78rem;
+    }
 
     /* Receipt thumbnail inside expense cards */
     .expense-screenshot-thumb {
@@ -420,6 +438,67 @@
       white-space:nowrap;
     }
     .help{ display:block; margin-top:0.35rem; color:#6b7280; font-size:0.85rem; }
+    .help.is-emphasis{
+      color:#b45309;
+      font-weight:700;
+    }
+    .upload-control.is-required .upload-btn{
+      border-color:#fca5a5;
+      background:linear-gradient(135deg,#fff5f5,#fffaf8);
+      box-shadow:0 10px 24px rgba(239,68,68,0.12);
+    }
+    .upload-control.is-required .upload-filename{
+      color:#b45309;
+    }
+
+    .mini-info-modal{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:1rem;
+      background:rgba(15,23,42,0.38);
+      z-index:10080;
+    }
+    .mini-info-modal__card{
+      width:min(380px,100%);
+      background:#fff;
+      border-radius:20px;
+      padding:1.2rem 1.1rem 1rem;
+      border:1px solid #e2e8f0;
+      box-shadow:0 24px 60px rgba(15,23,42,0.22);
+    }
+    .mini-info-modal__badge{
+      display:inline-flex;
+      align-items:center;
+      gap:0.4rem;
+      padding:0.4rem 0.7rem;
+      border-radius:999px;
+      background:#ede9fe;
+      color:#6d28d9;
+      font-size:0.78rem;
+      font-weight:800;
+      letter-spacing:0.02em;
+      text-transform:uppercase;
+    }
+    .mini-info-modal__title{
+      margin:0.85rem 0 0.55rem;
+      font-size:1.08rem;
+      color:#0f172a;
+      font-weight:800;
+    }
+    .mini-info-modal__text{
+      margin:0;
+      color:#475569;
+      line-height:1.65;
+      font-size:0.95rem;
+    }
+    .mini-info-modal__actions{
+      margin-top:1rem;
+      display:flex;
+      justify-content:flex-end;
+    }
 
     .expense-buttons {
       display: flex;
@@ -487,6 +566,10 @@
       border: 1.5px solid #d1d5db;
       margin-bottom: 1rem;
       font-size: 1rem;
+    }
+    .ex-input--compact{
+      font-size:0.95rem;
+      padding:0.72rem 0.78rem;
     }
 
     /* =============================
@@ -975,6 +1058,36 @@
   .order-select__chip--selected{
     max-width:100%;
   }
+  .funds-type-summary{
+    display:flex;
+    align-items:center;
+    gap:0.65rem;
+    min-width:0;
+    width:100%;
+  }
+  .funds-type-summary__name{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    color:#0f172a;
+    font-weight:800;
+    font-size:0.98rem;
+  }
+  .funds-select__option-main{
+    min-width:0;
+    flex:1 1 auto;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:0.2rem;
+  }
+  .funds-select__option-note{
+    font-size:0.78rem;
+    line-height:1.35;
+    color:#64748b;
+    font-weight:600;
+  }
   .order-preview-card{
     margin-top:0.9rem;
     padding:0.95rem 1rem;
@@ -1147,6 +1260,10 @@
       max-width:100%;
     }
     .order-summary-inline{
+      flex-wrap:wrap;
+      align-items:flex-start;
+    }
+    .funds-type-summary{
       flex-wrap:wrap;
       align-items:flex-start;
     }
@@ -1782,13 +1899,25 @@
     </div>
 
     <label class="field-label"><i data-feather="tag"></i> Funds Type <span class="req-star">*</span></label>
-    <select id="co_type" class="ex-input"></select>
+    <div id="fundsTypePicker" class="order-select funds-select">
+      <button id="fundsTypeTrigger" type="button" class="order-select__trigger is-placeholder" aria-haspopup="listbox" aria-expanded="false">
+        <span id="fundsTypeTriggerText" class="order-select__trigger-label">Select funds type...</span>
+        <i data-feather="chevron-down"></i>
+      </button>
+      <div id="fundsTypeDropdown" class="order-select__dropdown" hidden>
+        <div id="fundsTypeDropdownState" class="order-select__status">Loading funds types...</div>
+        <div id="fundsTypeOptionsList" class="order-select__options" role="listbox" aria-label="Funds types"></div>
+      </div>
+      <select id="co_type" class="ex-input order-select-hidden" aria-hidden="true" tabindex="-1">
+        <option value="">Select funds type...</option>
+      </select>
+    </div>
 
-    <label class="field-label"><i data-feather="log-out"></i> From <span class="opt-tag">(Optional)</span></label>
-    <input id="co_from" type="text" class="ex-input"/>
+    <label class="field-label field-label--compact"><i data-feather="log-out"></i> From <span class="opt-tag">(Optional)</span></label>
+    <input id="co_from" type="text" class="ex-input ex-input--compact"/>
 
-    <label class="field-label"><i data-feather="log-in"></i> To <span class="opt-tag">(Optional)</span></label>
-    <input id="co_to" type="text" class="ex-input"/>
+    <label class="field-label field-label--compact"><i data-feather="log-in"></i> To <span class="opt-tag">(Optional)</span></label>
+    <input id="co_to" type="text" class="ex-input ex-input--compact"/>
 
     <div id="co_km_block" style="display:none;">
       <label class="field-label"><i data-feather="navigation"></i> Kilometer <span class="opt-tag">(Optional)</span></label>
@@ -1796,24 +1925,23 @@
     </div>
 
     <div id="co_cash_block">
-      <!-- Screenshot (receipt) -->
-<div class="form-group">
-  <label for="co_screenshot" class="field-label"><i data-feather="image"></i> Screenshot <span class="opt-tag">(Optional)</span></label>
-  <div class="upload-control">
-    <input id="co_screenshot" class="upload-input" type="file" accept="image/*" multiple />
-    <div class="upload-row">
-      <button id="co_screenshot_btn" type="button" class="upload-btn">
-        <i data-feather="upload"></i>
-        <span>Upload screenshot</span>
-      </button>
-      <span id="co_screenshot_name" class="upload-filename">No file chosen</span>
-    </div>
-  </div>
-  <small class="help">Upload receipt screenshots (JPG/PNG).</small>
-</div>
-      
       <label class="field-label"><i data-feather="minus-circle"></i> Cash out <span class="opt-tag">(Optional)</span></label>
       <input id="co_cash" type="number" class="ex-input"/>
+    </div>
+
+    <div id="co_screenshot_block">
+      <label for="co_screenshot" class="field-label"><i data-feather="image"></i> Screenshot <span id="co_screenshot_indicator" class="opt-tag">(Optional)</span></label>
+      <div id="co_screenshot_wrap" class="upload-control">
+        <input id="co_screenshot" class="upload-input" type="file" accept="image/*" multiple />
+        <div class="upload-row">
+          <button id="co_screenshot_btn" type="button" class="upload-btn">
+            <i data-feather="upload"></i>
+            <span>Upload screenshot</span>
+          </button>
+          <span id="co_screenshot_name" class="upload-filename">No file chosen</span>
+        </div>
+      </div>
+      <small id="co_screenshot_help" class="help">Upload receipt screenshots (JPG/PNG).</small>
     </div>
 
     <div class="ex-modal-actions">
@@ -1821,6 +1949,19 @@
       <button class="ex-btn ex-danger" onclick="closeCashOutModal()">Back</button>
     </div>
 
+  </div>
+</div>
+
+<div id="ownCarInfoModal" class="mini-info-modal" aria-hidden="true">
+  <div class="mini-info-modal__card" role="dialog" aria-modal="true" aria-labelledby="ownCarInfoTitle">
+    <div class="mini-info-modal__badge">Own car notice</div>
+    <h4 id="ownCarInfoTitle" class="mini-info-modal__title">Google Maps screenshot required</h4>
+    <p class="mini-info-modal__text">
+      For <strong>Own car</strong> expenses, please upload a screenshot from Google Maps showing the distance between the starting point and destination.
+    </p>
+    <div class="mini-info-modal__actions">
+      <button id="ownCarInfoCloseBtn" type="button" class="ex-btn ex-primary">Got it</button>
+    </div>
   </div>
 </div>
 
