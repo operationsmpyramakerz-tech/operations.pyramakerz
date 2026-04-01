@@ -346,13 +346,30 @@
     </button>
 
     <div class="co-submodal-header">
-      <div class="co-submodal-title" id="reqMaintenanceReceiptTitle">Upload Maintenance Receipt</div>
-      <div class="co-submodal-sub" id="reqMaintenanceReceiptSub">Upload the maintenance receipt images before marking this order as delivered.</div>
+      <div class="co-submodal-title" id="reqMaintenanceReceiptTitle">Upload Signed Report</div>
+      <div class="co-submodal-sub" id="reqMaintenanceReceiptSub">Upload at least one signed report image before marking this order as delivered.</div>
     </div>
 
     <div class="co-submodal-body">
+      <div class="co-submodal-field" id="reqMaintenanceReceiptNumbersField" hidden>
+        <label class="co-submodal-label" for="reqMaintenanceReceiptNumberInput">Store Receipt Number</label>
+        <div class="co-submodal-inputs" id="reqMaintenanceReceiptNumbers">
+          <input
+            class="co-submodal-input req-delivery-receipt-input"
+            id="reqMaintenanceReceiptNumberInput"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="off"
+            placeholder="e.g. 12345"
+            aria-label="Store Receipt Number"
+          />
+        </div>
+        <button type="button" class="ro-action-btn ro-action-btn--light co-submodal-add" id="reqMaintenanceAddReceiptBtn">Add Other Receipt</button>
+      </div>
+
       <div class="co-submodal-field">
-        <label class="co-submodal-label" for="reqMaintenanceReceiptInput">Maintenance receipt images</label>
+        <label class="co-submodal-label" id="reqMaintenanceReceiptLabel" for="reqMaintenanceReceiptInput">Signed report images</label>
         <input class="co-upload-field__input" id="reqMaintenanceReceiptInput" type="file" accept="image/*" multiple hidden />
         <button type="button" class="co-upload-field" id="reqMaintenanceReceiptChooseBtn">
           <span class="co-upload-field__icon"><i data-feather="upload-cloud"></i></span>
