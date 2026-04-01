@@ -120,8 +120,36 @@ document.addEventListener("DOMContentLoaded", () => {
   const norm = (s) => String(s || "").trim().toLowerCase();
   const RECEIPT_INPUT_SELECTOR = ".req-receipt-input";
 
+  function createSubmodalInputRow(input, { removable = false, kind = "receipt" } = {}) {
+    const row = document.createElement("div");
+    row.className = "co-submodal-input-row";
+    row.appendChild(input);
+
+    if (removable) {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "co-submodal-input-remove";
+      removeBtn.setAttribute("data-remove-input", kind);
+      removeBtn.setAttribute("aria-label", "Remove extra store receipt number");
+      removeBtn.textContent = "×";
+      row.appendChild(removeBtn);
+    }
+
+    return row;
+  }
+
   function getReceiptInputs() {
     return Array.from(receiptInputsWrap?.querySelectorAll(RECEIPT_INPUT_SELECTOR) || []).filter(Boolean);
+  }
+
+  function syncReceiptInputMeta() {
+    getReceiptInputs().forEach((input, idx) => {
+      input.id = idx === 0 ? "reqReceiptInput" : `reqReceiptInput${idx + 1}`;
+      input.setAttribute(
+        "aria-label",
+        idx === 0 ? "Store Receipt Number" : `Store Receipt Number ${idx + 1}`,
+      );
+    });
   }
 
   function createReceiptInput(value = "") {
@@ -144,25 +172,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
     nextValues.forEach((value, idx) => {
       const input = idx === 0 && receiptInput ? receiptInput : createReceiptInput();
-      const inputId = idx === 0 ? "reqReceiptInput" : `reqReceiptInput${idx + 1}`;
-      input.id = inputId;
       input.value = String(value || "");
-      input.setAttribute(
-        "aria-label",
-        idx === 0 ? "Store Receipt Number" : `Store Receipt Number ${idx + 1}`,
-      );
-      receiptInputsWrap.appendChild(input);
+      const row = createSubmodalInputRow(input, {
+        removable: idx > 0,
+        kind: "receipt",
+      });
+      receiptInputsWrap.appendChild(row);
     });
+
+    syncReceiptInputMeta();
   }
 
   function addReceiptInput(value = "", { focus = true } = {}) {
     if (!receiptInputsWrap) return null;
 
     const input = createReceiptInput(value);
-    const nextIndex = getReceiptInputs().length + 1;
-    input.id = `reqReceiptInput${nextIndex}`;
-    input.setAttribute("aria-label", `Store Receipt Number ${nextIndex}`);
-    receiptInputsWrap.appendChild(input);
+    const row = createSubmodalInputRow(input, {
+      removable: true,
+      kind: "receipt",
+    });
+    receiptInputsWrap.appendChild(row);
+    syncReceiptInputMeta();
 
     if (focus) {
       window.requestAnimationFrame(() => {
@@ -220,6 +250,16 @@ document.addEventListener("DOMContentLoaded", () => {
     return Array.from(maintenanceReceiptNumbersWrap.querySelectorAll(DELIVERY_RECEIPT_INPUT_SELECTOR));
   }
 
+  function syncDeliveryReceiptInputMeta() {
+    getDeliveryReceiptInputs().forEach((input, idx) => {
+      input.id = idx === 0 ? "reqMaintenanceReceiptNumberInput" : `reqMaintenanceReceiptNumberInput${idx + 1}`;
+      input.setAttribute(
+        "aria-label",
+        idx === 0 ? "Store Receipt Number" : `Store Receipt Number ${idx + 1}`,
+      );
+    });
+  }
+
   function createDeliveryReceiptInput(value = "") {
     const input = document.createElement("input");
     input.className = "co-submodal-input req-delivery-receipt-input";
@@ -242,25 +282,27 @@ document.addEventListener("DOMContentLoaded", () => {
       const input = idx === 0 && maintenanceReceiptNumberInput
         ? maintenanceReceiptNumberInput
         : createDeliveryReceiptInput();
-      const inputId = idx === 0 ? "reqMaintenanceReceiptNumberInput" : `reqMaintenanceReceiptNumberInput${idx + 1}`;
-      input.id = inputId;
       input.value = String(value || "");
-      input.setAttribute(
-        "aria-label",
-        idx === 0 ? "Store Receipt Number" : `Store Receipt Number ${idx + 1}`,
-      );
-      maintenanceReceiptNumbersWrap.appendChild(input);
+      const row = createSubmodalInputRow(input, {
+        removable: idx > 0,
+        kind: "delivery-receipt",
+      });
+      maintenanceReceiptNumbersWrap.appendChild(row);
     });
+
+    syncDeliveryReceiptInputMeta();
   }
 
   function addDeliveryReceiptInput(value = "", { focus = true } = {}) {
     if (!maintenanceReceiptNumbersWrap) return null;
 
     const input = createDeliveryReceiptInput(value);
-    const nextIndex = getDeliveryReceiptInputs().length + 1;
-    input.id = `reqMaintenanceReceiptNumberInput${nextIndex}`;
-    input.setAttribute("aria-label", `Store Receipt Number ${nextIndex}`);
-    maintenanceReceiptNumbersWrap.appendChild(input);
+    const row = createSubmodalInputRow(input, {
+      removable: true,
+      kind: "delivery-receipt",
+    });
+    maintenanceReceiptNumbersWrap.appendChild(row);
+    syncDeliveryReceiptInputMeta();
 
     if (focus) {
       window.requestAnimationFrame(() => {
@@ -288,6 +330,32 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     return { error: "", values: normalizeReceiptNumbers(values) };
+  }
+
+  function removeExtraReceiptInput(removeBtn, { kind = "receipt" } = {}) {
+    const row = removeBtn?.closest?.(".co-submodal-input-row");
+    if (!row) return;
+
+    const wrap = kind === "delivery-receipt" ? maintenanceReceiptNumbersWrap : receiptInputsWrap;
+    const selector = kind === "delivery-receipt" ? DELIVERY_RECEIPT_INPUT_SELECTOR : RECEIPT_INPUT_SELECTOR;
+    const syncMeta = kind === "delivery-receipt" ? syncDeliveryReceiptInputMeta : syncReceiptInputMeta;
+    if (!wrap) return;
+
+    const inputRows = Array.from(wrap.querySelectorAll(".co-submodal-input-row"));
+    if (inputRows.length <= 1) return;
+
+    const currentIndex = inputRows.indexOf(row);
+    row.remove();
+    syncMeta();
+
+    window.requestAnimationFrame(() => {
+      const nextInputs = Array.from(wrap.querySelectorAll(selector)).filter(Boolean);
+      const nextTarget = nextInputs[Math.min(currentIndex, Math.max(nextInputs.length - 1, 0))];
+      try {
+        nextTarget?.focus();
+        nextTarget?.select?.();
+      } catch {}
+    });
   }
 
   function setTechVisitError(message) {
@@ -2910,16 +2978,23 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
       });
 
       const idSet = new Set(g.orderIds);
+      const primaryReceiptPageId = String(data?.primaryReceiptPageId || g.orderIds?.[0] || "").trim();
+      const nextOrderReceiptUrls = toStringArray(data?.orderReceiptUrls ?? data?.orderReceiptUrl);
+      const nextOrderReceiptNames = toStringArray(data?.orderReceiptNames ?? data?.orderReceiptName);
+      const nextMaintenanceReceiptUrls = toStringArray(data?.maintenanceReceiptUrls ?? data?.maintenanceReceiptUrl);
+      const nextMaintenanceReceiptNames = toStringArray(data?.maintenanceReceiptNames ?? data?.maintenanceReceiptName);
+
       allItems.forEach((it) => {
         if (!idSet.has(it.id)) return;
+        const isReceiptHolder = !!primaryReceiptPageId && String(it.id || "").trim() === primaryReceiptPageId;
         it.status = "Arrived";
         it.statusColor = data.statusColor || it.statusColor;
-        it.orderReceiptUrls = toStringArray(data?.orderReceiptUrls ?? data?.orderReceiptUrl);
-        it.orderReceiptNames = toStringArray(data?.orderReceiptNames ?? data?.orderReceiptName);
+        it.orderReceiptUrls = isReceiptHolder ? nextOrderReceiptUrls.slice() : [];
+        it.orderReceiptNames = isReceiptHolder ? nextOrderReceiptNames.slice() : [];
         it.orderReceiptUrl = it.orderReceiptUrls[0] || null;
         it.orderReceiptName = it.orderReceiptNames[0] || null;
-        it.maintenanceReceiptUrls = toStringArray(data?.maintenanceReceiptUrls ?? data?.maintenanceReceiptUrl);
-        it.maintenanceReceiptNames = toStringArray(data?.maintenanceReceiptNames ?? data?.maintenanceReceiptName);
+        it.maintenanceReceiptUrls = isReceiptHolder ? nextMaintenanceReceiptUrls.slice() : [];
+        it.maintenanceReceiptNames = isReceiptHolder ? nextMaintenanceReceiptNames.slice() : [];
         it.maintenanceReceiptUrl = it.maintenanceReceiptUrls[0] || null;
         it.maintenanceReceiptName = it.maintenanceReceiptNames[0] || null;
         if (data?.receiptNumber !== null && data?.receiptNumber !== undefined) {
@@ -3334,6 +3409,13 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
   maintenanceReceiptNumbersWrap?.addEventListener("input", () => {
     if (maintenanceReceiptError?.textContent) setMaintenanceReceiptError("");
   });
+  maintenanceReceiptNumbersWrap?.addEventListener("click", (e) => {
+    const removeBtn = e.target?.closest?.('.co-submodal-input-remove[data-remove-input="delivery-receipt"]');
+    if (!removeBtn) return;
+    e.preventDefault();
+    if (maintenanceReceiptError?.textContent) setMaintenanceReceiptError("");
+    removeExtraReceiptInput(removeBtn, { kind: "delivery-receipt" });
+  });
   maintenanceAddReceiptBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     setMaintenanceReceiptError("");
@@ -3411,6 +3493,13 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
 
   receiptInputsWrap?.addEventListener("input", () => {
     if (receiptError?.textContent) setReceiptError("");
+  });
+  receiptInputsWrap?.addEventListener("click", (e) => {
+    const removeBtn = e.target?.closest?.('.co-submodal-input-remove[data-remove-input="receipt"]');
+    if (!removeBtn) return;
+    e.preventDefault();
+    if (receiptError?.textContent) setReceiptError("");
+    removeExtraReceiptInput(removeBtn, { kind: "receipt" });
   });
 
   addReceiptBtn?.addEventListener("click", (e) => {
