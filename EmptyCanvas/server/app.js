@@ -235,6 +235,8 @@ async function clearUserServerCaches(req, opts = {}) {
   if (usernameKey) {
     tasks.push(cacheDel(`cache:api:stock:${usernameKey}:v1`));
     tasks.push(cacheDel(`cache:api:expenses:${usernameKey}:v1`));
+    tasks.push(cacheDel(`cache:api:expenses:${usernameKey}:v2`));
+    tasks.push(cacheDel(`cache:api:expenses:${usernameKey}:v3`));
     for (const tab of ["all", "not-started", "approved", "rejected"]) {
       tasks.push(cacheDel(`cache:api:sv-orders:${usernameKey}:${tab}:v2`));
     }
@@ -244,6 +246,7 @@ async function clearUserServerCaches(req, opts = {}) {
     cacheDel("cache:api:orders:requested:v7"),
     cacheDel("cache:api:expenses:users:v1"),
     cacheDel("cache:api:expenses:types:v1"),
+    cacheDel("cache:api:expenses:types:v2"),
     cacheDel("cache:api:expenses:cash-in-from:v1"),
     cacheDel("cache:notion:teamMembersAll:v1"),
     cacheDel("cache:api:order-types:v1"),
@@ -313,7 +316,9 @@ async function clearExpensesRouteCaches(req, teamMemberPageId = "") {
     const tasks = [
       cacheDel(`cache:api:expenses:${usernameKey}:v1`),
       cacheDel(`cache:api:expenses:${usernameKey}:v2`),
+      cacheDel(`cache:api:expenses:${usernameKey}:v3`),
       cacheDel("cache:api:expenses:users:v1"),
+      cacheDel("cache:api:expenses:types:v2"),
     ];
 
     const memberKey = normalizeNotionId(teamMemberPageId || "");
@@ -538,6 +543,15 @@ function notionFileMetas(prop) {
       };
     })
     .filter((item) => item.name || item.url);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function toUniqueStringArray(value, { splitComma = false } = {}) {
@@ -3686,6 +3700,48 @@ async function detectOrderReceiptPropName() {
       'Receipt',
     ]) || null
   );
+}
+
+async function detectOrderReceiptFilesPropName() {
+  const props = await getOrdersDBProps();
+  const preferred = pickPropName(props, [
+    'Order receipt',
+    'Order Receipt',
+    'Order receipts',
+    'Order Receipts',
+  ]);
+
+  if (preferred && (props?.[preferred]?.type === 'files' || props?.[preferred]?.type === 'url')) {
+    return preferred;
+  }
+
+  for (const [key, meta] of Object.entries(props || {})) {
+    if (!/(order\s*receipt|receipt\s*order)/i.test(String(key || ''))) continue;
+    if (meta?.type === 'files' || meta?.type === 'url') return key;
+  }
+
+  return null;
+}
+
+function getOrderReceiptEntries(prop, propName = 'Order receipt') {
+  if (!prop) return [];
+
+  if (prop.type === 'files') {
+    return notionFileMetas(prop)
+      .map((item, index) => ({
+        name: String(item?.name || '').trim() || `${propName} ${index + 1}`,
+        url: String(item?.url || '').trim(),
+      }))
+      .filter((item) => !!item.url);
+  }
+
+  if (prop.type === 'url') {
+    const url = String(prop?.url || '').trim();
+    if (!url) return [];
+    return [{ name: String(propName || 'Order receipt').trim() || 'Order receipt', url }];
+  }
+
+  return [];
 }
 
 function _normalizeMultilineText(value) {
@@ -13398,16 +13454,32 @@ app.get("/api/logistics", requireAuth, requirePage("Logistics"), async (req, res
 // ================== EXPENSES API ==================
 
 // Get Funds Type Options
-app.get("/api/expenses/types", cachedJsonRoute(20 * 60, () => "cache:api:expenses:types:v1"), async (req, res) => {
+app.get("/api/expenses/types", cachedJsonRoute(20 * 60, () => "cache:api:expenses:types:v2"), async (req, res) => {
   try {
     const response = await notion.databases.retrieve({
       database_id: process.env.Expenses_Database,
     });
 
-    const options = response.properties["Funds Type"].select.options
-      .map(opt => opt.name)
-      .filter((name) => String(name || "").trim())
-      .filter((name) => String(name || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "") !== "settledmyaccount");
+    const hiddenKeys = new Set(["settledmyaccount", "cashreceipt", "cashreciept"]);
+    const extraOptions = ["نقل", "توكتوك", "مشال", "مصروفات"];
+    const options = [];
+    const seen = new Set();
+
+    const pushOption = (name) => {
+      const raw = String(name || "").trim();
+      if (!raw) return;
+      const key = raw.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, "");
+      if (!key || hiddenKeys.has(key) || seen.has(key)) return;
+      seen.add(key);
+      options.push(raw);
+    };
+
+    for (const opt of response.properties["Funds Type"].select.options || []) {
+      pushOption(opt?.name);
+    }
+    for (const extra of extraOptions) {
+      pushOption(extra);
+    }
 
     res.json({ success: true, options });
   } catch (err) {
@@ -13599,6 +13671,138 @@ app.get(
   },
 );
 
+app.get(
+  "/orders/order-receipt-viewer",
+  requireAuth,
+  requirePage("Expenses"),
+  async (req, res) => {
+    try {
+      const rawIds = String(req.query?.ids || "").trim();
+      const ids = Array.from(
+        new Set(
+          rawIds
+            .split(',')
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+            .map((value) => (looksLikeNotionId(value) ? toHyphenatedUUID(value) : value)),
+        ),
+      );
+
+      if (!ids.length) {
+        return res.status(400).send("Missing order ids");
+      }
+
+      const receiptPropName = await detectOrderReceiptFilesPropName();
+      const items = [];
+      const seen = new Set();
+
+      for (const pageId of ids) {
+        try {
+          const orderPage = await notion.pages.retrieve({ page_id: pageId });
+          const props = orderPage?.properties || {};
+          const receiptEntries = getOrderReceiptEntries(
+            receiptPropName ? props?.[receiptPropName] : null,
+            receiptPropName || 'Order receipt',
+          );
+
+          for (const entry of receiptEntries) {
+            const url = String(entry?.url || '').trim();
+            if (!url || seen.has(url)) continue;
+            seen.add(url);
+            items.push({
+              name: String(entry?.name || 'Order receipt').trim() || 'Order receipt',
+              url,
+            });
+          }
+        } catch (pageErr) {
+          console.warn('Order receipt viewer page load failed:', pageId, pageErr?.body || pageErr?.message || pageErr);
+        }
+      }
+
+      if (!items.length) {
+        const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Order receipt</title>
+  <style>
+    body{margin:0;padding:24px;font-family:Inter,Arial,sans-serif;background:#f8fafc;color:#0f172a;}
+    .card{max-width:560px;margin:40px auto;background:#fff;border:1px solid #e2e8f0;border-radius:22px;padding:24px;box-shadow:0 20px 50px rgba(15,23,42,.12)}
+    h1{margin:0 0 10px;font-size:24px}
+    p{margin:0;color:#475569;line-height:1.7}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Order receipt</h1>
+    <p>No files or links were found in the <strong>Order receipt</strong> field for this order.</p>
+  </div>
+</body>
+</html>`;
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(404).send(html);
+      }
+
+      if (items.length === 1) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.redirect(items[0].url);
+      }
+
+      const galleryHtml = items.map((item, index) => {
+        const safeUrl = escapeHtml(item.url);
+        const safeName = escapeHtml(item.name || `Receipt ${index + 1}`);
+        const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(item.url);
+        return `
+          <a class="receipt-card" href="${safeUrl}" target="_blank" rel="noopener noreferrer">
+            <div class="receipt-card__preview">${isImage ? `<img src="${safeUrl}" alt="${safeName}" loading="lazy" />` : `<span>${safeName}</span>`}</div>
+            <div class="receipt-card__meta">
+              <strong>${safeName}</strong>
+              <span>Open receipt</span>
+            </div>
+          </a>
+        `;
+      }).join('');
+
+      const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Order receipt</title>
+  <style>
+    body{margin:0;padding:24px;font-family:Inter,Arial,sans-serif;background:#f8fafc;color:#0f172a;}
+    .wrap{max-width:960px;margin:0 auto;}
+    h1{margin:0 0 10px;font-size:28px;}
+    p{margin:0 0 20px;color:#475569;line-height:1.7;}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;}
+    .receipt-card{display:flex;flex-direction:column;overflow:hidden;text-decoration:none;color:inherit;background:#fff;border:1px solid #e2e8f0;border-radius:22px;box-shadow:0 18px 40px rgba(15,23,42,.10)}
+    .receipt-card__preview{aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#eef2ff,#f8fafc);padding:12px;}
+    .receipt-card__preview img{width:100%;height:100%;object-fit:cover;border-radius:14px;display:block;}
+    .receipt-card__preview span{padding:12px 14px;border-radius:999px;background:#fff;border:1px solid #dbeafe;color:#1d4ed8;font-weight:700;text-align:center;}
+    .receipt-card__meta{display:flex;flex-direction:column;gap:6px;padding:16px 18px 18px;}
+    .receipt-card__meta strong{font-size:16px;line-height:1.4;word-break:break-word;}
+    .receipt-card__meta span{color:#2563eb;font-size:14px;font-weight:700;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Order receipt</h1>
+    <p>Open any file or link saved in the <strong>Order receipt</strong> field.</p>
+    <div class="grid">${galleryHtml}</div>
+  </div>
+</body>
+</html>`;
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.send(html);
+    } catch (err) {
+      console.error('/orders/order-receipt-viewer error:', err?.body || err);
+      return res.status(500).send('Failed to open order receipt');
+    }
+  },
+);
+
 app.post("/api/expenses/cash-out", async (req, res) => {
   const {
     orderId,
@@ -13655,6 +13859,14 @@ app.post("/api/expenses/cash-out", async (req, res) => {
       });
     }
 
+    const amountNum = Number(amount);
+    if (normalizedFundsTypeKey !== "owncar" && (!Number.isFinite(amountNum) || amountNum <= 0)) {
+      return res.status(400).json({
+        success: false,
+        error: "Cash out amount is required",
+      });
+    }
+
     const autoReason = String(reason || "").trim() || [
       String(orderLabel || "").trim(),
       String(orderDisplayId || "").trim() && !String(orderLabel || "").trim() ? String(orderDisplayId || "").trim() : "",
@@ -13689,7 +13901,7 @@ app.post("/api/expenses/cash-out", async (req, res) => {
       },
 
       "Cash out": {
-        number: Number(amount) || 0
+        number: normalizedFundsTypeKey === "owncar" ? 0 : amountNum
       }
     };
 
@@ -13867,9 +14079,22 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       };
     }
 
+    const fundsTypeMeta = expProps?.["Funds Type"] || null;
+    const cashInFundsTypeName =
+      (Array.isArray(fundsTypeMeta?.select?.options)
+        ? fundsTypeMeta.select.options.find((opt) => {
+            const key = String(opt?.name || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+            return key === "cashreceipt" || key === "cashreciept";
+          })?.name
+        : null) ||
+      "cash receipt";
+
     const propsToCreate = {
       "Team Member": {
         relation: teamMemberPageId ? [{ id: teamMemberPageId }] : [],
+      },
+      "Funds Type": {
+        select: { name: cashInFundsTypeName },
       },
       // Store receipt number in the DB title (same behavior as "Settled my account")
       [titleKey]: {
@@ -14026,7 +14251,7 @@ app.post(
 );
 
 // Fetch All Expenses — FILTER BY CURRENT USER ONLY
-app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${cacheKeySafe(req.session?.username || "")}:v2`), async (req, res) => {
+app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${cacheKeySafe(req.session?.username || "")}:v3`), async (req, res) => {
   try {
     // Get current user's Team Member relation PAGE ID
     const teamMemberPageId = await getCurrentUserRelationPage(req);
@@ -14100,11 +14325,18 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
 
     const linkedOrderMetaByPageId = new Map();
     let orderGroupPropName = null;
+    let orderReceiptPropName = null;
     if (linkedOrderRelationIds.size) {
       try {
         orderGroupPropName = await detectOrderGroupIdPropName();
       } catch (groupPropErr) {
         console.warn("Expense order group detection failed:", groupPropErr?.body || groupPropErr?.message || groupPropErr);
+      }
+
+      try {
+        orderReceiptPropName = await detectOrderReceiptFilesPropName();
+      } catch (receiptPropErr) {
+        console.warn("Expense order receipt detection failed:", receiptPropErr?.body || receiptPropErr?.message || receiptPropErr);
       }
 
       await mapWithConcurrency(linkedOrderRelationIds, 3, async (pageId) => {
@@ -14139,6 +14371,10 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
 
           const { orderType } = _extractOrderTypeInfo(props);
           const label = [orderIdText, orderType].filter(Boolean).join(" - ") || orderIdText || "Order";
+          const receiptEntries = getOrderReceiptEntries(
+            orderReceiptPropName ? props?.[orderReceiptPropName] : null,
+            orderReceiptPropName || 'Order receipt',
+          );
 
           meta = {
             pageId,
@@ -14148,6 +14384,7 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
             label,
             trackingGroupId: pageId,
             trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+            receiptEntries,
           };
         } catch (orderErr) {
           console.warn("Expense linked order retrieve failed:", pageId, orderErr?.body || orderErr?.message || orderErr);
@@ -14159,6 +14396,7 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
             label: "Order",
             trackingGroupId: pageId,
             trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+            receiptEntries: [],
           };
         }
 
@@ -14250,9 +14488,30 @@ app.get("/api/expenses", cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:${
               label: meta.label,
               trackingGroupId: meta.trackingGroupId,
               trackingUrl: meta.trackingUrl,
+              relationIds: [],
+              receiptEntries: [],
               items: [],
             });
           }
+
+          const group = linkedOrdersMap.get(meta.key);
+          if (!group.relationIds.includes(rel.id)) {
+            group.relationIds.push(rel.id);
+          }
+
+          for (const entry of meta.receiptEntries || []) {
+            const url = String(entry?.url || '').trim();
+            if (!url) continue;
+            if (group.receiptEntries.some((item) => String(item?.url || '').trim() === url)) continue;
+            group.receiptEntries.push({
+              name: String(entry?.name || 'Order receipt').trim() || 'Order receipt',
+              url,
+            });
+          }
+
+          group.receiptViewerUrl = group.relationIds.length
+            ? `/orders/order-receipt-viewer?ids=${encodeURIComponent(group.relationIds.join(','))}`
+            : '';
         }
       }
 
