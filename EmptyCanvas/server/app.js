@@ -16211,9 +16211,20 @@ app.post("/api/expenses/export/pdf", async (req, res) => {
 app.post("/api/expenses/export/excel", async (req, res) => {
   try {
     const ExcelJS = require("exceljs");
-    const { userName, items } = req.body;
+    const { userName, items, dateFrom, dateTo } = req.body;
 
     const safeItems = Array.isArray(items) ? items : [];
+    const normalizedDateFrom = String(dateFrom || "").trim();
+    const normalizedDateTo = String(dateTo || "").trim();
+    const hasSelectedPeriod = !!(normalizedDateFrom || normalizedDateTo);
+
+    if (!safeItems.length) {
+      return res.status(400).json({
+        error: hasSelectedPeriod
+          ? "No expenses found for the selected period."
+          : "No expenses to export.",
+      });
+    }
 
     // userName is coming from the UI as "Expenses — <Name>"
     const rawName = String(userName || "Expenses").trim();
@@ -16419,10 +16430,17 @@ app.post("/api/expenses/export/excel", async (req, res) => {
 
     sheet.mergeCells(2, 1, 2, lastCol);
     const metaCell = sheet.getCell("A2");
-    metaCell.value = `Generated: ${new Date().toISOString().slice(0, 10)}`;
+    const generatedOn = new Date().toISOString().slice(0, 10);
+    const periodLabel = hasSelectedPeriod
+      ? `Period: ${normalizedDateFrom || "Any"} → ${normalizedDateTo || "Any"}`
+      : "";
+    metaCell.value = [
+      `Generated: ${generatedOn}`,
+      periodLabel,
+    ].filter(Boolean).join(" • ");
     metaCell.font = { italic: true, color: { argb: "FF6B7280" } };
-    metaCell.alignment = { horizontal: "center", vertical: "middle" };
-    sheet.getRow(2).height = 18;
+    metaCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    sheet.getRow(2).height = hasSelectedPeriod ? 28 : 18;
 
     // -------------------------
     // Summary box
@@ -16654,7 +16672,15 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
 
-    const filename = safeExcelFileName(`${displayName}_expenses_${new Date().toISOString().slice(0, 10)}`);
+    const filenameParts = [displayName, "expenses"];
+    if (hasSelectedPeriod) {
+      filenameParts.push(normalizedDateFrom || "start");
+      filenameParts.push("to");
+      filenameParts.push(normalizedDateTo || "end");
+    }
+    filenameParts.push(new Date().toISOString().slice(0, 10));
+
+    const filename = safeExcelFileName(filenameParts.join("_"));
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${filename}.xlsx"`
