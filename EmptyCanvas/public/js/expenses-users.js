@@ -66,6 +66,20 @@ function formatDateDisplay(dateStr) {
   });
 }
 
+function toLocalDateKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function getTimeValue(it) {
   // Prefer Notion created_time (higher precision + stable for "after settle")
   const raw = it?.createdTime || it?.created_time || "";
@@ -87,6 +101,44 @@ function setTotalBalanceCard(total) {
   const n = Number(total || 0);
   card.classList.toggle("is-negative", n < 0);
   card.classList.toggle("is-positive", n > 0);
+}
+
+function showExpensesUsersToast({ type = "info", title = "", message = "" } = {}) {
+  if (window.UI?.toast) {
+    window.UI.toast({ type, title, message });
+    return;
+  }
+
+  const parts = [title, message].filter(Boolean);
+  alert(parts.join("\n") || "Done");
+}
+
+function getDateFilterValues() {
+  return {
+    from: document.getElementById("dateFrom")?.value || "",
+    to: document.getElementById("dateTo")?.value || "",
+  };
+}
+
+function hasActiveDateFilter(filters = getDateFilterValues()) {
+  return !!(String(filters?.from || "").trim() || String(filters?.to || "").trim());
+}
+
+function getCombinedExpenseItems(...collections) {
+  return collections.flatMap((items) => (Array.isArray(items) ? items : []));
+}
+
+function getExportableExpenseItems(updated) {
+  const next = updated || applyFiltersAndSorting();
+  if (hasActiveDateFilter()) {
+    const sortType = document.getElementById("sortSelect")?.value || "newest";
+    return filterAndSort(getCombinedExpenseItems(next?.recent, next?.past), {
+      from: "",
+      to: "",
+      sortType,
+    });
+  }
+  return Array.isArray(next?.recent) ? next.recent : [];
 }
 
 // ---------------------------------
@@ -437,17 +489,14 @@ function filterAndSort(items, { from, to, sortType }) {
 
   // ---- DATE FILTER ----
   if (from || to) {
-    const fromD = from ? new Date(from) : null;
-    const toD = to ? new Date(to) : null;
-
     result = result.filter((it) => {
       const raw = it?.date || it?.createdTime || it?.created_time || null;
       if (!raw) return true; // keep if no date
 
-      const d = new Date(raw);
-      if (Number.isNaN(d.getTime())) return true;
-      if (fromD && d < fromD) return false;
-      if (toD && d > toD) return false;
+      const itemDateKey = toLocalDateKey(raw);
+      if (!itemDateKey) return true;
+      if (from && itemDateKey < from) return false;
+      if (to && itemDateKey > to) return false;
       return true;
     });
   }
@@ -477,8 +526,7 @@ function filterAndSort(items, { from, to, sortType }) {
 }
 
 function applyFiltersAndSorting() {
-  const from = document.getElementById("dateFrom")?.value || "";
-  const to = document.getElementById("dateTo")?.value || "";
+  const { from, to } = getDateFilterValues();
   const sortType = document.getElementById("sortSelect")?.value || "newest";
 
   FILTERED_RECENT_ITEMS = filterAndSort(RECENT_USER_ITEMS, { from, to, sortType });
@@ -668,9 +716,26 @@ function buildUserExpensesTicketsHtml(items, { emptyMessage = "No expenses yet."
 function renderUserExpensesGrouped(recentItems, pastItems, totalEl, listEl) {
   const recent = Array.isArray(recentItems) ? recentItems : [];
   const past = Array.isArray(pastItems) ? pastItems : [];
+  const dateFilterActive = hasActiveDateFilter();
+  const sortType = document.getElementById("sortSelect")?.value || "newest";
+  const filteredPeriodItems = dateFilterActive
+    ? filterAndSort(getCombinedExpenseItems(recent, past), { from: "", to: "", sortType })
+    : [];
+  const totalItems = dateFilterActive ? filteredPeriodItems : recent;
+  const pastWrapper = document.getElementById("pastExpensesWrapper");
+  const togglePastBtn = document.getElementById("togglePastExpensesBtn");
+
+  if (pastWrapper) {
+    pastWrapper.style.display = !dateFilterActive && PAST_USER_ITEMS.length > 0 ? "flex" : "none";
+  }
+  if (!dateFilterActive && togglePastBtn) {
+    togglePastBtn.textContent = SHOW_PAST_EXPENSES
+      ? "Hide past expenses"
+      : "Show past expenses";
+  }
 
   let total = 0;
-  for (const it of recent) {
+  for (const it of totalItems) {
     total += Number(it.cashIn || 0) - Number(it.cashOut || 0);
   }
 
@@ -679,19 +744,23 @@ function renderUserExpensesGrouped(recentItems, pastItems, totalEl, listEl) {
 
   let html = "";
 
-  if (recent.length === 0) {
-    if (PAST_USER_ITEMS.length > 0) {
+  if (totalItems.length === 0) {
+    if (dateFilterActive) {
+      html += '<div class="expenses-empty">No expenses found for the selected period.</div>';
+    } else if (PAST_USER_ITEMS.length > 0) {
       html += '<div class="expenses-empty">No expenses since the last settlement.</div>';
     } else {
       html += '<div class="expenses-empty">No expenses for this user.</div>';
     }
+  } else if (dateFilterActive) {
+    html += buildUserExpensesTicketsHtml(filteredPeriodItems);
   } else {
     html += buildUserExpensesTicketsHtml(recent);
-  }
 
-  if (SHOW_PAST_EXPENSES && past.length > 0) {
-    html += '<div class="expenses-separator"><span>Past expenses</span></div>';
-    html += buildUserExpensesTicketsHtml(past);
+    if (SHOW_PAST_EXPENSES && past.length > 0) {
+      html += '<div class="expenses-separator"><span>Past expenses</span></div>';
+      html += buildUserExpensesTicketsHtml(past);
+    }
   }
 
   listEl.innerHTML = html;
@@ -745,34 +814,94 @@ if (sortSelect) {
   });
 }
 
-// Download Excel ONLY (after last settle) + respects filters
+// Download Excel using the active date filters when present
 const downloadExcelBtn = document.getElementById("downloadExcelBtn");
 if (downloadExcelBtn) {
-  downloadExcelBtn.addEventListener("click", () => {
+  downloadExcelBtn.addEventListener("click", async () => {
+    const filters = getDateFilterValues();
+    const dateFilterActive = hasActiveDateFilter(filters);
+
     // Always re-apply filters so download matches current UI controls
     const updated = applyFiltersAndSorting();
-    if (!Array.isArray(updated.recent) || updated.recent.length === 0) {
-      return alert("No expenses to download.");
+    const exportItems = getExportableExpenseItems(updated);
+
+    if (!exportItems.length) {
+      showExpensesUsersToast({
+        type: "info",
+        title: "No expenses",
+        message: dateFilterActive
+          ? "No expenses found for the selected period."
+          : "No expenses to download.",
+      });
+      return;
     }
 
-    fetch(`/api/expenses/export/excel`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userName: document.getElementById("userExpensesTitle")?.textContent || "Expenses",
-        items: updated.recent,
-        lastSettledDate: LAST_SETTLED_DATE,
-        lastSettledAt: LAST_SETTLED_AT,
-      }),
-    })
-      .then((res) => res.blob())
-      .then((blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "expenses.xlsx";
-        a.click();
+    downloadExcelBtn.disabled = true;
+    downloadExcelBtn.dataset.prevHtml = downloadExcelBtn.innerHTML;
+    downloadExcelBtn.textContent = "Preparing...";
+
+    try {
+      const res = await fetch(`/api/expenses/export/excel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: document.getElementById("userExpensesTitle")?.textContent || "Expenses",
+          items: exportItems,
+          lastSettledDate: LAST_SETTLED_DATE,
+          lastSettledAt: LAST_SETTLED_AT,
+          dateFrom: filters.from || null,
+          dateTo: filters.to || null,
+        }),
       });
+
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+          err.error ||
+            (dateFilterActive
+              ? "No expenses found for the selected period."
+              : "Failed to export Excel.")
+        );
+      }
+
+      const blob = await res.blob();
+      const cd = res.headers.get("content-disposition") || "";
+      const match = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+      const fileName = decodeURIComponent((match && (match[1] || match[2])) || "expenses.xlsx");
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      showExpensesUsersToast({
+        type: "success",
+        title: "Downloaded",
+        message: "Excel exported successfully.",
+      });
+    } catch (err) {
+      console.error("download expenses excel error:", err);
+      showExpensesUsersToast({
+        type: "error",
+        title: "Export failed",
+        message: err?.message || "Failed to export Excel.",
+      });
+    } finally {
+      downloadExcelBtn.disabled = false;
+      const prev = downloadExcelBtn.dataset.prevHtml;
+      if (prev) downloadExcelBtn.innerHTML = prev;
+      else downloadExcelBtn.textContent = "Download Excel";
+      if (window.feather) window.feather.replace();
+    }
   });
 }
 
