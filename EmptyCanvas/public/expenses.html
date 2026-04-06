@@ -262,7 +262,7 @@
       height:14px;
     }
     .field-label--compact .opt-tag{
-      font-size:0.78rem;
+      font-size:0.73rem;
     }
 
     /* Receipt thumbnail inside expense cards */
@@ -303,11 +303,11 @@
     .total-card {
       background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
       color: white;
-      border-radius: 24px;
-      padding: 2rem 1.8rem;
+      border-radius: 22px;
+      padding: 1.55rem 1.35rem;
       text-align: center;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
-      margin-bottom: 2rem;
+      box-shadow: 0 18px 36px rgba(0,0,0,0.18);
+      margin-bottom: 1.45rem;
       position: relative;
       overflow: hidden;
     }
@@ -325,15 +325,16 @@
       100% { transform: translateX(100%) translateY(100%) rotate(30deg); }
     }
     .total-amount {
-      font-size: 3.2rem;
+      font-size: 2.9rem;
       font-weight: 800;
-      margin: 0.5rem 0;
+      margin: 0.42rem 0;
       letter-spacing: -1px;
+      line-height: 1.05;
     }
     .total-label {
-      font-size: 1.1rem;
+      font-size: 1.02rem;
       opacity: 0.9;
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.42rem;
     }
     .view-all-btn {
       background: rgba(255,255,255,0.15);
@@ -348,7 +349,7 @@
 
     /* Settled my account button (inside Total Card) */
     .settle-btn{
-      margin-top: 1rem;
+      margin-top: 0.88rem;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -376,8 +377,8 @@
 
     /* Last settled time text (under Settled my account) */
     .last-settled{
-      margin-top: 0.55rem;
-      font-size: 0.9rem;
+      margin-top: 0.5rem;
+      font-size: 0.84rem;
       font-weight: 650;
       color: rgba(255,255,255,0.85);
       opacity: 0.95;
@@ -416,7 +417,7 @@
       align-items:center;
       gap:0.55rem;
       padding:0.75rem 1rem;
-      border-radius:14px;
+      border-radius:12px;
       border:1px solid #e5e7eb;
       background: linear-gradient(135deg, #ffffff, #f8fafc);
       color:#0f172a;
@@ -464,7 +465,7 @@
     .mini-info-modal__card{
       width:min(380px,100%);
       background:#fff;
-      border-radius:20px;
+      border-radius:18px;
       padding:1.2rem 1.1rem 1rem;
       border:1px solid #e2e8f0;
       box-shadow:0 24px 60px rgba(15,23,42,0.22);
@@ -665,7 +666,7 @@
   padding:1.1rem 1.05rem;
   margin-bottom:.9rem;
   display:flex;
-  align-items:flex-start;
+  align-items:center;
   gap:1rem;
   box-shadow:0 8px 25px rgba(0,0,0,0.07);
   transition:transform .2s ease, box-shadow .2s ease;
@@ -1353,7 +1354,7 @@
   }
   .expense-ticket__header-row{
     display:flex;
-    align-items:flex-start;
+    align-items:center;
     justify-content:space-between;
     gap:0.85rem;
   }
@@ -1363,10 +1364,12 @@
   .expense-ticket__reason{
     flex:1 1 auto;
     min-width:0;
+    display:flex;
+    align-items:center;
     color:#0f172a;
     font-size:0.94rem;
     font-weight:780;
-    line-height:1.48;
+    line-height:1.4;
     direction:rtl;
     text-align:right;
     unicode-bidi:plaintext;
@@ -1374,7 +1377,7 @@
   .expense-ticket__meta{
     flex:0 0 auto;
     display:flex;
-    align-items:flex-start;
+    align-items:center;
     justify-content:flex-start;
   }
   .expense-ticket__date{
@@ -1814,7 +1817,7 @@ body.expense-shots-modal-open{
 
 .expense-ticket__route-top{
   display:flex;
-  align-items:flex-start;
+  align-items:center;
   justify-content:space-between;
   gap:0.9rem;
 }
@@ -1887,7 +1890,7 @@ body.expense-shots-modal-open{
 .expense-shots-modal{
   position:fixed;
   inset:0;
-  z-index:2600;
+  z-index:100200;
   display:none;
   align-items:center;
   justify-content:center;
@@ -1902,8 +1905,8 @@ body.expense-shots-modal-open{
 }
 
 .expense-shots-modal__card{
-  width:min(560px, 100%);
-  max-height:min(78vh, 640px);
+  width:min(460px, 100%);
+  max-height:min(72vh, 560px);
   display:flex;
   flex-direction:column;
   background:#ffffff;
@@ -1921,7 +1924,7 @@ body.expense-shots-modal-open{
 
 .expense-shots-modal__head{
   display:flex;
-  align-items:flex-start;
+  align-items:center;
   justify-content:space-between;
   gap:1rem;
   padding:1rem 1rem 0.9rem;
@@ -1954,12 +1957,14 @@ body.expense-shots-modal-open{
   justify-content:center;
   cursor:pointer;
   flex:0 0 auto;
+  font-size:28px;
+  line-height:1;
+  font-weight:400;
 }
 
-.expense-shots-modal__close svg{
-  width:18px;
-  height:18px;
-  stroke-width:2.3;
+.expense-shots-modal__close span{
+  display:block;
+  transform:translateY(-1px);
 }
 
 .expense-shots-modal__body{
@@ -1969,15 +1974,15 @@ body.expense-shots-modal-open{
 
 .expense-shots-modal__grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns:repeat(auto-fit, minmax(110px, 1fr));
   gap:0.8rem;
 }
 
 .expense-shots-modal__item{
   display:flex;
   flex-direction:column;
-  gap:0.5rem;
-  padding:0.55rem;
+  gap:0.42rem;
+  padding:0.45rem;
   text-decoration:none;
   color:inherit;
   border:1px solid #e2e8f0;
@@ -1990,7 +1995,7 @@ body.expense-shots-modal-open{
   display:flex;
   align-items:center;
   justify-content:center;
-  aspect-ratio:1 / 1;
+  aspect-ratio:4 / 4.4;
   border-radius:14px;
   overflow:hidden;
   background:#e2e8f0;
@@ -2204,8 +2209,45 @@ body.expense-shots-modal-open{
     <label class="field-label"><i data-feather="plus-circle"></i> Cash in <span class="req-star">*</span></label>
     <input id="ci_cash" type="number" class="ex-input"/>
 
-    <label class="field-label"><i data-feather="hash"></i> Receipt number <span class="req-star">*</span></label>
-    <input id="ci_receipt" type="text" class="ex-input" placeholder="Enter receipt number"/>
+    <label class="field-label"><i data-feather="tag"></i> Funds Type <span class="req-star">*</span></label>
+    <div id="cashInFundsTypePicker" class="order-select funds-select">
+      <button id="cashInFundsTypeTrigger" type="button" class="order-select__trigger is-placeholder" aria-haspopup="listbox" aria-expanded="false">
+        <span id="cashInFundsTypeTriggerText" class="order-select__trigger-label">Select funds type...</span>
+        <i data-feather="chevron-down"></i>
+      </button>
+      <div id="cashInFundsTypeDropdown" class="order-select__dropdown" hidden>
+        <div id="cashInFundsTypeDropdownState" class="order-select__status">Choose funds type</div>
+        <div id="cashInFundsTypeOptionsList" class="order-select__options" role="listbox" aria-label="Cash in funds types"></div>
+      </div>
+      <select id="ci_funds_type" class="ex-input order-select-hidden" aria-hidden="true" tabindex="-1">
+        <option value="">Select funds type...</option>
+        <option value="Cash Payment">Cash Payment</option>
+        <option value="Online Transfer">Online Transfer</option>
+      </select>
+    </div>
+
+    <label class="field-label"><i data-feather="user"></i> Payment by <span class="req-star">*</span></label>
+    <input id="ci_payment_by" type="text" class="ex-input" placeholder="Enter the person name"/>
+
+    <div id="ci_receipt_block" style="display:none;">
+      <label class="field-label"><i data-feather="hash"></i> Receipt number <span class="req-star">*</span></label>
+      <input id="ci_receipt" type="text" class="ex-input" placeholder="Enter receipt number"/>
+    </div>
+
+    <div id="ci_screenshot_block" style="display:none;">
+      <label for="ci_screenshot" class="field-label"><i data-feather="image"></i> Screenshot <span id="ci_screenshot_indicator" class="req-text">(Required)</span></label>
+      <div id="ci_screenshot_wrap" class="upload-control is-required">
+        <input id="ci_screenshot" class="upload-input" type="file" accept="image/*" multiple />
+        <div class="upload-row">
+          <button id="ci_screenshot_btn" type="button" class="upload-btn">
+            <i data-feather="upload"></i>
+            <span>Upload screenshot</span>
+          </button>
+          <span id="ci_screenshot_name" class="upload-filename">No file chosen</span>
+        </div>
+      </div>
+      <small id="ci_screenshot_help" class="help is-emphasis">Upload the transfer screenshot (JPG/PNG).</small>
+    </div>
 
     <div class="ex-modal-actions">
       <button id="ci_submit" class="ex-btn ex-primary">Submit</button>
@@ -2408,7 +2450,7 @@ body.expense-shots-modal-open{
         <div id="expenseShotsModalCount" class="expense-shots-modal__count">No images uploaded</div>
       </div>
       <button type="button" class="expense-shots-modal__close" data-expense-shots-close aria-label="Close screenshots viewer">
-        <i data-feather="x"></i>
+        <span aria-hidden="true">×</span>
       </button>
     </div>
     <div id="expenseShotsModalBody" class="expense-shots-modal__body"></div>
