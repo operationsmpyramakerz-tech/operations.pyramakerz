@@ -1072,9 +1072,11 @@ if (togglePastBtn) {
 document.addEventListener("click", (e) => {
   const modal = document.getElementById("userExpensesModal");
   const sheet = document.getElementById("userExpensesSheet");
+  const shotsModal = document.getElementById("expenseShotsModal");
 
   if (!modal || !sheet) return;
   if (modal.style.display !== "flex") return;
+  if (shotsModal && shotsModal.style.display === "flex") return;
   if (e.target.closest(".user-tab")) return;
 
   if (!sheet.contains(e.target)) closeUserExpensesModal();
@@ -1087,6 +1089,10 @@ function closeUserExpensesModal() {
   const toggleBtn = document.getElementById("togglePastExpensesBtn");
 
   if (!modal || !sheet) return;
+
+  if (typeof closeExpenseShotsModal === "function") {
+    closeExpenseShotsModal();
+  }
 
   // reset state so next open starts clean
   SHOW_PAST_EXPENSES = false;
