@@ -14229,10 +14229,22 @@ app.post("/api/expenses/cash-out", async (req, res) => {
 
 // Cash In
 app.post("/api/expenses/cash-in", async (req, res) => {
-  const { date, amount, cashInFrom, receiptNumber } = req.body;
+  const {
+    date,
+    amount,
+    cashInFrom,
+    paymentBy,
+    fundsType,
+    receiptNumber,
+    screenshots,
+    screenshotDataUrl,
+    screenshotName,
+  } = req.body;
 
   try {
     const teamMemberPageId = await getCurrentUserRelationPage(req);
+    const currentUsername = String(req.session?.username || "").trim();
+    const teamMemberName = currentUsername || (teamMemberPageId ? String(await pageTitleById(teamMemberPageId) || "").trim() : "");
 
     if (!date || amount === undefined || amount === null || amount === "") {
       return res.status(400).json({
@@ -14249,64 +14261,63 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       });
     }
 
+    const payerName = String(paymentBy || cashInFrom || "").trim();
+    if (!payerName) {
+      return res.status(400).json({
+        success: false,
+        error: "Payment by is required",
+      });
+    }
+
+    const selectedFundsTypeRaw = String(fundsType || "").trim();
+    const selectedFundsTypeKey = normKey(selectedFundsTypeRaw);
+    const isOnlineTransfer = selectedFundsTypeKey === "onlinetransfer";
+    const isCashPayment = selectedFundsTypeKey === "cashpayment" || selectedFundsTypeKey === "cashreceipt" || selectedFundsTypeKey === "cashreciept";
+
+    if (!selectedFundsTypeKey || (!isOnlineTransfer && !isCashPayment)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid funds type",
+      });
+    }
+
     const receipt = String(receiptNumber || "").trim();
-    if (!receipt) {
+    if (isCashPayment && !receipt) {
       return res.status(400).json({
         success: false,
         error: "Missing receipt number",
       });
     }
 
-    // Detect Expenses DB properties (title + optional Cash in from)
-    const expProps = await getExpensesDBProps();
-    const titleKey = firstTitlePropName(expProps) || "Reason";
-    const cashInFromKey =
-      pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
-      "Cash in from";
-    const cashInFromProp = expProps?.[cashInFromKey];
+    const hasScreenshotPayload =
+      (Array.isArray(screenshots) && screenshots.some((shot) => String(shot?.dataUrl || shot?.screenshotDataUrl || "").trim())) ||
+      !!String(screenshotDataUrl || "").trim();
 
-    let cashInFromValue = null;
-    const fromVal = String(cashInFrom || "").trim();
-
-    if (fromVal && cashInFromProp?.type === "relation") {
-      // Notion expects: { relation: [{ id: "..." }] }
-      const relDbId = cashInFromProp?.relation?.database_id;
-
-      if (fromVal) {
-        let relPageId = null;
-
-        try {
-          if (looksLikeNotionId(fromVal)) {
-            relPageId = toHyphenatedUUID(fromVal);
-          } else if (relDbId) {
-            relPageId = await findOrCreatePageByTitle(relDbId, fromVal);
-          }
-        } catch (e) {
-          // If integration doesn't have permission on the related DB, don't fail the whole request
-          console.warn("Cash in from relation resolve failed:", e?.body || e);
-          relPageId = null;
-        }
-
-        cashInFromValue = { relation: relPageId ? [{ id: relPageId }] : [] };
-      } else {
-        cashInFromValue = { relation: [] };
-      }
-    } else if (fromVal && cashInFromProp?.type === "rich_text") {
-      // Old schema uses rich_text
-      cashInFromValue = {
-        rich_text: [{ type: "text", text: { content: fromVal } }],
-      };
+    if (isOnlineTransfer && !hasScreenshotPayload) {
+      return res.status(400).json({
+        success: false,
+        error: "Screenshot is required for online transfer",
+      });
     }
 
+    // Detect Expenses DB properties
+    const expProps = await getExpensesDBProps();
+    const titleKey = firstTitlePropName(expProps) || "Reason";
+    const fromKey = pickPropName(expProps, ["From"]) || "From";
+    const toKey = pickPropName(expProps, ["To"]) || "To";
+
     const fundsTypeMeta = expProps?.["Funds Type"] || null;
+    const fundsTypeOptions = Array.isArray(fundsTypeMeta?.select?.options) ? fundsTypeMeta.select.options : [];
+    const preferredFundsTypeNames = isOnlineTransfer
+      ? [selectedFundsTypeRaw, "Online Transfer"]
+      : [selectedFundsTypeRaw, "Cash Payment", "Cash Receipt", "cash receipt"];
+
     const cashInFundsTypeName =
-      (Array.isArray(fundsTypeMeta?.select?.options)
-        ? fundsTypeMeta.select.options.find((opt) => {
-            const key = String(opt?.name || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-            return key === "cashreceipt" || key === "cashreciept";
-          })?.name
-        : null) ||
-      "cash receipt";
+      fundsTypeOptions.find((opt) => preferredFundsTypeNames.some((name) => normKey(name) === normKey(opt?.name)))?.name ||
+      selectedFundsTypeRaw ||
+      (isOnlineTransfer ? "Online Transfer" : "Cash Payment");
+
+    const titleContent = receipt || cashInFundsTypeName || "Cash In";
 
     const propsToCreate = {
       "Team Member": {
@@ -14315,9 +14326,8 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       "Funds Type": {
         select: { name: cashInFundsTypeName },
       },
-      // Store receipt number in the DB title (same behavior as "Settled my account")
       [titleKey]: {
-        title: [{ text: { content: receipt } }],
+        title: [{ text: { content: titleContent } }],
       },
       "Date": {
         date: { start: date },
@@ -14327,8 +14337,40 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       },
     };
 
-    if (cashInFromValue) {
-      propsToCreate[cashInFromKey] = cashInFromValue;
+    propsToCreate[fromKey] = {
+      rich_text: [{ type: "text", text: { content: payerName } }],
+    };
+    propsToCreate[toKey] = {
+      rich_text: [{ type: "text", text: { content: teamMemberName || "" } }],
+    };
+
+    const filesToAttach = [];
+
+    if (Array.isArray(screenshots) && screenshots.length) {
+      for (let i = 0; i < screenshots.length; i++) {
+        const s = screenshots[i] || {};
+        const dataUrl = s.dataUrl || s.screenshotDataUrl || "";
+        if (!dataUrl) continue;
+
+        const originalName = String(s.name || s.filename || "transfer.png").trim() || "transfer.png";
+        const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+        const filename = `cashin-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
+
+        const url = await uploadToBlobFromBase64(dataUrl, filename);
+        filesToAttach.push(makeExternalFile(originalName, url));
+      }
+    }
+
+    if (!filesToAttach.length && screenshotDataUrl) {
+      const originalName = (screenshotName && String(screenshotName).trim()) || `cashin-${Date.now()}.png`;
+      const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+      const filename = `cashin-${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
+      const url = await uploadToBlobFromBase64(screenshotDataUrl, filename);
+      filesToAttach.push(makeExternalFile(originalName, url));
+    }
+
+    if (filesToAttach.length) {
+      propsToCreate["Screenshot"] = { files: filesToAttach };
     }
 
     await notion.pages.create({
@@ -14339,15 +14381,15 @@ app.post("/api/expenses/cash-in", async (req, res) => {
     await clearExpensesRouteCaches(req, teamMemberPageId);
 
     res.json({ success: true, message: "Cash in recorded" });
-} catch (err) {
-  console.error("❌ Cash in error (RAW):", err);
-  console.error("❌ Cash in error BODY:", err.body);
+  } catch (err) {
+    console.error("❌ Cash in error (RAW):", err);
+    console.error("❌ Cash in error BODY:", err.body);
 
-  res.status(500).json({
-    success: false,
-    error: err.body || err.message || "Failed to save cash in"
-  });
-}
+    res.status(500).json({
+      success: false,
+      error: err.body || err.message || "Failed to save cash in"
+    });
+  }
 });
 
 // Settled my account
