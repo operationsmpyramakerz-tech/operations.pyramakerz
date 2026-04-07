@@ -981,6 +981,51 @@
   white-space: nowrap;
 }
 
+.expense-ticket__header-row--with-order{
+  align-items: center;
+}
+
+.expense-ticket__order-actions{
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .45rem;
+}
+
+.expense-ticket__reason--block{
+  width: 100%;
+}
+
+.expense-ticket__order-btn{
+  display: inline-flex;
+  align-items: center;
+  gap: .42rem;
+  padding: .48rem .74rem;
+  border-radius: 999px;
+  background: var(--expense-order-btn-bg,#eef2ff);
+  color: var(--expense-order-btn-fg,#312e81);
+  border: 1px solid var(--expense-order-btn-border,#c7d2fe);
+  font-size: .78rem;
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: 0 8px 18px rgba(15,23,42,0.06);
+}
+
+.expense-ticket__order-btn svg{
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
+}
+
+.expense-ticket__order-btn--disabled{
+  opacity: .7;
+  cursor: default;
+}
+
 .expense-ticket__header-divider{
   width: 100%;
   border-top: 2px dashed #d6dee8;
