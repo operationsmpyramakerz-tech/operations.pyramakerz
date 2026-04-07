@@ -225,6 +225,7 @@ async function clearUserServerCaches(req, opts = {}) {
   if (normalizedUserId) {
     tasks.push(cacheDel(`cache:api:account:${normalizedUserId}:v2`));
     tasks.push(cacheDel(`cache:api:expenses:user:${normalizedUserId}:v1`));
+    tasks.push(cacheDel(`cache:api:expenses:user:${normalizedUserId}:v2`));
   }
 
   if (userId) {
@@ -322,7 +323,10 @@ async function clearExpensesRouteCaches(req, teamMemberPageId = "") {
     ];
 
     const memberKey = normalizeNotionId(teamMemberPageId || "");
-    if (memberKey) tasks.push(cacheDel(`cache:api:expenses:user:${memberKey}:v1`));
+    if (memberKey) {
+      tasks.push(cacheDel(`cache:api:expenses:user:${memberKey}:v1`));
+      tasks.push(cacheDel(`cache:api:expenses:user:${memberKey}:v2`));
+    }
 
     await Promise.all(tasks);
   } catch (e) {
@@ -13893,7 +13897,7 @@ app.get(
 app.get(
   "/orders/order-receipt-viewer",
   requireAuth,
-  requirePage("Expenses"),
+  requirePage(["Expenses", "Expenses Users"]),
   async (req, res) => {
     try {
       const rawIds = String(req.query?.ids || "").trim();
@@ -14911,7 +14915,7 @@ app.get(
   "/api/expenses/user/:memberId",
   requireAuth,
   requirePage("Expenses Users"),
-  cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:user:${normalizeNotionId(req.params?.memberId || "")}:v1`),
+  cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:user:${normalizeNotionId(req.params?.memberId || "")}:v2`),
   async (req, res) => {
     try {
       if (!expensesDatabaseId) {
@@ -14954,21 +14958,121 @@ app.get(
       const cashInFromKey =
         pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
         "Cash in from";
+      const ordersKey =
+        pickPropName(expProps, ["📄 Orders", "Orders", "Order"]) ||
+        pickPropName(expProps, ["Orders", "Order"]) ||
+        null;
 
       // If Cash in from is a relation in Notion, resolve related page titles once.
       const cashInFromTitleMap = new Map();
       const cashInFromIds = new Set();
+      const linkedOrderRelationIds = new Set();
 
       for (const page of results) {
-        const p = page.properties?.[cashInFromKey];
-        if (p?.type === "relation") {
-          (p.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
+        const cashInProp = page.properties?.[cashInFromKey];
+        if (cashInProp?.type === "relation") {
+          (cashInProp.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
+        }
+
+        const ordersProp = ordersKey ? page.properties?.[ordersKey] : null;
+        if (ordersProp?.type === "relation") {
+          (ordersProp.relation || []).forEach((r) => r?.id && linkedOrderRelationIds.add(r.id));
         }
       }
 
-      for (const id of cashInFromIds) {
-        const t = await pageTitleById(id);
-        cashInFromTitleMap.set(id, t);
+      if (cashInFromIds.size) {
+        const cashInFromLookup = await mapWithConcurrency(cashInFromIds, 4, async (id) => {
+          try {
+            return await pageTitleById(id);
+          } catch {
+            return "";
+          }
+        });
+        for (const [id, title] of cashInFromLookup.entries()) {
+          if (title) cashInFromTitleMap.set(id, title);
+        }
+      }
+
+      const linkedOrderMetaByPageId = new Map();
+      let orderGroupPropName = null;
+      let orderReceiptPropName = null;
+      if (linkedOrderRelationIds.size) {
+        try {
+          orderGroupPropName = await detectOrderGroupIdPropName();
+        } catch (groupPropErr) {
+          console.warn("Expense user order group detection failed:", groupPropErr?.body || groupPropErr?.message || groupPropErr);
+        }
+
+        try {
+          orderReceiptPropName = await detectOrderReceiptFilesPropName();
+        } catch (receiptPropErr) {
+          console.warn("Expense user order receipt detection failed:", receiptPropErr?.body || receiptPropErr?.message || receiptPropErr);
+        }
+
+        await mapWithConcurrency(linkedOrderRelationIds, 3, async (pageId) => {
+          let meta = null;
+
+          try {
+            const orderPage = await notion.pages.retrieve({ page_id: pageId });
+            const props = orderPage?.properties || {};
+            let orderIdText = "";
+            let groupKey = "";
+
+            if (orderGroupPropName) {
+              const groupValue = _extractPropNumber(props?.[orderGroupPropName]);
+              if (Number.isFinite(Number(groupValue))) {
+                orderIdText = `ORD-${Number(groupValue)}`;
+                groupKey = `group:${Number(groupValue)}`;
+              }
+            }
+
+            if (!orderIdText) {
+              for (const prop of Object.values(props || {})) {
+                if (prop?.type === "unique_id" && typeof prop?.unique_id?.number === "number") {
+                  const prefix = prop.unique_id.prefix ? String(prop.unique_id.prefix).trim() : "";
+                  orderIdText = prefix ? `${prefix}-${prop.unique_id.number}` : String(prop.unique_id.number);
+                  groupKey = `uid:${orderIdText}`;
+                  break;
+                }
+              }
+            }
+
+            if (!groupKey) groupKey = `page:${pageId}`;
+
+            const { orderType } = _extractOrderTypeInfo(props);
+            const label = [orderIdText, orderType].filter(Boolean).join(" - ") || orderIdText || "Order";
+            const receiptEntries = getOrderReceiptEntries(
+              orderReceiptPropName ? props?.[orderReceiptPropName] : null,
+              orderReceiptPropName || 'Order receipt',
+            );
+
+            meta = {
+              pageId,
+              key: groupKey,
+              orderId: orderIdText || "Order",
+              orderType: orderType || "",
+              label,
+              trackingGroupId: pageId,
+              trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+              receiptEntries,
+            };
+          } catch (orderErr) {
+            console.warn("Expense linked order retrieve failed:", pageId, orderErr?.body || orderErr?.message || orderErr);
+            meta = {
+              pageId,
+              key: `page:${pageId}`,
+              orderId: "Order",
+              orderType: "",
+              label: "Order",
+              trackingGroupId: pageId,
+              trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+              receiptEntries: [],
+            };
+          }
+
+          linkedOrderMetaByPageId.set(pageId, meta);
+          return meta;
+        });
       }
 
       // Last settled time/date: find the most recent "Settled my account" record.
@@ -15039,6 +15143,48 @@ app.get(
         const screenshotUrl = screenshots[0]?.url || "";
         const screenshotName = screenshots[0]?.name || "";
 
+        const linkedOrdersMap = new Map();
+        const linkedOrdersProp = ordersKey ? props?.[ordersKey] : null;
+        if (linkedOrdersProp?.type === "relation") {
+          for (const rel of linkedOrdersProp.relation || []) {
+            const meta = linkedOrderMetaByPageId.get(rel.id);
+            if (!meta) continue;
+
+            if (!linkedOrdersMap.has(meta.key)) {
+              linkedOrdersMap.set(meta.key, {
+                key: meta.key,
+                orderId: meta.orderId,
+                orderType: meta.orderType,
+                label: meta.label,
+                trackingGroupId: meta.trackingGroupId,
+                trackingUrl: meta.trackingUrl,
+                relationIds: [],
+                receiptEntries: [],
+                items: [],
+              });
+            }
+
+            const group = linkedOrdersMap.get(meta.key);
+            if (!group.relationIds.includes(rel.id)) {
+              group.relationIds.push(rel.id);
+            }
+
+            for (const entry of meta.receiptEntries || []) {
+              const url = String(entry?.url || '').trim();
+              if (!url) continue;
+              if (group.receiptEntries.some((item) => String(item?.url || '').trim() === url)) continue;
+              group.receiptEntries.push({
+                name: String(entry?.name || 'Order receipt').trim() || 'Order receipt',
+                url,
+              });
+            }
+
+            group.receiptViewerUrl = group.relationIds.length
+              ? `/orders/order-receipt-viewer?ids=${encodeURIComponent(group.relationIds.join(','))}`
+              : '';
+          }
+        }
+
         return {
           id: page.id,
           createdTime: page.created_time || null,
@@ -15051,6 +15197,7 @@ app.get(
           cashIn: props["Cash in"]?.number || 0,
           cashOut: props["Cash out"]?.number || 0,
           cashInFrom,
+          orders: Array.from(linkedOrdersMap.values()),
           screenshots,
           screenshotUrl,
           screenshotName,
@@ -15116,7 +15263,10 @@ app.get("/api/expenses/screenshot/:expenseId", async (req, res) => {
       return res.status(404).send("No screenshot");
     }
 
-    const f = (screenshotProp.files || [])[0];
+    const requestedIndex = Number.parseInt(String(req.query?.index || "0"), 10);
+    const shotIndex = Number.isFinite(requestedIndex) && requestedIndex >= 0 ? requestedIndex : 0;
+    const files = Array.isArray(screenshotProp.files) ? screenshotProp.files : [];
+    const f = files[shotIndex] || files[0];
     if (!f) return res.status(404).send("No screenshot");
 
     let url = "";
@@ -16276,6 +16426,76 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     // (Notion file URLs expire, so we link to our proxy endpoint instead.)
     const baseUrl = `${req.protocol}://${req.get("host")}`;
 
+    function toAbsoluteAppUrl(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      if (/^https?:\/\//i.test(raw)) return raw;
+      if (raw.startsWith("/")) return `${baseUrl}${raw}`;
+      return `${baseUrl}/${raw.replace(/^\/+/, "")}`;
+    }
+
+    function getExpenseScreenshotEntriesForExport(item) {
+      const shots = Array.isArray(item?.screenshots) ? item.screenshots : [];
+      const normalized = shots
+        .map((shot) => ({
+          name: String(shot?.name || "Screenshot").trim() || "Screenshot",
+          url: String(shot?.url || "").trim(),
+        }))
+        .filter((shot) => shot.url);
+
+      if (normalized.length) return normalized;
+
+      const fallbackUrl = String(item?.screenshotUrl || "").trim();
+      if (!fallbackUrl) return [];
+      return [{
+        name: String(item?.screenshotName || "Screenshot").trim() || "Screenshot",
+        url: fallbackUrl,
+      }];
+    }
+
+    function getExpenseReasonExportPayload(item) {
+      const orders = Array.isArray(item?.orders) ? item.orders.filter(Boolean) : [];
+      const fallbackText = String(item?.reason || "").trim();
+      if (!orders.length) {
+        return { text: fallbackText, hyperlink: "" };
+      }
+
+      const orderIds = Array.from(
+        new Set(
+          orders
+            .map((order) => String(order?.orderId || "").trim())
+            .filter(Boolean),
+        ),
+      );
+
+      const relationIds = Array.from(
+        new Set(
+          orders.flatMap((order) =>
+            Array.isArray(order?.relationIds) ? order.relationIds.map((id) => String(id || "").trim()).filter(Boolean) : [],
+          ),
+        ),
+      );
+
+      let hyperlink = "";
+      if (relationIds.length) {
+        hyperlink = `${baseUrl}/orders/order-receipt-viewer?ids=${encodeURIComponent(relationIds.join(','))}`;
+      } else {
+        const firstOrder = orders.find((order) => String(order?.receiptViewerUrl || order?.trackingUrl || "").trim()) || null;
+        hyperlink = firstOrder
+          ? toAbsoluteAppUrl(firstOrder.receiptViewerUrl || firstOrder.trackingUrl || "")
+          : "";
+      }
+
+      return {
+        text: orderIds.join(", ") || fallbackText || String(orders[0]?.label || "Order").trim() || "Order",
+        hyperlink,
+      };
+    }
+
+    const maxScreenshotCount = safeItems.reduce((maxCount, item) => {
+      return Math.max(maxCount, getExpenseScreenshotEntriesForExport(item).length);
+    }, 0);
+
     const totalCashIn = safeItems.reduce(
       (sum, it) => sum + Number(it?.cashIn || 0),
       0
@@ -16444,9 +16664,13 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       { header: "Reason", width: 36 },
       { header: "From", width: 18 },
       { header: "To", width: 18 },
+      { header: "Kilometers", width: 14 },
       { header: "Cash In", width: 14 },
       { header: "Cash Out", width: 14 },
-      { header: "Screenshot", width: 18 },
+      ...Array.from({ length: maxScreenshotCount }, (_, index) => ({
+        header: `Screenshot ${index + 1}`,
+        width: 18,
+      })),
     ];
 
     const lastCol = columns.length;
@@ -16571,34 +16795,50 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     safeItems.forEach((it) => {
       const d = it?.date ? new Date(it.date) : null;
       const dateVal = d && !Number.isNaN(d.getTime()) ? d : (it?.date || "");
-
-      // Notion-hosted "file" URLs expire. Use a stable proxy URL (fresh redirect at click-time).
-      const screenshotUrlRaw = String(it?.screenshotUrl || "").trim();
-      const screenshotText = String(it?.screenshotName || "Open").trim() || "Open";
-
+      const reasonPayload = getExpenseReasonExportPayload(it);
+      const screenshotEntries = getExpenseScreenshotEntriesForExport(it);
       const expenseId = String(it?.id || "").trim();
-      const screenshotUrl = (screenshotUrlRaw && expenseId)
-        ? `${baseUrl}/api/expenses/screenshot/${encodeURIComponent(expenseId)}`
-        : screenshotUrlRaw;
+      const screenshotValues = Array.from({ length: maxScreenshotCount }, (_, index) => {
+        const shot = screenshotEntries[index] || null;
+        if (!shot) return "";
+
+        const rawUrl = String(shot?.url || "").trim();
+        const hyperlink = expenseId
+          ? `${baseUrl}/api/expenses/screenshot/${encodeURIComponent(expenseId)}?index=${index}`
+          : rawUrl;
+
+        if (!hyperlink) return "";
+        return {
+          text: String(shot?.name || `Screenshot ${index + 1}`).trim() || `Screenshot ${index + 1}`,
+          hyperlink,
+        };
+      });
 
       const row = sheet.addRow([
         dateVal,
         it?.fundsType || "",
-        it?.reason || "",
+        reasonPayload.text || "",
         it?.from || "",
         it?.to || "",
+        Number(it?.kilometer || 0),
         Number(it?.cashIn || 0),
         Number(it?.cashOut || 0),
-        "", // hyperlink placeholder
+        ...screenshotValues,
       ]);
 
-      // Screenshot hyperlink (if exists)
-      if (screenshotUrl) {
-        const linkCell = row.getCell(8);
-        linkCell.value = { text: screenshotText, hyperlink: screenshotUrl };
+      const reasonCell = row.getCell(3);
+      if (reasonPayload.hyperlink && reasonPayload.text) {
+        reasonCell.value = { text: reasonPayload.text, hyperlink: reasonPayload.hyperlink };
+        reasonCell.font = { color: { argb: "FF2563EB" }, underline: true };
+      }
+
+      screenshotValues.forEach((value, index) => {
+        if (!value || typeof value !== "object") return;
+        const linkCell = row.getCell(9 + index);
+        linkCell.value = value;
         linkCell.font = { color: { argb: "FF2563EB" }, underline: true };
         linkCell.alignment = { vertical: "middle", horizontal: "center" };
-      }
+      });
     });
 
     // Body styling (borders, wrapping, number formats, zebra rows)
@@ -16645,20 +16885,27 @@ app.post("/api/expenses/export/excel", async (req, res) => {
           }
         }
 
-        // Cash columns
+        // Kilometers column
         if (colNumber === 6) {
+          cell.numFmt = numFmtFor(cell.value);
+          cell.alignment = { vertical: "middle", horizontal: "center" };
+          cell.font = { color: { argb: "FF475569" } };
+        }
+
+        // Cash columns
+        if (colNumber === 7) {
           cell.numFmt = numFmtFor(cell.value);
           cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FF16A34A" } };
         }
-        if (colNumber === 7) {
+        if (colNumber === 8) {
           cell.numFmt = numFmtFor(cell.value);
           cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FFDC2626" } };
         }
 
-        // Screenshot column (hyperlink)
-        if (colNumber === 8) {
+        // Screenshot columns (hyperlinks)
+        if (colNumber >= 9) {
           cell.alignment = { vertical: "middle", horizontal: "center", wrapText: false };
         }
       });
