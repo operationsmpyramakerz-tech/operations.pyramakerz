@@ -207,13 +207,34 @@ function normalizeGroupText(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function normalizeExpenseOrderTypeKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getExpenseOrdersArray(item) {
+  return Array.isArray(item?.orders) ? item.orders.filter(Boolean) : [];
+}
+
 function isOwnCarFundsType(value) {
   return normalizeFundsType(value) === "own car";
 }
 
 function getExpenseDisplayReason(item) {
   const rawReason = String(item?.reason || "").trim();
+  const orders = getExpenseOrdersArray(item);
+  const primaryOrder = orders[0] || null;
+  const primaryLabel = String(primaryOrder?.label || "").trim();
+
+  if (primaryLabel && rawReason) {
+    const normalizedReason = normalizeGroupText(rawReason);
+    const normalizedLabel = normalizeGroupText(primaryLabel);
+    if (normalizedReason === normalizedLabel || normalizedReason.startsWith(`${normalizedLabel} •`)) {
+      return primaryLabel;
+    }
+  }
+
   if (rawReason) return rawReason;
+  if (primaryLabel) return primaryLabel;
   if (Number(item?.cashIn || 0) > 0) return "Cash In";
   return String(item?.fundsType || "").trim() || "Cash Out";
 }
@@ -720,6 +741,7 @@ function buildGroupedExpenseCollections(items) {
         date,
         reason: reason || "No reason",
         items: [],
+        ordersMap: new Map(),
         totalCashIn: 0,
         totalCashOut: 0,
         totalKilometer: 0,
@@ -733,10 +755,30 @@ function buildGroupedExpenseCollections(items) {
     group.totalCashOut += Number(item?.cashOut || 0);
     group.totalKilometer += Number(item?.kilometer || 0);
     group.createdSort = Math.max(group.createdSort || 0, getTimeValue(item));
+
+    for (const order of getExpenseOrdersArray(item)) {
+      const orderKey = String(order?.key || order?.orderId || order?.label || "").trim();
+      if (!orderKey) continue;
+      if (!group.ordersMap.has(orderKey)) {
+        group.ordersMap.set(orderKey, {
+          key: orderKey,
+          orderId: String(order?.orderId || "").trim(),
+          orderType: String(order?.orderType || "").trim(),
+          label: String(order?.label || "").trim(),
+          trackingGroupId: String(order?.trackingGroupId || "").trim(),
+          trackingUrl: String(order?.trackingUrl || "").trim(),
+          receiptViewerUrl: String(order?.receiptViewerUrl || "").trim(),
+          relationIds: Array.isArray(order?.relationIds) ? order.relationIds.filter(Boolean) : [],
+        });
+      }
+    }
   }
 
   const sortType = document.getElementById("sortSelect")?.value || "newest";
-  const groups = Array.from(grouped.values());
+  const groups = Array.from(grouped.values()).map((group) => ({
+    ...group,
+    orders: Array.from(group.ordersMap?.values?.() || []),
+  }));
 
   groups.sort((a, b) => {
     const timeA = Number.isFinite(new Date(`${a?.date || ""}T00:00:00`).getTime())
@@ -815,23 +857,140 @@ function buildExpenseTicketRowHtml(item) {
   `;
 }
 
+function getExpenseOrderTypeMeta(type) {
+  const label = String(type || "").trim();
+  const key = normalizeExpenseOrderTypeKey(type);
+
+  if (key === "manualreason" || key === "otherreason" || key === "manual") {
+    return {
+      label: label || "Manual reason",
+      icon: "edit-3",
+      bg: "#F3F4F6",
+      fg: "#111827",
+      bd: "#D1D5DB",
+    };
+  }
+
+  if (key === "requestproducts" || key === "delivery") {
+    return {
+      label: label || "Request Products",
+      icon: "shopping-cart",
+      bg: "#DCFCE7",
+      fg: "#166534",
+      bd: "#86EFAC",
+    };
+  }
+
+  if (key === "withdrawproducts" || key === "withdrawal") {
+    return {
+      label: label || "Withdraw Products",
+      icon: "log-out",
+      bg: "#FEE2E2",
+      fg: "#B91C1C",
+      bd: "#FECACA",
+    };
+  }
+
+  if (key === "requestmaintenance" || key === "maintenance") {
+    return {
+      label: label || "Request Maintenance",
+      icon: "tool",
+      bg: "#FEF3C7",
+      fg: "#92400E",
+      bd: "#FDE68A",
+    };
+  }
+
+  return {
+    label: label || "Order",
+    icon: "package",
+    bg: "#EFF6FF",
+    fg: "#1D4ED8",
+    bd: "#BFDBFE",
+  };
+}
+
+function buildExpenseOrderActionHtml(order) {
+  if (!order) return "";
+
+  const meta = getExpenseOrderTypeMeta(order?.orderType || "");
+  const href = String(order?.receiptViewerUrl || order?.trackingUrl || "").trim();
+  const orderLabel = [
+    String(order?.orderId || "").trim(),
+    String(order?.orderType || "").trim(),
+  ].filter(Boolean).join(" · ") || String(order?.label || "Order").trim() || "Order";
+
+  const content = `
+    ${featherIconMarkup(meta.icon, { width: 15, height: 15 })}
+    <span>${escapeHtml(orderLabel)}</span>
+    ${href ? featherIconMarkup("external-link", { width: 14, height: 14 }) : ""}
+  `;
+
+  if (href) {
+    return `
+      <a
+        class="expense-ticket__order-btn"
+        style="--expense-order-btn-bg:${meta.bg};--expense-order-btn-fg:${meta.fg};--expense-order-btn-border:${meta.bd};"
+        href="${escapeHtml(href)}"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        ${content}
+      </a>
+    `;
+  }
+
+  return `
+    <span
+      class="expense-ticket__order-btn expense-ticket__order-btn--disabled"
+      style="--expense-order-btn-bg:${meta.bg};--expense-order-btn-fg:${meta.fg};--expense-order-btn-border:${meta.bd};"
+    >
+      ${content}
+    </span>
+  `;
+}
+
+function shouldHideExpenseGroupReason(group) {
+  const reason = normalizeGroupText(group?.reason);
+  const orders = Array.isArray(group?.orders) ? group.orders : [];
+  if (!reason || !orders.length) return false;
+
+  return orders.some((order) => {
+    const label = normalizeGroupText(order?.label);
+    const orderId = normalizeGroupText(order?.orderId);
+    return (!!label && reason === label) || (!!orderId && reason === orderId);
+  });
+}
 
 function buildUserExpenseTicketHtml(group, { compact = false } = {}) {
   const total = getExpenseGroupTotalDisplay(group);
   const rows = [...(Array.isArray(group?.items) ? group.items : [])].sort(
     (a, b) => getTimeValue(a) - getTimeValue(b)
   );
-  const reason = String(group?.reason || "No reason").trim() || "No reason";
+  const hideReason = shouldHideExpenseGroupReason(group);
+  const hasOrders = Array.isArray(group?.orders) && group.orders.length > 0;
+  const reasonText = String(group?.reason || "No reason").trim() || "No reason";
+  const ordersHtml = hasOrders
+    ? `<div class="expense-ticket__order-actions">${group.orders.map(buildExpenseOrderActionHtml).join("")}</div>`
+    : "";
+  const reasonHtml = hideReason
+    ? ""
+    : `<div class="expense-ticket__reason">${escapeHtml(reasonText)}</div>`;
+  const headerSideHtml = hasOrders ? ordersHtml : reasonHtml;
+  const secondaryReasonHtml = hasOrders && reasonHtml
+    ? `<div class="expense-ticket__reason expense-ticket__reason--block">${escapeHtml(reasonText)}</div>`
+    : "";
 
   return `
     <article class="expense-ticket${compact ? " expense-ticket--compact" : ""}">
       <div class="expense-ticket__top">
-        <div class="expense-ticket__header-row">
+        <div class="expense-ticket__header-row${hasOrders ? " expense-ticket__header-row--with-order" : ""}">
           <div class="expense-ticket__meta">
             <span class="expense-ticket__date">${escapeHtml(formatExpenseGroupDateLabel(group?.date))}</span>
           </div>
-          <div class="expense-ticket__reason">${escapeHtml(reason)}</div>
+          ${headerSideHtml}
         </div>
+        ${secondaryReasonHtml}
         <div class="expense-ticket__header-divider" aria-hidden="true"></div>
       </div>
       <div class="expense-ticket__legs">

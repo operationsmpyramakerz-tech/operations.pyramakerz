@@ -81,12 +81,20 @@ function showToast(message, type = "error", { duration = 4000 } = {}) {
   if (!container) return;
 
   const safeType = ["error", "success", "info"].includes(type) ? type : "error";
-  const iconMap = { error: "!", success: "✓", info: "i" };
+  const iconMap = {
+    error: "x-circle",
+    success: "check-circle",
+    info: "info",
+  };
+  const fallbackIconMap = { error: "!", success: "✓", info: "i" };
+  const iconHtml =
+    featherIconMarkup(iconMap[safeType], { width: 18, height: 18, strokeWidth: 2.35 }) ||
+    `<span>${fallbackIconMap[safeType] || "!"}</span>`;
 
   const toast = document.createElement("div");
   toast.className = `toast toast--${safeType}`;
   toast.innerHTML = `
-    <div class="toast__icon" aria-hidden="true">${iconMap[safeType] || "!"}</div>
+    <div class="toast__icon" aria-hidden="true">${iconHtml}</div>
     <div class="toast__body">
       <p class="toast__msg"></p>
     </div>
