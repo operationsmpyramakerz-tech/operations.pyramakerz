@@ -211,26 +211,9 @@ function isOwnCarFundsType(value) {
   return normalizeFundsType(value) === "own car";
 }
 
-function getExpenseOrdersArray(item) {
-  return Array.isArray(item?.orders) ? item.orders.filter(Boolean) : [];
-}
-
 function getExpenseDisplayReason(item) {
   const rawReason = String(item?.reason || "").trim();
-  const orders = getExpenseOrdersArray(item);
-  const primaryOrder = orders[0] || null;
-  const primaryLabel = String(primaryOrder?.label || "").trim();
-
-  if (primaryLabel && rawReason) {
-    const normalizedReason = normalizeGroupText(rawReason);
-    const normalizedLabel = normalizeGroupText(primaryLabel);
-    if (normalizedReason === normalizedLabel || normalizedReason.startsWith(`${normalizedLabel} •`)) {
-      return primaryLabel;
-    }
-  }
-
   if (rawReason) return rawReason;
-  if (primaryLabel) return primaryLabel;
   if (Number(item?.cashIn || 0) > 0) return "Cash In";
   return String(item?.fundsType || "").trim() || "Cash Out";
 }
@@ -274,6 +257,169 @@ function getExpenseRowTypeLabel(item) {
 function getExpensePrimaryScreenshot(item) {
   const shots = getReceiptImages(item);
   return shots.length ? shots[0] : null;
+}
+
+
+function getExpenseAmountToneClass(item) {
+  const isCashIn = Number(item?.cashIn || 0) > 0;
+  if (isCashIn) return "is-positive";
+
+  const fundsType = String(item?.fundsType || "").trim();
+  const kilometer = Number(item?.kilometer || 0);
+  const cashOut = Number(item?.cashOut || 0);
+
+  if (isOwnCarFundsType(fundsType) && kilometer > 0 && !cashOut) {
+    return "is-neutral";
+  }
+
+  return cashOut > 0 ? "is-negative" : "is-neutral";
+}
+
+function encodeExpenseShotsData(shots) {
+  try {
+    const safeShots = (Array.isArray(shots) ? shots : [])
+      .map((shot) => ({
+        name: String(shot?.name || "Receipt").trim() || "Receipt",
+        url: String(shot?.url || "").trim(),
+      }))
+      .filter((shot) => shot.url);
+
+    return encodeURIComponent(JSON.stringify(safeShots));
+  } catch (err) {
+    return "";
+  }
+}
+
+function decodeExpenseShotsData(value) {
+  try {
+    const parsed = JSON.parse(decodeURIComponent(String(value || "")));
+    return (Array.isArray(parsed) ? parsed : [])
+      .map((shot) => ({
+        name: String(shot?.name || "Receipt").trim() || "Receipt",
+        url: String(shot?.url || "").trim(),
+      }))
+      .filter((shot) => shot.url);
+  } catch (err) {
+    return [];
+  }
+}
+
+function buildExpenseScreenshotButtonHtml(item) {
+  const shots = getReceiptImages(item);
+  const hasShots = shots.length > 0;
+  const serializedShots = encodeExpenseShotsData(shots);
+  const ariaLabel = hasShots
+    ? `View ${shots.length} screenshot${shots.length === 1 ? "" : "s"}`
+    : "No screenshots uploaded";
+
+  return `
+    <button
+      type="button"
+      class="expense-ticket__shot-btn${hasShots ? " expense-ticket__shot-btn--has-shots" : ""}"
+      aria-label="${escapeHtml(ariaLabel)}"
+      data-shots="${escapeHtml(serializedShots)}"
+    >
+      <span class="expense-ticket__shot-btn-icon" aria-hidden="true">${featherIconMarkup("image", { width: 18, height: 18 })}</span>
+    </button>
+  `;
+}
+
+function buildExpenseShotsViewerBodyHtml(shots) {
+  const safeShots = Array.isArray(shots) ? shots : [];
+  if (!safeShots.length) {
+    return `
+      <div class="expense-shots-modal__empty">
+        <div class="expense-shots-modal__empty-icon" aria-hidden="true">${featherIconMarkup("image", { width: 24, height: 24 })}</div>
+        <div>No screenshots uploaded for this expense.</div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="expense-shots-modal__grid">
+      ${safeShots
+        .map((shot, index) => `
+          <a class="expense-shots-modal__item" href="${escapeHtml(shot.url)}" target="_blank" rel="noopener noreferrer">
+            <span class="expense-shots-modal__image-wrap">
+              <img class="expense-shots-modal__image" src="${escapeHtml(shot.url)}" alt="${escapeHtml(shot.name || `Screenshot ${index + 1}`)}" loading="lazy" />
+            </span>
+            <span class="expense-shots-modal__caption">${escapeHtml(shot.name || `Screenshot ${index + 1}`)}</span>
+          </a>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function openExpenseShotsModal(shots) {
+  const modal = document.getElementById("expenseShotsModal");
+  const countEl = document.getElementById("expenseShotsModalCount");
+  const bodyEl = document.getElementById("expenseShotsModalBody");
+  if (!modal || !countEl || !bodyEl) return;
+
+  const safeShots = (Array.isArray(shots) ? shots : [])
+    .map((shot) => ({
+      name: String(shot?.name || "Receipt").trim() || "Receipt",
+      url: String(shot?.url || "").trim(),
+    }))
+    .filter((shot) => shot.url);
+
+  countEl.textContent = safeShots.length
+    ? `${safeShots.length} image${safeShots.length === 1 ? "" : "s"}`
+    : "No images uploaded";
+
+  bodyEl.innerHTML = buildExpenseShotsViewerBodyHtml(safeShots);
+  modal.style.display = "flex";
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("expense-shots-modal-open");
+  requestAnimationFrame(() => modal.classList.add("is-open"));
+}
+
+function closeExpenseShotsModal() {
+  const modal = document.getElementById("expenseShotsModal");
+  if (!modal) return;
+
+  modal.classList.remove("is-open");
+  modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("expense-shots-modal-open");
+  window.setTimeout(() => {
+    if (!modal.classList.contains("is-open")) {
+      modal.style.display = "none";
+    }
+  }, 180);
+}
+
+function setupExpenseShotsViewer() {
+  const modal = document.getElementById("expenseShotsModal");
+  const card = modal?.querySelector ? modal.querySelector(".expense-shots-modal__card") : null;
+  if (!modal || !card) return;
+
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest(".expense-ticket__shot-btn");
+    if (!trigger) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    openExpenseShotsModal(decodeExpenseShotsData(trigger.getAttribute("data-shots")));
+  });
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal || event.target.closest("[data-expense-shots-close]")) {
+      event.stopPropagation();
+      closeExpenseShotsModal();
+      return;
+    }
+
+    if (card.contains(event.target)) {
+      event.stopPropagation();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && modal.style.display === "flex") {
+      closeExpenseShotsModal();
+    }
+  });
 }
 
 // ------------------------
@@ -574,7 +720,6 @@ function buildGroupedExpenseCollections(items) {
         date,
         reason: reason || "No reason",
         items: [],
-        ordersMap: new Map(),
         totalCashIn: 0,
         totalCashOut: 0,
         totalKilometer: 0,
@@ -588,28 +733,10 @@ function buildGroupedExpenseCollections(items) {
     group.totalCashOut += Number(item?.cashOut || 0);
     group.totalKilometer += Number(item?.kilometer || 0);
     group.createdSort = Math.max(group.createdSort || 0, getTimeValue(item));
-
-    for (const order of getExpenseOrdersArray(item)) {
-      const orderKey = String(order?.key || order?.trackingGroupId || order?.label || order?.orderId || "").trim();
-      if (!orderKey) continue;
-      if (!group.ordersMap.has(orderKey)) {
-        group.ordersMap.set(orderKey, order);
-      }
-    }
   }
 
   const sortType = document.getElementById("sortSelect")?.value || "newest";
-  const groups = Array.from(grouped.values()).map((group) => ({
-    key: group.key,
-    date: group.date,
-    reason: group.reason,
-    items: group.items,
-    orders: Array.from(group.ordersMap.values()),
-    totalCashIn: group.totalCashIn,
-    totalCashOut: group.totalCashOut,
-    totalKilometer: group.totalKilometer,
-    createdSort: group.createdSort,
-  }));
+  const groups = Array.from(grouped.values());
 
   groups.sort((a, b) => {
     const timeA = Number.isFinite(new Date(`${a?.date || ""}T00:00:00`).getTime())
@@ -659,166 +786,35 @@ function getExpenseGroupTotalDisplay(group) {
   return { text: `£${formatExpenseNumber(0)}`, className: "is-neutral" };
 }
 
-function normalizeExpenseOrderTypeKey(value) {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function getExpenseOrderTypeMeta(type) {
-  const label = String(type || "").trim();
-  const key = normalizeExpenseOrderTypeKey(type);
-
-  if (key === "manualreason" || key === "otherreason" || key === "manual") {
-    return {
-      label: label || "Manual reason",
-      icon: "edit-3",
-      bg: "#F3F4F6",
-      fg: "#111827",
-      bd: "#D1D5DB",
-    };
-  }
-
-  if (key === "requestproducts" || key === "delivery") {
-    return {
-      label: label || "Request Products",
-      icon: "shopping-cart",
-      bg: "#DCFCE7",
-      fg: "#166534",
-      bd: "#86EFAC",
-    };
-  }
-
-  if (key === "withdrawproducts" || key === "withdrawal") {
-    return {
-      label: label || "Withdraw Products",
-      icon: "log-out",
-      bg: "#FEE2E2",
-      fg: "#B91C1C",
-      bd: "#FECACA",
-    };
-  }
-
-  if (key === "requestmaintenance" || key === "maintenance") {
-    return {
-      label: label || "Request Maintenance",
-      icon: "tool",
-      bg: "#FEF3C7",
-      fg: "#92400E",
-      bd: "#FDE68A",
-    };
-  }
-
-  return {
-    label: label || "Order",
-    icon: "package",
-    bg: "#EFF6FF",
-    fg: "#1D4ED8",
-    bd: "#BFDBFE",
-  };
-}
-
-function buildExpenseOrderActionHtml(order) {
-  if (!order) return "";
-
-  const meta = getExpenseOrderTypeMeta(order?.orderType || "");
-  const href = String(order?.receiptViewerUrl || order?.trackingUrl || "").trim();
-  const orderLabel = [
-    String(order?.orderId || "").trim(),
-    String(order?.orderType || "").trim(),
-  ].filter(Boolean).join(" · ") || String(order?.label || "Order").trim() || "Order";
-
-  const content = `
-    ${featherIconMarkup(meta.icon, { width: 15, height: 15 })}
-    <span>${escapeHtml(orderLabel)}</span>
-    ${href ? featherIconMarkup("external-link", { width: 14, height: 14 }) : ""}
-  `;
-
-  if (href) {
-    return `
-      <a
-        class="expense-ticket__order-btn"
-        style="--expense-order-btn-bg:${meta.bg};--expense-order-btn-fg:${meta.fg};--expense-order-btn-border:${meta.bd};"
-        href="${escapeHtml(href)}"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        ${content}
-      </a>
-    `;
-  }
-
-  return `
-    <span
-      class="expense-ticket__order-btn expense-ticket__order-btn--disabled"
-      style="--expense-order-btn-bg:${meta.bg};--expense-order-btn-fg:${meta.fg};--expense-order-btn-border:${meta.bd};"
-    >
-      ${content}
-    </span>
-  `;
-}
-
-function shouldHideExpenseGroupReason(group) {
-  const reason = normalizeGroupText(group?.reason);
-  const orders = Array.isArray(group?.orders) ? group.orders : [];
-  if (!reason || !orders.length) return false;
-
-  return orders.some((order) => {
-    const label = normalizeGroupText(order?.label);
-    const orderId = normalizeGroupText(order?.orderId);
-    return (!!label && reason === label) || (!!orderId && reason === orderId);
-  });
-}
-
-function buildExpenseAmountChipHtml(item) {
-  const amountLabel = formatExpenseAmountLabel(item);
-  const primaryShot = getExpensePrimaryScreenshot(item);
-
-  const chipInner = `
-    ${primaryShot?.url
-      ? `<img class="expense-ticket__amount-thumb" src="${escapeHtml(primaryShot.url)}" alt="${escapeHtml(primaryShot.name || "Receipt")}" />`
-      : `<span class="expense-ticket__amount-icon" aria-hidden="true">${featherIconMarkup("dollar-sign", { width: 14, height: 14 })}</span>`}
-    <span class="expense-ticket__amount-chip-text">${escapeHtml(amountLabel)}</span>
-  `;
-
-  if (primaryShot?.url) {
-    return `
-      <a class="expense-ticket__amount-chip expense-ticket__amount-chip--link" href="${escapeHtml(primaryShot.url)}" target="_blank" rel="noopener noreferrer">
-        ${chipInner}
-      </a>
-    `;
-  }
-
-  return `
-    <span class="expense-ticket__amount-chip">
-      ${chipInner}
-    </span>
-  `;
-}
 
 function buildExpenseTicketRowHtml(item) {
   const endpoints = getExpenseRouteEndpoints(item);
   const typeLabel = getExpenseRowTypeLabel(item);
-  const typeClass = Number(item?.cashIn || 0) > 0 ? " expense-ticket__track-pill--in" : "";
+  const amountLabel = formatExpenseAmountLabel(item);
+  const amountToneClass = getExpenseAmountToneClass(item);
 
   return `
     <div class="expense-ticket__route">
-      <div class="expense-ticket__route-meta">
-        ${buildExpenseAmountChipHtml(item)}
-      </div>
-      <div class="expense-ticket__point expense-ticket__point--from">
-        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</div>
-      </div>
-      <div class="expense-ticket__track">
-        <span class="expense-ticket__track-segment expense-ticket__track-segment--left"></span>
-        <span class="expense-ticket__track-pill${typeClass}">${escapeHtml(typeLabel)}</span>
-        <span class="expense-ticket__track-segment expense-ticket__track-segment--right"></span>
-        <span class="expense-ticket__track-arrow" aria-hidden="true">${featherIconMarkup("arrow-right", { width: 19, height: 19 })}</span>
-      </div>
-      <div class="expense-ticket__point expense-ticket__point--right">
-        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</div>
+      <div class="expense-ticket__route-frame">
+        <div class="expense-ticket__route-shot">
+          ${buildExpenseScreenshotButtonHtml(item)}
+        </div>
+        <div class="expense-ticket__route-body">
+          <div class="expense-ticket__route-top">
+            <div class="expense-ticket__route-title" dir="auto" title="${escapeHtml(typeLabel)}">${escapeHtml(typeLabel)}</div>
+            <div class="expense-ticket__route-amount ${amountToneClass}" title="${escapeHtml(amountLabel)}">${escapeHtml(amountLabel)}</div>
+          </div>
+          <div class="expense-ticket__route-sub">
+            <span class="expense-ticket__route-endpoint expense-ticket__route-endpoint--from" dir="auto" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</span>
+            <span class="expense-ticket__route-arrow" aria-hidden="true">${featherIconMarkup("arrow-right", { width: 16, height: 16 })}</span>
+            <span class="expense-ticket__route-endpoint expense-ticket__route-endpoint--to" dir="auto" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</span>
+          </div>
+        </div>
       </div>
     </div>
   `;
 }
+
 
 function buildUserExpenseTicketHtml(group, { compact = false } = {}) {
   const total = getExpenseGroupTotalDisplay(group);
@@ -826,29 +822,16 @@ function buildUserExpenseTicketHtml(group, { compact = false } = {}) {
     (a, b) => getTimeValue(a) - getTimeValue(b)
   );
   const reason = String(group?.reason || "No reason").trim() || "No reason";
-  const hideReason = shouldHideExpenseGroupReason(group);
-  const hasOrders = Array.isArray(group?.orders) && group.orders.length > 0;
-  const ordersHtml = hasOrders
-    ? `<div class="expense-ticket__order-actions">${group.orders.map(buildExpenseOrderActionHtml).join("")}</div>`
-    : "";
-  const reasonHtml = hideReason
-    ? ""
-    : `<div class="expense-ticket__reason">${escapeHtml(reason)}</div>`;
-  const headerSideHtml = hasOrders ? ordersHtml : reasonHtml;
-  const secondaryReasonHtml = hasOrders && reasonHtml
-    ? `<div class="expense-ticket__reason expense-ticket__reason--block">${escapeHtml(reason)}</div>`
-    : "";
 
   return `
     <article class="expense-ticket${compact ? " expense-ticket--compact" : ""}">
       <div class="expense-ticket__top">
-        <div class="expense-ticket__header-row${hasOrders ? " expense-ticket__header-row--with-order" : ""}">
+        <div class="expense-ticket__header-row">
           <div class="expense-ticket__meta">
             <span class="expense-ticket__date">${escapeHtml(formatExpenseGroupDateLabel(group?.date))}</span>
           </div>
-          ${headerSideHtml}
+          <div class="expense-ticket__reason">${escapeHtml(reason)}</div>
         </div>
-        ${secondaryReasonHtml}
         <div class="expense-ticket__header-divider" aria-hidden="true"></div>
       </div>
       <div class="expense-ticket__legs">
@@ -1089,9 +1072,11 @@ if (togglePastBtn) {
 document.addEventListener("click", (e) => {
   const modal = document.getElementById("userExpensesModal");
   const sheet = document.getElementById("userExpensesSheet");
+  const shotsModal = document.getElementById("expenseShotsModal");
 
   if (!modal || !sheet) return;
   if (modal.style.display !== "flex") return;
+  if (shotsModal && shotsModal.style.display === "flex") return;
   if (e.target.closest(".user-tab")) return;
 
   if (!sheet.contains(e.target)) closeUserExpensesModal();
@@ -1105,6 +1090,10 @@ function closeUserExpensesModal() {
 
   if (!modal || !sheet) return;
 
+  if (typeof closeExpenseShotsModal === "function") {
+    closeExpenseShotsModal();
+  }
+
   // reset state so next open starts clean
   SHOW_PAST_EXPENSES = false;
   if (toggleBtn) toggleBtn.textContent = "Show past expenses";
@@ -1115,4 +1104,7 @@ function closeUserExpensesModal() {
 }
 
 // ---------------------------
-document.addEventListener("DOMContentLoaded", loadExpenseUsers);
+document.addEventListener("DOMContentLoaded", () => {
+  setupExpenseShotsViewer();
+  loadExpenseUsers();
+});
