@@ -13893,7 +13893,7 @@ app.get(
 app.get(
   "/orders/order-receipt-viewer",
   requireAuth,
-  requirePage("Expenses"),
+  requirePage(["Expenses", "Expenses Users"]),
   async (req, res) => {
     try {
       const rawIds = String(req.query?.ids || "").trim();
@@ -14229,22 +14229,10 @@ app.post("/api/expenses/cash-out", async (req, res) => {
 
 // Cash In
 app.post("/api/expenses/cash-in", async (req, res) => {
-  const {
-    date,
-    amount,
-    cashInFrom,
-    paymentBy,
-    fundsType,
-    receiptNumber,
-    screenshots,
-    screenshotDataUrl,
-    screenshotName,
-  } = req.body;
+  const { date, amount, cashInFrom, receiptNumber } = req.body;
 
   try {
     const teamMemberPageId = await getCurrentUserRelationPage(req);
-    const currentUsername = String(req.session?.username || "").trim();
-    const teamMemberName = currentUsername || (teamMemberPageId ? String(await pageTitleById(teamMemberPageId) || "").trim() : "");
 
     if (!date || amount === undefined || amount === null || amount === "") {
       return res.status(400).json({
@@ -14261,63 +14249,64 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       });
     }
 
-    const payerName = String(paymentBy || cashInFrom || "").trim();
-    if (!payerName) {
-      return res.status(400).json({
-        success: false,
-        error: "Payment by is required",
-      });
-    }
-
-    const selectedFundsTypeRaw = String(fundsType || "").trim();
-    const selectedFundsTypeKey = normKey(selectedFundsTypeRaw);
-    const isOnlineTransfer = selectedFundsTypeKey === "onlinetransfer";
-    const isCashPayment = selectedFundsTypeKey === "cashpayment" || selectedFundsTypeKey === "cashreceipt" || selectedFundsTypeKey === "cashreciept";
-
-    if (!selectedFundsTypeKey || (!isOnlineTransfer && !isCashPayment)) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid funds type",
-      });
-    }
-
     const receipt = String(receiptNumber || "").trim();
-    if (isCashPayment && !receipt) {
+    if (!receipt) {
       return res.status(400).json({
         success: false,
         error: "Missing receipt number",
       });
     }
 
-    const hasScreenshotPayload =
-      (Array.isArray(screenshots) && screenshots.some((shot) => String(shot?.dataUrl || shot?.screenshotDataUrl || "").trim())) ||
-      !!String(screenshotDataUrl || "").trim();
-
-    if (isOnlineTransfer && !hasScreenshotPayload) {
-      return res.status(400).json({
-        success: false,
-        error: "Screenshot is required for online transfer",
-      });
-    }
-
-    // Detect Expenses DB properties
+    // Detect Expenses DB properties (title + optional Cash in from)
     const expProps = await getExpensesDBProps();
     const titleKey = firstTitlePropName(expProps) || "Reason";
-    const fromKey = pickPropName(expProps, ["From"]) || "From";
-    const toKey = pickPropName(expProps, ["To"]) || "To";
+    const cashInFromKey =
+      pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
+      "Cash in from";
+    const cashInFromProp = expProps?.[cashInFromKey];
+
+    let cashInFromValue = null;
+    const fromVal = String(cashInFrom || "").trim();
+
+    if (fromVal && cashInFromProp?.type === "relation") {
+      // Notion expects: { relation: [{ id: "..." }] }
+      const relDbId = cashInFromProp?.relation?.database_id;
+
+      if (fromVal) {
+        let relPageId = null;
+
+        try {
+          if (looksLikeNotionId(fromVal)) {
+            relPageId = toHyphenatedUUID(fromVal);
+          } else if (relDbId) {
+            relPageId = await findOrCreatePageByTitle(relDbId, fromVal);
+          }
+        } catch (e) {
+          // If integration doesn't have permission on the related DB, don't fail the whole request
+          console.warn("Cash in from relation resolve failed:", e?.body || e);
+          relPageId = null;
+        }
+
+        cashInFromValue = { relation: relPageId ? [{ id: relPageId }] : [] };
+      } else {
+        cashInFromValue = { relation: [] };
+      }
+    } else if (fromVal && cashInFromProp?.type === "rich_text") {
+      // Old schema uses rich_text
+      cashInFromValue = {
+        rich_text: [{ type: "text", text: { content: fromVal } }],
+      };
+    }
 
     const fundsTypeMeta = expProps?.["Funds Type"] || null;
-    const fundsTypeOptions = Array.isArray(fundsTypeMeta?.select?.options) ? fundsTypeMeta.select.options : [];
-    const preferredFundsTypeNames = isOnlineTransfer
-      ? [selectedFundsTypeRaw, "Online Transfer"]
-      : [selectedFundsTypeRaw, "Cash Payment", "Cash Receipt", "cash receipt"];
-
     const cashInFundsTypeName =
-      fundsTypeOptions.find((opt) => preferredFundsTypeNames.some((name) => normKey(name) === normKey(opt?.name)))?.name ||
-      selectedFundsTypeRaw ||
-      (isOnlineTransfer ? "Online Transfer" : "Cash Payment");
-
-    const titleContent = receipt || cashInFundsTypeName || "Cash In";
+      (Array.isArray(fundsTypeMeta?.select?.options)
+        ? fundsTypeMeta.select.options.find((opt) => {
+            const key = String(opt?.name || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+            return key === "cashreceipt" || key === "cashreciept";
+          })?.name
+        : null) ||
+      "cash receipt";
 
     const propsToCreate = {
       "Team Member": {
@@ -14326,8 +14315,9 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       "Funds Type": {
         select: { name: cashInFundsTypeName },
       },
+      // Store receipt number in the DB title (same behavior as "Settled my account")
       [titleKey]: {
-        title: [{ text: { content: titleContent } }],
+        title: [{ text: { content: receipt } }],
       },
       "Date": {
         date: { start: date },
@@ -14337,40 +14327,8 @@ app.post("/api/expenses/cash-in", async (req, res) => {
       },
     };
 
-    propsToCreate[fromKey] = {
-      rich_text: [{ type: "text", text: { content: payerName } }],
-    };
-    propsToCreate[toKey] = {
-      rich_text: [{ type: "text", text: { content: teamMemberName || "" } }],
-    };
-
-    const filesToAttach = [];
-
-    if (Array.isArray(screenshots) && screenshots.length) {
-      for (let i = 0; i < screenshots.length; i++) {
-        const s = screenshots[i] || {};
-        const dataUrl = s.dataUrl || s.screenshotDataUrl || "";
-        if (!dataUrl) continue;
-
-        const originalName = String(s.name || s.filename || "transfer.png").trim() || "transfer.png";
-        const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
-        const filename = `cashin-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
-
-        const url = await uploadToBlobFromBase64(dataUrl, filename);
-        filesToAttach.push(makeExternalFile(originalName, url));
-      }
-    }
-
-    if (!filesToAttach.length && screenshotDataUrl) {
-      const originalName = (screenshotName && String(screenshotName).trim()) || `cashin-${Date.now()}.png`;
-      const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
-      const filename = `cashin-${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
-      const url = await uploadToBlobFromBase64(screenshotDataUrl, filename);
-      filesToAttach.push(makeExternalFile(originalName, url));
-    }
-
-    if (filesToAttach.length) {
-      propsToCreate["Screenshot"] = { files: filesToAttach };
+    if (cashInFromValue) {
+      propsToCreate[cashInFromKey] = cashInFromValue;
     }
 
     await notion.pages.create({
@@ -14381,15 +14339,15 @@ app.post("/api/expenses/cash-in", async (req, res) => {
     await clearExpensesRouteCaches(req, teamMemberPageId);
 
     res.json({ success: true, message: "Cash in recorded" });
-  } catch (err) {
-    console.error("❌ Cash in error (RAW):", err);
-    console.error("❌ Cash in error BODY:", err.body);
+} catch (err) {
+  console.error("❌ Cash in error (RAW):", err);
+  console.error("❌ Cash in error BODY:", err.body);
 
-    res.status(500).json({
-      success: false,
-      error: err.body || err.message || "Failed to save cash in"
-    });
-  }
+  res.status(500).json({
+    success: false,
+    error: err.body || err.message || "Failed to save cash in"
+  });
+}
 });
 
 // Settled my account
@@ -14911,7 +14869,7 @@ app.get(
   "/api/expenses/user/:memberId",
   requireAuth,
   requirePage("Expenses Users"),
-  cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:user:${normalizeNotionId(req.params?.memberId || "")}:v1`),
+  cachedJsonRoute(2 * 60, (req) => `cache:api:expenses:user:${normalizeNotionId(req.params?.memberId || "")}:v2`),
   async (req, res) => {
     try {
       if (!expensesDatabaseId) {
@@ -14949,26 +14907,125 @@ app.get(
       }
 
 
-            // Resolve Cash in from (rich_text OR relation) + support Reason as title/rich_text
+            // Resolve Cash in from (rich_text OR relation) + linked orders
       const expProps = await getExpensesDBProps();
       const cashInFromKey =
         pickPropName(expProps, ["Cash in from", "Cash In From", "Cash In from"]) ||
         "Cash in from";
+      const ordersKey =
+        pickPropName(expProps, ["📄 Orders", "Orders", "Order"]) ||
+        pickPropName(expProps, ["Orders", "Order"]) ||
+        null;
 
-      // If Cash in from is a relation in Notion, resolve related page titles once.
       const cashInFromTitleMap = new Map();
       const cashInFromIds = new Set();
+      const linkedOrderRelationIds = new Set();
 
       for (const page of results) {
         const p = page.properties?.[cashInFromKey];
         if (p?.type === "relation") {
           (p.relation || []).forEach((r) => r?.id && cashInFromIds.add(r.id));
         }
+
+        const ordersProp = ordersKey ? page.properties?.[ordersKey] : null;
+        if (ordersProp?.type === "relation") {
+          (ordersProp.relation || []).forEach((r) => r?.id && linkedOrderRelationIds.add(r.id));
+        }
       }
 
-      for (const id of cashInFromIds) {
-        const t = await pageTitleById(id);
-        cashInFromTitleMap.set(id, t);
+      if (cashInFromIds.size) {
+        const cashInFromLookup = await mapWithConcurrency(cashInFromIds, 4, async (id) => {
+          try {
+            return await pageTitleById(id);
+          } catch {
+            return "";
+          }
+        });
+        for (const [id, title] of cashInFromLookup.entries()) {
+          if (title) cashInFromTitleMap.set(id, title);
+        }
+      }
+
+      const linkedOrderMetaByPageId = new Map();
+      let orderGroupPropName = null;
+      let orderReceiptPropName = null;
+      if (linkedOrderRelationIds.size) {
+        try {
+          orderGroupPropName = await detectOrderGroupIdPropName();
+        } catch (groupPropErr) {
+          console.warn("Expense user order group detection failed:", groupPropErr?.body || groupPropErr?.message || groupPropErr);
+        }
+
+        try {
+          orderReceiptPropName = await detectOrderReceiptFilesPropName();
+        } catch (receiptPropErr) {
+          console.warn("Expense user order receipt detection failed:", receiptPropErr?.body || receiptPropErr?.message || receiptPropErr);
+        }
+
+        await mapWithConcurrency(linkedOrderRelationIds, 3, async (pageId) => {
+          let meta = null;
+
+          try {
+            const orderPage = await notion.pages.retrieve({ page_id: pageId });
+            const props = orderPage?.properties || {};
+            let orderIdText = "";
+            let groupKey = "";
+
+            if (orderGroupPropName) {
+              const groupValue = _extractPropNumber(props?.[orderGroupPropName]);
+              if (Number.isFinite(Number(groupValue))) {
+                orderIdText = `ORD-${Number(groupValue)}`;
+                groupKey = `group:${Number(groupValue)}`;
+              }
+            }
+
+            if (!orderIdText) {
+              for (const prop of Object.values(props || {})) {
+                if (prop?.type === "unique_id" && typeof prop?.unique_id?.number === "number") {
+                  const prefix = prop.unique_id.prefix ? String(prop.unique_id.prefix).trim() : "";
+                  orderIdText = prefix ? `${prefix}-${prop.unique_id.number}` : String(prop.unique_id.number);
+                  groupKey = `uid:${orderIdText}`;
+                  break;
+                }
+              }
+            }
+
+            if (!groupKey) groupKey = `page:${pageId}`;
+
+            const { orderType } = _extractOrderTypeInfo(props);
+            const label = [orderIdText, orderType].filter(Boolean).join(" - ") || orderIdText || "Order";
+            const receiptEntries = getOrderReceiptEntries(
+              orderReceiptPropName ? props?.[orderReceiptPropName] : null,
+              orderReceiptPropName || 'Order receipt',
+            );
+
+            meta = {
+              pageId,
+              key: groupKey,
+              orderId: orderIdText || "Order",
+              orderType: orderType || "",
+              label,
+              trackingGroupId: pageId,
+              trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+              receiptEntries,
+            };
+          } catch (orderErr) {
+            console.warn("Expense user linked order retrieve failed:", pageId, orderErr?.body || orderErr?.message || orderErr);
+            meta = {
+              pageId,
+              key: `page:${pageId}`,
+              orderId: "Order",
+              orderType: "",
+              label: "Order",
+              trackingGroupId: pageId,
+              trackingUrl: `/orders/tracking?groupId=${encodeURIComponent(pageId)}`,
+              receiptEntries: [],
+            };
+          }
+
+          linkedOrderMetaByPageId.set(pageId, meta);
+          return meta;
+        });
       }
 
       // Last settled time/date: find the most recent "Settled my account" record.
@@ -15039,6 +15096,48 @@ app.get(
         const screenshotUrl = screenshots[0]?.url || "";
         const screenshotName = screenshots[0]?.name || "";
 
+        const linkedOrdersMap = new Map();
+        const linkedOrdersProp = ordersKey ? props?.[ordersKey] : null;
+        if (linkedOrdersProp?.type === "relation") {
+          for (const rel of linkedOrdersProp.relation || []) {
+            const meta = linkedOrderMetaByPageId.get(rel.id);
+            if (!meta) continue;
+
+            if (!linkedOrdersMap.has(meta.key)) {
+              linkedOrdersMap.set(meta.key, {
+                key: meta.key,
+                orderId: meta.orderId,
+                orderType: meta.orderType,
+                label: meta.label,
+                trackingGroupId: meta.trackingGroupId,
+                trackingUrl: meta.trackingUrl,
+                relationIds: [],
+                receiptEntries: [],
+                items: [],
+              });
+            }
+
+            const group = linkedOrdersMap.get(meta.key);
+            if (!group.relationIds.includes(rel.id)) {
+              group.relationIds.push(rel.id);
+            }
+
+            for (const entry of meta.receiptEntries || []) {
+              const url = String(entry?.url || '').trim();
+              if (!url) continue;
+              if (group.receiptEntries.some((item) => String(item?.url || '').trim() === url)) continue;
+              group.receiptEntries.push({
+                name: String(entry?.name || 'Order receipt').trim() || 'Order receipt',
+                url,
+              });
+            }
+
+            group.receiptViewerUrl = group.relationIds.length
+              ? `/orders/order-receipt-viewer?ids=${encodeURIComponent(group.relationIds.join(','))}`
+              : '';
+          }
+        }
+
         return {
           id: page.id,
           createdTime: page.created_time || null,
@@ -15051,6 +15150,7 @@ app.get(
           cashIn: props["Cash in"]?.number || 0,
           cashOut: props["Cash out"]?.number || 0,
           cashInFrom,
+          orders: Array.from(linkedOrdersMap.values()),
           screenshots,
           screenshotUrl,
           screenshotName,
@@ -15083,6 +15183,8 @@ app.get(
 app.get("/api/expenses/screenshot/:expenseId", async (req, res) => {
   try {
     const raw = String(req.params.expenseId || "").trim();
+    const requestedIndex = Number.parseInt(String(req.query?.index ?? "0"), 10);
+    const screenshotIndex = Number.isFinite(requestedIndex) && requestedIndex >= 0 ? requestedIndex : 0;
     if (!raw) return res.status(400).send("Missing expenseId");
 
     // Accept both hyphenated and non-hyphenated UUIDs
@@ -15116,7 +15218,8 @@ app.get("/api/expenses/screenshot/:expenseId", async (req, res) => {
       return res.status(404).send("No screenshot");
     }
 
-    const f = (screenshotProp.files || [])[0];
+    const files = Array.isArray(screenshotProp.files) ? screenshotProp.files : [];
+    const f = files[screenshotIndex];
     if (!f) return res.status(404).send("No screenshot");
 
     let url = "";
@@ -16268,22 +16371,12 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       });
     }
 
-    // userName is coming from the UI as "Expenses — <Name>"
     const rawName = String(userName || "Expenses").trim();
     const displayName = (rawName.replace(/^Expenses\s*[—\-]\s*/i, "").trim() || rawName);
-
-    // Base URL used for stable hyperlinks inside Excel.
-    // (Notion file URLs expire, so we link to our proxy endpoint instead.)
     const baseUrl = `${req.protocol}://${req.get("host")}`;
 
-    const totalCashIn = safeItems.reduce(
-      (sum, it) => sum + Number(it?.cashIn || 0),
-      0
-    );
-    const totalCashOut = safeItems.reduce(
-      (sum, it) => sum + Number(it?.cashOut || 0),
-      0
-    );
+    const totalCashIn = safeItems.reduce((sum, it) => sum + Number(it?.cashIn || 0), 0);
+    const totalCashOut = safeItems.reduce((sum, it) => sum + Number(it?.cashOut || 0), 0);
     const totalBalance = totalCashIn - totalCashOut;
 
     const workbook = new ExcelJS.Workbook();
@@ -16292,21 +16385,13 @@ app.post("/api/expenses/export/excel", async (req, res) => {
 
     const sheet = workbook.addWorksheet("Expenses");
 
-    // -------------------------
-    // Styles / helpers
-    // -------------------------
-    const BORDER_COLOR = { argb: "FF9CA3AF" }; // gray-400
+    const BORDER_COLOR = { argb: "FF9CA3AF" };
     const borderThin = {
       top: { style: "thin", color: BORDER_COLOR },
       left: { style: "thin", color: BORDER_COLOR },
       bottom: { style: "thin", color: BORDER_COLOR },
       right: { style: "thin", color: BORDER_COLOR },
     };
-    // Numbers formatting (NO currency sign)
-    // IMPORTANT:
-    // Some Excel viewers (especially mobile) render a trailing "." when the format contains
-    // optional decimals like "0.##" even if the value is an integer. To guarantee "150" (not "150.")
-    // we use two formats and choose per-cell based on whether the value is integer-like.
     const numberFmtInt = '#,##0;-#,##0;0';
     const numberFmtDec = '#,##0.##;-#,##0.##;0';
 
@@ -16320,11 +16405,8 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       return isIntLike(n) ? numberFmtInt : numberFmtDec;
     }
 
-    // Funds Type cell colors (only the cell itself, NOT the whole row)
-    // Prefer using the same colors configured in Notion for the "Funds Type" select options.
-    // If we can't read Notion colors (or a type isn't found), we fall back to a high-contrast palette.
     const NOTION_COLOR_TO_FILL = {
-      default: "FFF3F4F6", // light gray
+      default: "FFF3F4F6",
       gray:    "FFE5E7EB",
       brown:   "FFF5E6D3",
       orange:  "FFFED7AA",
@@ -16336,7 +16418,6 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       red:     "FFFECACA",
     };
 
-    // Map: Funds Type name -> Notion color name
     const fundsTypeToNotionColor = new Map();
     try {
       const expProps = await getExpensesDBProps();
@@ -16352,29 +16433,26 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     } catch (e) {
       console.warn(
         "Excel export: unable to load Notion Funds Type colors, using fallback palette.",
-        e?.body || e
+        e?.body || e,
       );
     }
 
-    // Fallback palette (very distinct pastel colors) to avoid similar-looking types.
-    // Still deterministic via hashing so the same type always gets the same fallback color.
     const fundsTypePalette = [
-      "FFFDE68A", // yellow-200
-      "FFBFDBFE", // blue-200
-      "FFBBF7D0", // green-200
-      "FFFECACA", // red-200
-      "FFE9D5FF", // purple-200
-      "FFFBCFE8", // pink-200
-      "FFFED7AA", // orange-200
-      "FF99F6E4", // teal-200
-      "FFC7D2FE", // indigo-200
-      "FFD9F99D", // lime-200
-      "FFA5F3FC", // cyan-200
-      "FFF5E6D3", // light brown
+      "FFFDE68A",
+      "FFBFDBFE",
+      "FFBBF7D0",
+      "FFFECACA",
+      "FFE9D5FF",
+      "FFFBCFE8",
+      "FFFED7AA",
+      "FF99F6E4",
+      "FFC7D2FE",
+      "FFD9F99D",
+      "FFA5F3FC",
+      "FFF5E6D3",
     ];
 
     function hashStr(s) {
-      // djb2
       let h = 5381;
       const str = String(s || "");
       for (let i = 0; i < str.length; i++) {
@@ -16387,36 +16465,26 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     function fundsTypeFill(typeName) {
       const t = String(typeName || "").trim();
       if (!t) return null;
-
-      // 1) Prefer Notion option color (so export matches Notion)
       const notionColor = fundsTypeToNotionColor.get(t);
       const notionFill = notionColor ? NOTION_COLOR_TO_FILL[notionColor] : null;
       if (notionFill) return notionFill;
-
-      // 2) Fallback: deterministic palette
       const idx = hashStr(t.toLowerCase()) % fundsTypePalette.length;
       return fundsTypePalette[idx];
     }
-
 
     function formatNumberForWidth(n) {
       const num = Number(n);
       if (Number.isNaN(num)) return "";
       const negative = num < 0;
       const abs = Math.abs(num);
-
-      // Keep up to 2 decimals, trim trailing zeros
       let s = (abs % 1 === 0)
         ? abs.toString()
         : abs.toFixed(2).replace(/0+$/g, "").replace(/\.$/, "");
-
-      // Add thousands separators to approximate the displayed string
       s = s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
       return negative ? `-${s}` : s;
     }
 
     function safeExcelFileName(name) {
-      // Windows safe-ish + avoid empty filename
       const cleaned = String(name || "expenses")
         .replace(/\s+/g, " ")
         .trim()
@@ -16435,29 +16503,86 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       }
     }
 
-    // -------------------------
-    // Column layout
-    // -------------------------
+    function toAbsoluteUrl(rawUrl) {
+      const url = String(rawUrl || "").trim();
+      if (!url) return "";
+      if (/^https?:\/\//i.test(url)) return url;
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      return `${baseUrl}/${url.replace(/^\/+/, "")}`;
+    }
+
+    function getItemOrderMeta(it) {
+      const orders = Array.isArray(it?.orders) ? it.orders.filter(Boolean) : [];
+      const primaryOrder = orders[0] || null;
+      const orderText = String(primaryOrder?.orderId || primaryOrder?.label || "").trim();
+      const orderLink = toAbsoluteUrl(primaryOrder?.receiptViewerUrl || primaryOrder?.trackingUrl || "");
+      return {
+        text: orderText || String(it?.reason || "").trim(),
+        link: orderLink,
+      };
+    }
+
+    function getItemScreenshots(it) {
+      if (Array.isArray(it?.screenshots) && it.screenshots.length) {
+        return it.screenshots
+          .map((shot, index) => {
+            const expenseId = String(it?.id || "").trim();
+            const link = expenseId
+              ? `${baseUrl}/api/expenses/screenshot/${encodeURIComponent(expenseId)}?index=${index}`
+              : toAbsoluteUrl(shot?.url || "");
+            return {
+              name: String(shot?.name || `Screenshot ${index + 1}`).trim() || `Screenshot ${index + 1}`,
+              url: link,
+            };
+          })
+          .filter((shot) => !!shot.url);
+      }
+
+      const fallbackUrl = String(it?.screenshotUrl || "").trim();
+      if (!fallbackUrl) return [];
+      const expenseId = String(it?.id || "").trim();
+      return [{
+        name: String(it?.screenshotName || "Screenshot 1").trim() || "Screenshot 1",
+        url: expenseId
+          ? `${baseUrl}/api/expenses/screenshot/${encodeURIComponent(expenseId)}?index=0`
+          : toAbsoluteUrl(fallbackUrl),
+      }];
+    }
+
+    const maxScreenshotCount = Math.max(1, safeItems.reduce((maxCount, it) => {
+      return Math.max(maxCount, getItemScreenshots(it).length);
+    }, 0));
+
     const columns = [
       { header: "Date", width: 14 },
       { header: "Funds Type", width: 18 },
       { header: "Reason", width: 36 },
       { header: "From", width: 18 },
       { header: "To", width: 18 },
+      { header: "Kilometers", width: 14 },
       { header: "Cash In", width: 14 },
       { header: "Cash Out", width: 14 },
-      { header: "Screenshot", width: 18 },
+      ...Array.from({ length: maxScreenshotCount }, (_, index) => ({
+        header: `Screenshot ${index + 1}`,
+        width: 16,
+      })),
     ];
 
+    const COL_DATE = 1;
+    const COL_FUNDS_TYPE = 2;
+    const COL_REASON = 3;
+    const COL_FROM = 4;
+    const COL_TO = 5;
+    const COL_KILOMETERS = 6;
+    const COL_CASH_IN = 7;
+    const COL_CASH_OUT = 8;
+    const COL_SCREENSHOT_START = 9;
     const lastCol = columns.length;
 
-    columns.forEach((c, idx) => {
-      sheet.getColumn(idx + 1).width = c.width;
+    columns.forEach((column, idx) => {
+      sheet.getColumn(idx + 1).width = column.width;
     });
 
-    // -------------------------
-    // Title
-    // -------------------------
     sheet.mergeCells(1, 1, 1, lastCol);
     const titleCell = sheet.getCell("A1");
     titleCell.value = `Expenses Report — ${displayName}`;
@@ -16466,7 +16591,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     titleCell.fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { argb: "FF111827" }, // gray-900
+      fgColor: { argb: "FF111827" },
     };
     sheet.getRow(1).height = 26;
 
@@ -16484,9 +16609,6 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     metaCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
     sheet.getRow(2).height = hasSelectedPeriod ? 28 : 18;
 
-    // -------------------------
-    // Summary box
-    // -------------------------
     sheet.mergeCells("A3:B3");
     const summaryHead = sheet.getCell("A3");
     summaryHead.value = "Summary";
@@ -16505,134 +16627,111 @@ app.post("/api/expenses/export/excel", async (req, res) => {
       { label: "Total Balance", value: totalBalance, valueColor: "FF2563EB" },
     ];
 
-    summaryRows.forEach((r, i) => {
-      const rowIndex = 4 + i;
+    summaryRows.forEach((rowConfig, index) => {
+      const rowIndex = 4 + index;
       const labelCell = sheet.getCell(`A${rowIndex}`);
       const valueCell = sheet.getCell(`B${rowIndex}`);
 
-      labelCell.value = r.label;
+      labelCell.value = rowConfig.label;
       labelCell.font = { bold: true, color: { argb: "FF111827" } };
-      // User requested center alignment across the exported file
       labelCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       labelCell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "FFF3F4F6" }, // gray-100
+        fgColor: { argb: "FFF3F4F6" },
       };
 
-      valueCell.value = Number(r.value || 0);
-      // No currency sign + keep decimals only when needed
-      // (and never show a trailing dot for integers)
+      valueCell.value = Number(rowConfig.value || 0);
       valueCell.numFmt = numFmtFor(valueCell.value);
-      valueCell.font = { bold: true, color: { argb: r.valueColor } };
+      valueCell.font = { bold: true, color: { argb: rowConfig.valueColor } };
       valueCell.alignment = { horizontal: "center", vertical: "middle" };
 
       sheet.getRow(rowIndex).height = 18;
     });
 
-    // Border around summary box (A3:B6)
     setRangeBorder(3, 6, 1, 2);
 
-    // Leave a blank row then start the table
     const startRow = 8;
-
-    // -------------------------
-    // Table header
-    // -------------------------
     const headerRow = sheet.getRow(startRow);
     headerRow.height = 20;
 
-    // Style only the used header columns (avoid coloring to end of sheet)
-    columns.forEach((c, idx) => {
+    columns.forEach((column, idx) => {
       const cell = headerRow.getCell(idx + 1);
-      cell.value = c.header;
+      cell.value = column.header;
       cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
       cell.alignment = { horizontal: "center", vertical: "middle" };
       cell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "FF374151" }, // gray-700
+        fgColor: { argb: "FF374151" },
       };
       cell.border = borderThin;
     });
 
-    // Auto-filter on header row
     sheet.autoFilter = {
       from: { row: startRow, column: 1 },
       to: { row: startRow, column: columns.length },
     };
 
-    // Note: We intentionally DO NOT freeze panes here.
-    // Freezing draws a line across the sheet, and the user requested to remove it.
-
-    // -------------------------
-    // Table rows
-    // -------------------------
     safeItems.forEach((it) => {
       const d = it?.date ? new Date(it.date) : null;
       const dateVal = d && !Number.isNaN(d.getTime()) ? d : (it?.date || "");
+      const orderMeta = getItemOrderMeta(it);
+      const screenshotLinks = getItemScreenshots(it);
 
-      // Notion-hosted "file" URLs expire. Use a stable proxy URL (fresh redirect at click-time).
-      const screenshotUrlRaw = String(it?.screenshotUrl || "").trim();
-      const screenshotText = String(it?.screenshotName || "Open").trim() || "Open";
-
-      const expenseId = String(it?.id || "").trim();
-      const screenshotUrl = (screenshotUrlRaw && expenseId)
-        ? `${baseUrl}/api/expenses/screenshot/${encodeURIComponent(expenseId)}`
-        : screenshotUrlRaw;
-
-      const row = sheet.addRow([
+      const rowValues = [
         dateVal,
         it?.fundsType || "",
-        it?.reason || "",
+        orderMeta.text || "",
         it?.from || "",
         it?.to || "",
+        Number(it?.kilometer || 0),
         Number(it?.cashIn || 0),
         Number(it?.cashOut || 0),
-        "", // hyperlink placeholder
-      ]);
+        ...Array.from({ length: maxScreenshotCount }, () => ""),
+      ];
 
-      // Screenshot hyperlink (if exists)
-      if (screenshotUrl) {
-        const linkCell = row.getCell(8);
-        linkCell.value = { text: screenshotText, hyperlink: screenshotUrl };
-        linkCell.font = { color: { argb: "FF2563EB" }, underline: true };
-        linkCell.alignment = { vertical: "middle", horizontal: "center" };
+      const row = sheet.addRow(rowValues);
+
+      if (orderMeta.link && orderMeta.text) {
+        const reasonCell = row.getCell(COL_REASON);
+        reasonCell.value = { text: orderMeta.text, hyperlink: orderMeta.link };
+        reasonCell.font = { color: { argb: "FF2563EB" }, underline: true };
       }
+
+      screenshotLinks.forEach((shot, index) => {
+        const cell = row.getCell(COL_SCREENSHOT_START + index);
+        cell.value = { text: "Open", hyperlink: shot.url };
+        cell.font = { color: { argb: "FF2563EB" }, underline: true };
+      });
     });
 
-    // Body styling (borders, wrapping, number formats, zebra rows)
     const bodyStart = startRow + 1;
     const bodyEnd = sheet.rowCount;
 
     for (let r = bodyStart; r <= bodyEnd; r++) {
       const row = sheet.getRow(r);
       row.height = 18;
-
       const isZebra = (r - bodyStart) % 2 === 1;
+
       row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
         cell.border = borderThin;
-        // Default alignment: center (requested)
         cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
 
-        // Zebra fill for readability
         if (isZebra) {
           cell.fill = {
             type: "pattern",
             pattern: "solid",
-            fgColor: { argb: "FFF9FAFB" }, // gray-50
+            fgColor: { argb: "FFF9FAFB" },
           };
         }
 
-        // Date column
-        if (colNumber === 1) {
+        if (colNumber === COL_DATE) {
           cell.alignment = { vertical: "middle", horizontal: "center" };
-          // If it's a Date object, apply date format
           if (cell.value instanceof Date) cell.numFmt = "yyyy-mm-dd";
         }
 
-        // Funds Type column: color ONLY this cell based on type (same type => same color)
-        if (colNumber === 2) {
+        if (colNumber === COL_FUNDS_TYPE) {
           const fillArgb = fundsTypeFill(cell.value);
           if (fillArgb) {
             cell.fill = {
@@ -16640,34 +16739,34 @@ app.post("/api/expenses/export/excel", async (req, res) => {
               pattern: "solid",
               fgColor: { argb: fillArgb },
             };
-            // keep text readable
             cell.font = { color: { argb: "FF111827" }, bold: true };
           }
         }
 
-        // Cash columns
-        if (colNumber === 6) {
+        if (colNumber === COL_KILOMETERS) {
+          cell.numFmt = numFmtFor(cell.value);
+          cell.alignment = { vertical: "middle", horizontal: "center" };
+          cell.font = { color: { argb: "FF0F172A" } };
+        }
+
+        if (colNumber === COL_CASH_IN) {
           cell.numFmt = numFmtFor(cell.value);
           cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FF16A34A" } };
         }
-        if (colNumber === 7) {
+
+        if (colNumber === COL_CASH_OUT) {
           cell.numFmt = numFmtFor(cell.value);
           cell.alignment = { vertical: "middle", horizontal: "center" };
           cell.font = { color: { argb: "FFDC2626" } };
         }
 
-        // Screenshot column (hyperlink)
-        if (colNumber === 8) {
+        if (colNumber >= COL_SCREENSHOT_START) {
           cell.alignment = { vertical: "middle", horizontal: "center", wrapText: false };
         }
       });
     }
 
-    // -------------------------
-    // Auto-fit column widths ("auto fill" requested)
-    // Skip the big merged title row to avoid huge column widths.
-    // -------------------------
     const AUTO_FROM_ROW = 3;
     const AUTO_TO_ROW = sheet.rowCount;
     const MAX_COL_WIDTH = 60;
@@ -16689,20 +16788,16 @@ app.post("/api/expenses/export/excel", async (req, res) => {
 
     for (let c = 1; c <= lastCol; c++) {
       let maxLen = 0;
-
-      // Start with the table header label (if any)
       const headerLabel = columns?.[c - 1]?.header;
       if (headerLabel) maxLen = Math.max(maxLen, String(headerLabel).length);
 
       for (let r = AUTO_FROM_ROW; r <= AUTO_TO_ROW; r++) {
-        // Skip title/meta rows (1-2) by starting from 3, but also ignore merged title cell remnants
         const cell = sheet.getRow(r).getCell(c);
         const txt = cellTextForWidth(cell);
         if (!txt) continue;
         maxLen = Math.max(maxLen, txt.length);
       }
 
-      // Add a little padding
       const width = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, maxLen + 2));
       sheet.getColumn(c).width = width;
     }
@@ -16711,7 +16806,7 @@ app.post("/api/expenses/export/excel", async (req, res) => {
 
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
 
     const filenameParts = [displayName, "expenses"];
@@ -16725,12 +16820,11 @@ app.post("/api/expenses/export/excel", async (req, res) => {
     const filename = safeExcelFileName(filenameParts.join("_"));
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${filename}.xlsx"`
+      `attachment; filename="${filename}.xlsx"`,
     );
     res.setHeader("Content-Length", buffer.length);
 
     res.end(buffer);
-
   } catch (err) {
     console.error("Excel export error:", err);
     res.status(500).json({ error: "Failed to generate Excel file" });
