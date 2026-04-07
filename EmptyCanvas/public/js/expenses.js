@@ -19,6 +19,7 @@ const REQUIRED_SCREENSHOT_FUNDS_TYPE_KEYS = new Set([
   "uper",
   "didi",
 ]);
+const CASH_IN_FUNDS_TYPE_OPTIONS = ["Cash Payment", "Online Transfer"];
 
 let CASH_IN_FROM_OPTIONS = [];
 let EXPENSE_ORDER_OPTIONS = [];
@@ -80,11 +81,7 @@ function showToast(message, type = "error", { duration = 4000 } = {}) {
   if (!container) return;
 
   const safeType = ["error", "success", "info"].includes(type) ? type : "error";
-  const iconMap = {
-    error: featherIconMarkup("alert-circle", { width: 16, height: 16 }) || '<span style="font-size:16px;line-height:1;font-weight:800;">!</span>',
-    success: featherIconMarkup("check", { width: 16, height: 16 }) || '<span style="font-size:16px;line-height:1;font-weight:800;">✓</span>',
-    info: featherIconMarkup("info", { width: 16, height: 16 }) || '<span style="font-size:16px;line-height:1;font-weight:800;">i</span>',
-  };
+  const iconMap = { error: "!", success: "✓", info: "i" };
 
   const toast = document.createElement("div");
   toast.className = `toast toast--${safeType}`;
@@ -501,57 +498,198 @@ function getExpensePrimaryScreenshot(item) {
   return shots.length ? shots[0] : null;
 }
 
-function buildExpenseAmountChipHtml(item) {
-  const amountLabel = formatExpenseAmountLabel(item);
-  const primaryShot = getExpensePrimaryScreenshot(item);
 
-  const chipInner = `
-    ${primaryShot?.url
-      ? `<img class="expense-ticket__amount-thumb" src="${escapeHtml(primaryShot.url)}" alt="${escapeHtml(primaryShot.name || "Receipt")}" />`
-      : `<span class="expense-ticket__amount-icon" aria-hidden="true">${featherIconMarkup("dollar-sign", { width: 14, height: 14 })}</span>`}
-    <span class="expense-ticket__amount-chip-text">${escapeHtml(amountLabel)}</span>
+function getExpenseAmountToneClass(item) {
+  const isCashIn = Number(item?.cashIn || 0) > 0;
+  if (isCashIn) return "is-positive";
+
+  const fundsType = String(item?.fundsType || "").trim();
+  const kilometer = Number(item?.kilometer || 0);
+  const cashOut = Number(item?.cashOut || 0);
+
+  if (isOwnCarFundsType(fundsType) && kilometer > 0 && !cashOut) {
+    return "is-neutral";
+  }
+
+  return cashOut > 0 ? "is-negative" : "is-neutral";
+}
+
+function encodeExpenseShotsData(shots) {
+  try {
+    const safeShots = (Array.isArray(shots) ? shots : [])
+      .map((shot) => ({
+        name: String(shot?.name || "Receipt").trim() || "Receipt",
+        url: String(shot?.url || "").trim(),
+      }))
+      .filter((shot) => shot.url);
+
+    return encodeURIComponent(JSON.stringify(safeShots));
+  } catch (err) {
+    return "";
+  }
+}
+
+function decodeExpenseShotsData(value) {
+  try {
+    const parsed = JSON.parse(decodeURIComponent(String(value || "")));
+    return (Array.isArray(parsed) ? parsed : [])
+      .map((shot) => ({
+        name: String(shot?.name || "Receipt").trim() || "Receipt",
+        url: String(shot?.url || "").trim(),
+      }))
+      .filter((shot) => shot.url);
+  } catch (err) {
+    return [];
+  }
+}
+
+function buildExpenseScreenshotButtonHtml(item) {
+  const shots = getReceiptImages(item);
+  const hasShots = shots.length > 0;
+  const serializedShots = encodeExpenseShotsData(shots);
+  const ariaLabel = hasShots
+    ? `View ${shots.length} screenshot${shots.length === 1 ? "" : "s"}`
+    : "No screenshots uploaded";
+
+  return `
+    <button
+      type="button"
+      class="expense-ticket__shot-btn${hasShots ? " expense-ticket__shot-btn--has-shots" : ""}"
+      aria-label="${escapeHtml(ariaLabel)}"
+      data-shots="${escapeHtml(serializedShots)}"
+    >
+      <span class="expense-ticket__shot-btn-icon" aria-hidden="true">${featherIconMarkup("image", { width: 18, height: 18 })}</span>
+    </button>
   `;
+}
 
-  if (primaryShot?.url) {
+function buildExpenseShotsViewerBodyHtml(shots) {
+  const safeShots = Array.isArray(shots) ? shots : [];
+  if (!safeShots.length) {
     return `
-      <a class="expense-ticket__amount-chip expense-ticket__amount-chip--link" href="${escapeHtml(primaryShot.url)}" target="_blank" rel="noopener noreferrer">
-        ${chipInner}
-      </a>
+      <div class="expense-shots-modal__empty">
+        <div class="expense-shots-modal__empty-icon" aria-hidden="true">${featherIconMarkup("image", { width: 24, height: 24 })}</div>
+        <div>No screenshots uploaded for this expense.</div>
+      </div>
     `;
   }
 
   return `
-    <span class="expense-ticket__amount-chip">
-      ${chipInner}
-    </span>
+    <div class="expense-shots-modal__grid">
+      ${safeShots
+        .map((shot, index) => `
+          <a class="expense-shots-modal__item" href="${escapeHtml(shot.url)}" target="_blank" rel="noopener noreferrer">
+            <span class="expense-shots-modal__image-wrap">
+              <img class="expense-shots-modal__image" src="${escapeHtml(shot.url)}" alt="${escapeHtml(shot.name || `Screenshot ${index + 1}`)}" loading="lazy" />
+            </span>
+            <span class="expense-shots-modal__caption">${escapeHtml(shot.name || `Screenshot ${index + 1}`)}</span>
+          </a>
+        `)
+        .join("")}
+    </div>
   `;
 }
+
+function openExpenseShotsModal(shots) {
+  const modal = document.getElementById("expenseShotsModal");
+  const countEl = document.getElementById("expenseShotsModalCount");
+  const bodyEl = document.getElementById("expenseShotsModalBody");
+  if (!modal || !countEl || !bodyEl) return;
+
+  const safeShots = (Array.isArray(shots) ? shots : [])
+    .map((shot) => ({
+      name: String(shot?.name || "Receipt").trim() || "Receipt",
+      url: String(shot?.url || "").trim(),
+    }))
+    .filter((shot) => shot.url);
+
+  countEl.textContent = safeShots.length
+    ? `${safeShots.length} image${safeShots.length === 1 ? "" : "s"}`
+    : "No images uploaded";
+
+  bodyEl.innerHTML = buildExpenseShotsViewerBodyHtml(safeShots);
+  modal.style.display = "flex";
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("expense-shots-modal-open");
+  requestAnimationFrame(() => modal.classList.add("is-open"));
+}
+
+function closeExpenseShotsModal() {
+  const modal = document.getElementById("expenseShotsModal");
+  if (!modal) return;
+
+  modal.classList.remove("is-open");
+  modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("expense-shots-modal-open");
+  window.setTimeout(() => {
+    if (!modal.classList.contains("is-open")) {
+      modal.style.display = "none";
+    }
+  }, 180);
+}
+
+function setupExpenseShotsViewer() {
+  const modal = document.getElementById("expenseShotsModal");
+  const card = modal?.querySelector ? modal.querySelector(".expense-shots-modal__card") : null;
+  if (!modal || !card) return;
+
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest(".expense-ticket__shot-btn");
+    if (!trigger) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    openExpenseShotsModal(decodeExpenseShotsData(trigger.getAttribute("data-shots")));
+  });
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal || event.target.closest("[data-expense-shots-close]")) {
+      event.stopPropagation();
+      closeExpenseShotsModal();
+      return;
+    }
+
+    if (card.contains(event.target)) {
+      event.stopPropagation();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && modal.style.display === "flex") {
+      closeExpenseShotsModal();
+    }
+  });
+}
+
 
 function buildExpenseTicketRowHtml(item) {
   const endpoints = getExpenseRouteEndpoints(item);
   const typeLabel = getExpenseRowTypeLabel(item);
-  const typeClass = Number(item?.cashIn || 0) > 0 ? " expense-ticket__track-pill--in" : "";
+  const amountLabel = formatExpenseAmountLabel(item);
+  const amountToneClass = getExpenseAmountToneClass(item);
 
   return `
     <div class="expense-ticket__route">
-      <div class="expense-ticket__route-meta">
-        ${buildExpenseAmountChipHtml(item)}
-      </div>
-      <div class="expense-ticket__point expense-ticket__point--from">
-        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</div>
-      </div>
-      <div class="expense-ticket__track">
-        <span class="expense-ticket__track-segment expense-ticket__track-segment--left"></span>
-        <span class="expense-ticket__track-pill${typeClass}">${escapeHtml(typeLabel)}</span>
-        <span class="expense-ticket__track-segment expense-ticket__track-segment--right"></span>
-        <span class="expense-ticket__track-arrow" aria-hidden="true">${featherIconMarkup("arrow-right", { width: 19, height: 19 })}</span>
-      </div>
-      <div class="expense-ticket__point expense-ticket__point--right">
-        <div class="expense-ticket__point-value" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</div>
+      <div class="expense-ticket__route-frame">
+        <div class="expense-ticket__route-shot">
+          ${buildExpenseScreenshotButtonHtml(item)}
+        </div>
+        <div class="expense-ticket__route-body">
+          <div class="expense-ticket__route-top">
+            <div class="expense-ticket__route-title" dir="auto" title="${escapeHtml(typeLabel)}">${escapeHtml(typeLabel)}</div>
+            <div class="expense-ticket__route-amount ${amountToneClass}" title="${escapeHtml(amountLabel)}">${escapeHtml(amountLabel)}</div>
+          </div>
+          <div class="expense-ticket__route-sub">
+            <span class="expense-ticket__route-endpoint expense-ticket__route-endpoint--from" dir="auto" title="${escapeHtml(endpoints.from)}">${escapeHtml(endpoints.from)}</span>
+            <span class="expense-ticket__route-arrow" aria-hidden="true">${featherIconMarkup("arrow-right", { width: 16, height: 16 })}</span>
+            <span class="expense-ticket__route-endpoint expense-ticket__route-endpoint--to" dir="auto" title="${escapeHtml(endpoints.to)}">${escapeHtml(endpoints.to)}</span>
+          </div>
+        </div>
       </div>
     </div>
   `;
 }
+
 
 function buildExpenseTicketHtml(group, { compact = false } = {}) {
   const total = getExpenseGroupTotalDisplay(group);
@@ -870,6 +1008,183 @@ function buildFundsTypeSummaryHtml(value) {
       ${buildFundsTypeStatusChipHtml(type, { className: "order-select__chip order-select__chip--selected" })}
     </span>
   `;
+}
+
+function isCashInOnlineTransfer(value) {
+  return normalizeFundsTypeKey(value) === "onlinetransfer";
+}
+
+function isCashInCashPayment(value) {
+  const key = normalizeFundsTypeKey(value);
+  return key === "cashpayment" || key === "cashreceipt" || key === "cashreciept";
+}
+
+function getCashInFundsTypeOptions() {
+  return [...CASH_IN_FUNDS_TYPE_OPTIONS];
+}
+
+function getCashInFundsTypeNote(value) {
+  return isCashInOnlineTransfer(value)
+    ? "Screenshot is required for this transfer"
+    : "Receipt number is required for this payment";
+}
+
+function syncCashInFundsTypeHiddenSelect() {
+  const selectEl = document.getElementById("ci_funds_type");
+  if (!selectEl) return;
+
+  const currentValue = String(selectEl.value || "").trim();
+  const options = getCashInFundsTypeOptions();
+  selectEl.innerHTML = `<option value="">Select funds type...</option>`;
+
+  options.forEach((type) => {
+    const opt = document.createElement("option");
+    opt.value = type;
+    opt.textContent = type;
+    selectEl.appendChild(opt);
+  });
+
+  if (currentValue && options.includes(currentValue)) {
+    selectEl.value = currentValue;
+  } else if (currentValue) {
+    selectEl.value = "";
+  }
+}
+
+function positionCashInFundsTypeDropdown() {
+  const trigger = document.getElementById("cashInFundsTypeTrigger");
+  const dropdown = document.getElementById("cashInFundsTypeDropdown");
+  if (!trigger || !dropdown || dropdown.hidden) return;
+
+  const rect = trigger.getBoundingClientRect();
+  const viewportPad = 16;
+  const width = Math.min(rect.width, window.innerWidth - viewportPad * 2);
+  const left = Math.min(Math.max(viewportPad, rect.left), window.innerWidth - viewportPad - width);
+  const spaceBelow = Math.max(120, window.innerHeight - rect.bottom - viewportPad);
+  const spaceAbove = Math.max(120, rect.top - viewportPad);
+  const placeAbove = spaceBelow < 220 && spaceAbove > spaceBelow;
+  const availableSpace = placeAbove ? spaceAbove : spaceBelow;
+  const optionsList = document.getElementById("cashInFundsTypeOptionsList");
+
+  dropdown.style.left = `${left}px`;
+  dropdown.style.width = `${width}px`;
+  dropdown.style.maxHeight = `${Math.min(300, availableSpace)}px`;
+  if (optionsList) {
+    optionsList.style.maxHeight = `${Math.max(100, Math.min(220, availableSpace - 24))}px`;
+  }
+
+  if (placeAbove) {
+    dropdown.style.top = "auto";
+    dropdown.style.bottom = `${Math.max(viewportPad, window.innerHeight - rect.top + 8)}px`;
+  } else {
+    dropdown.style.bottom = "auto";
+    dropdown.style.top = `${Math.min(window.innerHeight - viewportPad, rect.bottom + 8)}px`;
+  }
+}
+
+function renderCashInFundsTypeDropdown() {
+  const listEl = document.getElementById("cashInFundsTypeOptionsList");
+  const stateEl = document.getElementById("cashInFundsTypeDropdownState");
+  const selectEl = document.getElementById("ci_funds_type");
+  if (!listEl || !stateEl || !selectEl) return;
+
+  const options = getCashInFundsTypeOptions();
+  const selectedValue = String(selectEl.value || "").trim();
+
+  stateEl.style.display = options.length ? "none" : "block";
+  if (!options.length) stateEl.textContent = "No funds types available right now.";
+
+  listEl.innerHTML = options.map((type) => {
+    const selected = type === selectedValue;
+    return `
+      <button
+        type="button"
+        class="order-select__option${selected ? " is-selected" : ""}"
+        data-cashin-funds-type="${escapeHtml(type)}"
+        role="option"
+        aria-selected="${selected ? "true" : "false"}"
+        title="${escapeHtml(type)}"
+      >
+        <span class="funds-select__option-main">
+          <span class="order-select__option-id">${escapeHtml(type)}</span>
+          <span class="funds-select__option-note">${escapeHtml(getCashInFundsTypeNote(type))}</span>
+        </span>
+      </button>
+    `;
+  }).join("");
+
+  window.requestAnimationFrame(positionCashInFundsTypeDropdown);
+}
+
+function openCashInFundsTypeDropdown() {
+  const trigger = document.getElementById("cashInFundsTypeTrigger");
+  const dropdown = document.getElementById("cashInFundsTypeDropdown");
+  if (!trigger || !dropdown) return;
+  dropdown.hidden = false;
+  trigger.classList.add("is-open");
+  trigger.setAttribute("aria-expanded", "true");
+  renderCashInFundsTypeDropdown();
+  window.requestAnimationFrame(positionCashInFundsTypeDropdown);
+}
+
+function closeCashInFundsTypeDropdown() {
+  const trigger = document.getElementById("cashInFundsTypeTrigger");
+  const dropdown = document.getElementById("cashInFundsTypeDropdown");
+  if (!trigger || !dropdown) return;
+  dropdown.hidden = true;
+  trigger.classList.remove("is-open");
+  trigger.setAttribute("aria-expanded", "false");
+}
+
+function syncCashInFormTypeState() {
+  const selectEl = document.getElementById("ci_funds_type");
+  const trigger = document.getElementById("cashInFundsTypeTrigger");
+  const triggerText = document.getElementById("cashInFundsTypeTriggerText");
+  const receiptBlock = document.getElementById("ci_receipt_block");
+  const receiptInput = document.getElementById("ci_receipt");
+  const screenshotBlock = document.getElementById("ci_screenshot_block");
+  const screenshotInput = document.getElementById("ci_screenshot");
+  const screenshotName = document.getElementById("ci_screenshot_name");
+  const selectedType = String(selectEl?.value || "").trim();
+  const isTransfer = isCashInOnlineTransfer(selectedType);
+  const isPayment = isCashInCashPayment(selectedType);
+
+  if (triggerText) {
+    triggerText.textContent = selectedType || "Select funds type...";
+  }
+
+  if (trigger) {
+    trigger.classList.toggle("is-placeholder", !selectedType);
+    trigger.classList.toggle("is-selected", !!selectedType);
+  }
+
+  if (receiptBlock) receiptBlock.style.display = isPayment ? "block" : "none";
+  if (receiptInput) {
+    receiptInput.required = isPayment;
+    if (!isPayment) receiptInput.value = "";
+  }
+
+  if (screenshotBlock) screenshotBlock.style.display = isTransfer ? "block" : "none";
+  if (screenshotInput) {
+    screenshotInput.required = isTransfer;
+    if (!isTransfer) screenshotInput.value = "";
+  }
+  if (!isTransfer && screenshotName) screenshotName.textContent = "No file chosen";
+
+  renderCashInFundsTypeDropdown();
+}
+
+function setCashInFundsTypeSelection(value = "") {
+  const selectEl = document.getElementById("ci_funds_type");
+  if (!selectEl) return;
+
+  const nextValue = String(value || "").trim();
+  selectEl.value = nextValue;
+  if (selectEl.value !== nextValue) {
+    selectEl.value = "";
+  }
+
+  syncCashInFormTypeState();
 }
 
 function syncFundsTypeHiddenSelect() {
@@ -1767,20 +2082,27 @@ function openCashInModal() {
     const d = document.getElementById("ci_date");
     const c = document.getElementById("ci_cash");
     const r = document.getElementById("ci_receipt");
-    const f = document.getElementById("ci_from");
-    const s = document.getElementById("ci_from_search");
+    const t = document.getElementById("ci_funds_type");
+    const p = document.getElementById("ci_payment_by");
+    const sInput = document.getElementById("ci_screenshot");
+    const sName = document.getElementById("ci_screenshot_name");
     if (d) d.value = "";
     if (c) c.value = "";
     if (r) r.value = "";
-    if (f) f.value = "";
-    if (s) s.value = "";
+    if (t) t.value = "";
+    if (p) p.value = "";
+    if (sInput) sInput.value = "";
+    if (sName) sName.textContent = "No file chosen";
     hideCashInFromDropdown();
+    closeCashInFundsTypeDropdown();
+    setCashInFundsTypeSelection("");
     renderCashInFromDropdown("");
     const modal = document.getElementById("cashInModal");
     if (modal) modal.style.display = "flex";
 }
 
 function closeCashInModal() {
+    closeCashInFundsTypeDropdown();
     const modal = document.getElementById("cashInModal");
     if (modal) modal.style.display = "none";
 }
@@ -1826,15 +2148,62 @@ async function submitCashIn() {
 
     const dateInput = document.getElementById("ci_date");
     const amountInput = document.getElementById("ci_cash");
+    const typeInput = document.getElementById("ci_funds_type");
+    const paymentByInput = document.getElementById("ci_payment_by");
     const receiptInput = document.getElementById("ci_receipt");
+    const screenshotInput = document.getElementById("ci_screenshot");
 
     const date = dateInput ? String(dateInput.value || "").trim() : "";
     const amount = amountInput ? String(amountInput.value || "").trim() : "";
+    const fundsType = typeInput ? String(typeInput.value || "").trim() : "";
+    const paymentBy = paymentByInput ? String(paymentByInput.value || "").trim() : "";
     const receiptNumber = receiptInput ? String(receiptInput.value || "").trim() : "";
+    const isTransfer = isCashInOnlineTransfer(fundsType);
+    const isPayment = isCashInCashPayment(fundsType);
 
-    if (!date || !amount || !receiptNumber) {
-        showToast("Please fill required fields.", "error");
-    return;
+    if (!date || !amount || !fundsType || !paymentBy) {
+      showToast("Please fill required fields.", "error");
+      return;
+    }
+
+    if (!isTransfer && !isPayment) {
+      showToast("Please select a valid funds type.", "error");
+      return;
+    }
+
+    if (isPayment && !receiptNumber) {
+      showToast("Receipt number is required for cash payment.", "error");
+      return;
+    }
+
+    const files = Array.from(screenshotInput?.files || []);
+    if (isTransfer && !files.length) {
+      showToast("Transfer screenshot is required.", "error");
+      return;
+    }
+
+    let screenshots = [];
+    if (files.length) {
+      const MAX_FILES = 6;
+      if (files.length > MAX_FILES) {
+        showToast(`You can upload up to ${MAX_FILES} images.`, "error");
+        return;
+      }
+
+      try {
+        screenshots = (await Promise.all(files.map(async (file) => {
+          const dataUrl = await fileToDataURL(file);
+          if (!dataUrl) return null;
+          return {
+            name: file?.name || "transfer.png",
+            dataUrl,
+          };
+        }))).filter(Boolean);
+      } catch (fileErr) {
+        console.error("Cash-in screenshot read error:", fileErr);
+        showToast("Failed to read the uploaded screenshot.", "error");
+        return;
+      }
     }
 
     const btn = document.getElementById("ci_submit");
@@ -1844,7 +2213,6 @@ async function submitCashIn() {
       btn.textContent = "Saving...";
     }
 
-    // Close modal immediately & show loader to prevent duplicate submits
     closeCashInModal();
     showSubmitLoader("Saving cash in...");
 
@@ -1852,7 +2220,14 @@ async function submitCashIn() {
         const res = await fetch("/api/expenses/cash-in", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ date, amount, receiptNumber }),
+            body: JSON.stringify({
+              date,
+              amount,
+              fundsType,
+              paymentBy,
+              receiptNumber: isPayment ? receiptNumber : "",
+              screenshots,
+            }),
         });
 
         const data = await res.json();
@@ -2102,10 +2477,10 @@ async function confirmCashOutDrafts() {
 /* =============================
    MODERN UPLOAD UI
    ============================= */
-function setupScreenshotUploadUI() {
-  const input = document.getElementById("co_screenshot");
-  const btn = document.getElementById("co_screenshot_btn");
-  const nameEl = document.getElementById("co_screenshot_name");
+function setupUploadInputUI(inputId, buttonId, nameId, emptyText = "No file chosen") {
+  const input = document.getElementById(inputId);
+  const btn = document.getElementById(buttonId);
+  const nameEl = document.getElementById(nameId);
   if (!input || !btn || !nameEl) return;
 
   btn.addEventListener("click", () => input.click());
@@ -2113,7 +2488,7 @@ function setupScreenshotUploadUI() {
   input.addEventListener("change", () => {
     const files = Array.from(input.files || []);
     if (!files.length) {
-      nameEl.textContent = "No file chosen";
+      nameEl.textContent = emptyText;
       return;
     }
 
@@ -2124,6 +2499,11 @@ function setupScreenshotUploadUI() {
 
     nameEl.textContent = `${files.length} files selected`;
   });
+}
+
+function setupScreenshotUploadUI() {
+  setupUploadInputUI("co_screenshot", "co_screenshot_btn", "co_screenshot_name");
+  setupUploadInputUI("ci_screenshot", "ci_screenshot_btn", "ci_screenshot_name");
 }
 
 /* =============================
@@ -2246,12 +2626,18 @@ async function loadExpenses() {
 document.addEventListener("DOMContentLoaded", () => {
     setupCashInFromSearchableSelect();
     setupScreenshotUploadUI();
+    syncCashInFundsTypeHiddenSelect();
+    syncCashInFormTypeState();
     syncSelectedExpenseOrderUI();
     syncCashOutFormTypeState({ showOwnCarInfo: false });
     renderPendingCashOutDrafts();
+    setupExpenseShotsViewer();
 
     const cashInBtn  = document.getElementById("cashInBtn");
     const cashOutBtn = document.getElementById("cashOutBtn");
+    const cashInFundsTypePicker = document.getElementById("cashInFundsTypePicker");
+    const cashInFundsTypeTrigger = document.getElementById("cashInFundsTypeTrigger");
+    const cashInFundsTypeOptionsList = document.getElementById("cashInFundsTypeOptionsList");
     const fundsTypePicker = document.getElementById("fundsTypePicker");
     const fundsTypeTrigger = document.getElementById("fundsTypeTrigger");
     const fundsTypeOptionsList = document.getElementById("fundsTypeOptionsList");
@@ -2275,6 +2661,14 @@ document.addEventListener("DOMContentLoaded", () => {
             openCashOutOrderModal({ resetSelection: true, resetDate: true, forceReload: false, resetDrafts: true });
         });
     }
+    if (cashInFundsTypeTrigger) {
+        cashInFundsTypeTrigger.addEventListener("click", (e) => {
+            e.preventDefault();
+            const dropdown = document.getElementById("cashInFundsTypeDropdown");
+            if (dropdown?.hidden) openCashInFundsTypeDropdown();
+            else closeCashInFundsTypeDropdown();
+        });
+    }
     if (fundsTypeTrigger) {
         fundsTypeTrigger.addEventListener("click", (e) => {
             e.preventDefault();
@@ -2289,6 +2683,15 @@ document.addEventListener("DOMContentLoaded", () => {
             const dropdown = document.getElementById("cashOutOrderDropdown");
             if (dropdown?.hidden) openExpenseOrderDropdown();
             else closeExpenseOrderDropdown();
+        });
+    }
+    if (cashInFundsTypeOptionsList) {
+        cashInFundsTypeOptionsList.addEventListener("click", (e) => {
+            const optionBtn = e.target?.closest ? e.target.closest(".order-select__option") : null;
+            if (!optionBtn) return;
+            const fundsType = String(optionBtn.getAttribute("data-cashin-funds-type") || "").trim();
+            setCashInFundsTypeSelection(fundsType);
+            closeCashInFundsTypeDropdown();
         });
     }
     if (fundsTypeOptionsList) {
@@ -2343,6 +2746,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!cashOutOrderPicker || !cashOutOrderPicker.contains(e.target)) {
           closeExpenseOrderDropdown();
         }
+        if (!cashInFundsTypePicker || !cashInFundsTypePicker.contains(e.target)) {
+          closeCashInFundsTypeDropdown();
+        }
         if (!fundsTypePicker || !fundsTypePicker.contains(e.target)) {
           closeFundsTypeDropdown();
         }
@@ -2350,16 +2756,19 @@ document.addEventListener("DOMContentLoaded", () => {
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
           closeExpenseOrderDropdown();
+          closeCashInFundsTypeDropdown();
           closeFundsTypeDropdown();
           closeOwnCarInfoModal();
         }
     });
     document.addEventListener("scroll", () => {
         positionExpenseOrderDropdown();
+        positionCashInFundsTypeDropdown();
         positionFundsTypeDropdown();
     }, true);
     window.addEventListener("resize", () => {
         positionExpenseOrderDropdown();
+        positionCashInFundsTypeDropdown();
         positionFundsTypeDropdown();
     });
     if (cashOutOrderAddExpenseBtn) {
