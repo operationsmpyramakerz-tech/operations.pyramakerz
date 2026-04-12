@@ -207,6 +207,75 @@ async function cacheDel(key) {
   }
 }
 
+function clearLocalAppCaches() {
+  try {
+    _CACHE_MEM.clear();
+  } catch {}
+  try {
+    _CACHE_INFLIGHT.clear();
+  } catch {}
+}
+
+async function deleteRedisKeysByPattern(pattern, batchSize = 200) {
+  if (!pattern || !redisClient || !redisClient.isReady) return 0;
+
+  const normalizedBatchSize = Math.max(1, Number(batchSize) || 200);
+  let deleted = 0;
+
+  const flush = async (keys) => {
+    const list = Array.isArray(keys) ? keys.filter(Boolean) : [];
+    if (!list.length) return;
+    if (list.length === 1) {
+      await redisClient.del(list[0]);
+    } else {
+      await redisClient.del(list);
+    }
+    deleted += list.length;
+  };
+
+  try {
+    if (typeof redisClient.scanIterator === "function") {
+      let batch = [];
+      for await (const key of redisClient.scanIterator({ MATCH: pattern, COUNT: normalizedBatchSize })) {
+        if (!key) continue;
+        batch.push(key);
+        if (batch.length >= normalizedBatchSize) {
+          await flush(batch);
+          batch = [];
+        }
+      }
+      if (batch.length) await flush(batch);
+      return deleted;
+    }
+
+    if (typeof redisClient.keys === "function") {
+      const keys = await redisClient.keys(pattern);
+      await flush(keys);
+      return deleted;
+    }
+  } catch (e) {
+    console.warn("[cache] delete pattern failed", pattern, e?.message || e);
+  }
+
+  return deleted;
+}
+
+async function clearAllAppCaches() {
+  clearLocalAppCaches();
+  let deletedRedisKeys = 0;
+
+  try {
+    deletedRedisKeys = await deleteRedisKeysByPattern("cache:*");
+  } catch (e) {
+    console.warn("[cache] global clear failed", e?.message || e);
+  }
+
+  return {
+    clearedMemory: true,
+    deletedRedisKeys,
+  };
+}
+
 function cacheKeySafe(value) {
   return encodeURIComponent(String(value ?? "").trim() || "-");
 }
@@ -1531,17 +1600,52 @@ async function getMaxOrderGroupIdNumberFromNotion(orderIdPropName) {
 async function allocateNextOrderGroupIdNumber(orderIdPropName) {
   if (!orderIdPropName) return null;
 
+  const maxFromNotion = Math.max(
+    0,
+    Number(await getMaxOrderGroupIdNumberFromNotion(orderIdPropName)) || 0,
+  );
+
   const redisKey = "cache:orders:order-group-id-counter:v1";
   if (redisClient && redisClient.isReady) {
     try {
-      const existing = await redisClient.get(redisKey);
-      if (existing === null || existing === undefined) {
-        const max = await getMaxOrderGroupIdNumberFromNotion(orderIdPropName);
-        // seed only if not exists (race-safe)
-        await redisClient.set(redisKey, String(max), { NX: true });
+      if (typeof redisClient.eval === "function") {
+        try {
+          const script = [
+            "local key = KEYS[1]",
+            "local notionMax = tonumber(ARGV[1]) or 0",
+            "local current = tonumber(redis.call('GET', key) or '0') or 0",
+            "if current < notionMax then",
+            "  redis.call('SET', key, notionMax)",
+            "end",
+            "return redis.call('INCR', key)",
+          ].join('\n');
+
+          const next = await redisClient.eval(script, {
+            keys: [redisKey],
+            arguments: [String(maxFromNotion)],
+          });
+
+          const parsedNext = Number(next);
+          if (Number.isFinite(parsedNext)) return parsedNext;
+        } catch (evalError) {
+          console.warn(
+            "[order-id] redis eval sync failed, using fallback:",
+            evalError?.message || evalError,
+          );
+        }
       }
+
+      const existingRaw = await redisClient.get(redisKey);
+      const existing = Math.max(0, Number(existingRaw) || 0);
+      if (maxFromNotion > existing && typeof redisClient.incrBy === "function") {
+        await redisClient.incrBy(redisKey, maxFromNotion - existing);
+      } else if (existing === 0 && maxFromNotion > 0) {
+        await redisClient.set(redisKey, String(maxFromNotion));
+      }
+
       const next = await redisClient.incr(redisKey);
-      return Number(next);
+      const parsedNext = Number(next);
+      if (Number.isFinite(parsedNext)) return parsedNext;
     } catch (e) {
       console.warn(
         "[order-id] redis counter failed, falling back to Notion:",
@@ -1550,8 +1654,7 @@ async function allocateNextOrderGroupIdNumber(orderIdPropName) {
     }
   }
 
-  const max = await getMaxOrderGroupIdNumberFromNotion(orderIdPropName);
-  return Number(max) + 1;
+  return maxFromNotion + 1;
 }
 
 // Authentication middleware
@@ -1919,8 +2022,9 @@ app.post("/api/hard-refresh", requireAuth, async (req, res) => {
   res.set("Cache-Control", "no-store");
 
   try {
+    const cacheStats = await clearAllAppCaches();
     await clearUserServerCaches(req);
-    return res.json({ success: true });
+    return res.json({ success: true, cache: cacheStats });
   } catch (error) {
     console.error("Error during hard refresh:", error?.body || error);
     return res.status(500).json({ error: "Failed to refresh cached data." });
