@@ -1712,27 +1712,6 @@ body.has-floating-search .main-header .searchbar{
 }
 
 
-
-
-/* -------------------------------------------------
-   Feather icons visibility fix (desktop-mode browsers)
-   Some mobile browsers in desktop mode render Feather SVGs
-   without consistently applying the inherited stroke color,
-   which makes icons look invisible inside dark/light pills.
-   Keep the exact design and only force the intended stroke.
-   ------------------------------------------------- */
-.app-container svg.feather{
-  display: block;
-  color: inherit;
-  stroke: currentColor !important;
-  fill: none !important;
-  vector-effect: non-scaling-stroke;
-}
-
-.app-container svg.feather *{
-  stroke: currentColor !important;
-}
-
 @supports (height: 100dvh){
   @media (max-width: 768px){
     .app-container{
