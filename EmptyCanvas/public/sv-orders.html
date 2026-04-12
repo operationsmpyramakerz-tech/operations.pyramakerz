@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css"/>
   <link rel="stylesheet" href="/css/style.css"/>
   <link href="/css/ui-redesign.css" rel="stylesheet"/>
-  <script src="https://unpkg.com/feather-icons"></script>
+  <script src="/js/vendor/feather-icons.min.js"></script>
 </head>
 <body class="permissions-loading">
   <script>
@@ -156,7 +156,7 @@
   </div>
 </div>
 
-  <script>feather.replace();</script>
+  <script>if (window.feather) feather.replace();</script>
   <script src="/js/common-ui.js"></script>
   <script>
     // Activate the current tab visually
