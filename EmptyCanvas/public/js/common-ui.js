@@ -1212,26 +1212,13 @@ ensureLink({ href: '/orders/sv-orders', label: 'Orders Review', icon: 'award' })
     ensureGreetingAndPages();
   });
 
-  function refreshFeatherIconsSoon(){
-    if (!window.feather) return;
-    try { hydratePendingFeatherIcons(document); } catch {}
-    try { requestAnimationFrame(() => { try { hydratePendingFeatherIcons(document); } catch {} }); } catch {}
-    try { setTimeout(() => { try { hydratePendingFeatherIcons(document); } catch {} }, 120); } catch {}
-  }
-
   let resizeTimer;
-  let featherRefreshTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    clearTimeout(featherRefreshTimer);
     resizeTimer = setTimeout(applyInitial, 150);
-    featherRefreshTimer = setTimeout(refreshFeatherIconsSoon, 180);
   });
 
-  window.addEventListener('pageshow', refreshFeatherIconsSoon);
-  window.addEventListener('orientationchange', () => setTimeout(refreshFeatherIconsSoon, 120));
-
-  refreshFeatherIconsSoon();
+  if (window.feather) feather.replace();
 });
 
 
