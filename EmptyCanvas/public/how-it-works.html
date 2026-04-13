@@ -23,6 +23,7 @@
   </style>
 
   <link href="/css/style.css" rel="stylesheet" />
+  <link href="/css/how-it-works.css" rel="stylesheet" />
   <link href="/css/ui-redesign.css" rel="stylesheet" />
   <script src="/js/vendor/feather-icons.min.js"></script>
 </head>
@@ -97,47 +98,19 @@
       </header>
 
       <main class="container-full-width">
-        <section class="card" aria-label="How it works">
-          <div style="max-width: 860px;">
-            <h2 style="margin-top: 0;">How it works</h2>
-            <p style="margin-top: 0.35rem; color: #475569; line-height: 1.65;">
-              This dashboard is connected to your Notion databases and shows your day-to-day operations in one place.
-              Use the left sidebar to navigate between pages (Orders, Tasks, Expenses, etc.).
-            </p>
-
-            <div style="display: grid; gap: 12px; margin-top: 16px;">
-              <div style="padding: 14px; border-radius: 16px; background: rgba(15,23,42,0.03); border: 1px solid rgba(0,0,0,0.06);">
-                <strong>Search</strong>
-                <div style="color:#475569; margin-top: 6px; line-height:1.6;">
-                  Use the circular <strong>Search</strong> button in the top-right to open the quick search box.
-                </div>
-              </div>
-
-              <div style="padding: 14px; border-radius: 16px; background: rgba(15,23,42,0.03); border: 1px solid rgba(0,0,0,0.06);">
-                <strong>Notifications</strong>
-                <div style="color:#475569; margin-top: 6px; line-height:1.6;">
-                  Click the bell icon to view your latest notifications.
-                </div>
-              </div>
-
-              <div style="padding: 14px; border-radius: 16px; background: rgba(15,23,42,0.03); border: 1px solid rgba(0,0,0,0.06);">
-                <strong>Profile menu</strong>
-                <div style="color:#475569; margin-top: 6px; line-height:1.6;">
-                  Click your avatar (top-right) to open the profile menu where you can open <strong>My profile</strong> or <strong>Log out</strong>.
-                </div>
-              </div>
-            </div>
-
-            <p style="margin-top: 18px; color:#475569;">
-              If you'd like this page to include a full guide with screenshots, tell me what you want to explain and I’ll write it in the same style.
-            </p>
-          </div>
-        </section>
+        <div id="sopApp" class="sop-app" aria-live="polite">
+          <section class="card sop-error-card">
+            <div class="sop-error-icon"><i data-feather="loader"></i></div>
+            <h2>Loading your operations guide…</h2>
+            <p>This page is preparing the S.O.P sections that match your current access.</p>
+          </section>
+        </div>
       </main>
     </div>
   </div>
 
   <script>if (window.feather) feather.replace();</script>
   <script src="/js/common-ui.js"></script>
+  <script src="/js/how-it-works.js"></script>
 </body>
 </html>
