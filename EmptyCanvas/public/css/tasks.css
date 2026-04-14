@@ -2500,3 +2500,353 @@ body.tasks-v2 .tv2-point-upload.is-loading::after{
     min-width: 36px;
   }
 }
+
+
+/* =================================
+   Tasks V2 - Round 3 polish updates
+   ================================= */
+body.tasks-v2{
+  background: #000 !important;
+}
+
+body.tasks-v2 .main-header,
+body.tasks-v2 .main-header .header-row1,
+body.tasks-v2 .main-header .header-row1 .left,
+body.tasks-v2 .main-header .header-row1 .right,
+body.tasks-v2 .main-header .topbar-right{
+  background: #000 !important;
+}
+
+body.tasks-v2 .main-header{
+  padding-bottom: 10px !important;
+}
+
+body.tasks-v2 .main-header .dash-title{
+  color: #fff !important;
+}
+
+body.tasks-v2 .main-header .page-title{
+  color: #fff !important;
+}
+
+body.tasks-v2 .main-header .search-icon-btn,
+body.tasks-v2 .main-header .notif-bell-btn{
+  background: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+  box-shadow: 0 18px 34px rgba(0,0,0,0.26) !important;
+  color: #fff !important;
+}
+
+body.tasks-v2 .main-header .search-icon-btn:hover,
+body.tasks-v2 .main-header .notif-bell-btn:hover,
+body.tasks-v2 .main-header .search-icon-btn:active,
+body.tasks-v2 .main-header .notif-bell-btn:active{
+  background: rgba(255,255,255,0.14) !important;
+}
+
+body.tasks-v2 .main-header .search-icon-btn .search-icon-svg,
+body.tasks-v2 .main-header .notif-bell-btn svg,
+body.tasks-v2 .main-header .notif-bell-btn i,
+body.tasks-v2 .main-header .search-icon-btn svg{
+  color: #fff !important;
+}
+
+body.tasks-v2 .main-header .notif-badge{
+  border-color: #000 !important;
+}
+
+body.tasks-v2 .tv2-card{
+  --tv2-prio-accent: #e5e7eb;
+  --tv2-prio-shadow: rgba(148,163,184,0.22);
+  padding: 14px 16px 16px;
+}
+
+body.tasks-v2 .tv2-card::before{
+  top: 14px;
+  bottom: 14px;
+  width: 12px;
+  border-radius: 22px 14px 14px 22px;
+  background: var(--tv2-prio-accent);
+  box-shadow: 8px 0 20px -12px var(--tv2-prio-shadow), 0 14px 28px -24px rgba(15,23,42,0.45);
+}
+
+body.tasks-v2 .tv2-card--prio-high{
+  --tv2-prio-accent: #ef4444;
+  --tv2-prio-shadow: rgba(239,68,68,0.34);
+}
+
+body.tasks-v2 .tv2-card--prio-medium{
+  --tv2-prio-accent: #16a34a;
+  --tv2-prio-shadow: rgba(22,163,74,0.34);
+}
+
+body.tasks-v2 .tv2-card--prio-low{
+  --tv2-prio-accent: #eab308;
+  --tv2-prio-shadow: rgba(234,179,8,0.34);
+}
+
+body.tasks-v2 .tv2-card__top{
+  gap: 10px;
+}
+
+body.tasks-v2 .tv2-time{
+  min-height: 30px;
+}
+
+body.tasks-v2 .tv2-card__title{
+  margin-top: 6px;
+}
+
+body.tasks-v2 .tv2-progress-row{
+  margin-top: 8px;
+}
+
+body.tasks-v2 .tv2-points-overlay{
+  align-items: center !important;
+  justify-content: center !important;
+  padding: max(18px, env(safe-area-inset-top, 0px) + 8px) 18px max(18px, env(safe-area-inset-bottom, 0px) + 8px) !important;
+  overflow: auto;
+}
+
+body.tasks-v2 .tv2-points{
+  width: min(460px, calc(100vw - 28px));
+  max-height: min(78vh, 680px);
+  display: flex;
+  flex-direction: column;
+  margin: auto;
+}
+
+body.tasks-v2 .tv2-points__list{
+  flex: 1 1 auto;
+}
+
+body.tasks-v2 .tv2-points.is-loading .tv2-points__progress{
+  padding-bottom: 10px;
+}
+
+body.tasks-v2 .tv2-points__bar.is-loading{
+  background: linear-gradient(90deg, rgba(15,23,42,0.06), rgba(15,23,42,0.12), rgba(15,23,42,0.06));
+  background-size: 220% 100%;
+  animation: tv2Shimmer 1.2s linear infinite;
+}
+
+body.tasks-v2 .tv2-points__barfill.is-loading{
+  width: 36% !important;
+  background: linear-gradient(90deg, rgba(22,129,22,0.12) 0%, rgba(22,129,22,0.4) 50%, rgba(22,129,22,0.12) 100%);
+  background-size: 220% 100%;
+  box-shadow: none;
+  animation: tv2Shimmer 1.1s linear infinite;
+}
+
+body.tasks-v2 .tv2-points-loading{
+  display: grid;
+  gap: 14px;
+}
+
+body.tasks-v2 .tv2-points-loading__hero{
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%);
+  border: 1px solid rgba(17,24,39,0.07);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 28px rgba(15,23,42,0.06);
+}
+
+body.tasks-v2 .tv2-points-loading__ring{
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 3px solid rgba(255,117,24,0.16);
+  border-top-color: #ff7518;
+  border-right-color: #ff7518;
+  animation: tv2Spin .72s linear infinite;
+  flex: 0 0 auto;
+}
+
+body.tasks-v2 .tv2-points-loading__copy{
+  min-width: 0;
+}
+
+body.tasks-v2 .tv2-points-loading__title{
+  font-size: 15px;
+  font-weight: 900;
+  color: #111827;
+}
+
+body.tasks-v2 .tv2-points-loading__sub{
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(17,24,39,0.55);
+}
+
+body.tasks-v2 .tv2-points-loading__stack{
+  display: grid;
+  gap: 12px;
+}
+
+body.tasks-v2 .tv2-points-skeleton-row{
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 44px 44px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  border: 1px solid rgba(17,24,39,0.07);
+  box-shadow: 0 14px 28px rgba(15,23,42,0.06);
+}
+
+body.tasks-v2 .tv2-points-skeleton-row__circle,
+body.tasks-v2 .tv2-points-skeleton-row__line,
+body.tasks-v2 .tv2-points-skeleton-row__action{
+  position: relative;
+  overflow: hidden;
+  background: rgba(148,163,184,0.18);
+}
+
+body.tasks-v2 .tv2-points-skeleton-row__circle::after,
+body.tasks-v2 .tv2-points-skeleton-row__line::after,
+body.tasks-v2 .tv2-points-skeleton-row__action::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.88) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: tv2ShimmerSweep 1.2s ease-in-out infinite;
+}
+
+body.tasks-v2 .tv2-points-skeleton-row__circle{
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+}
+
+body.tasks-v2 .tv2-points-skeleton-row__line{
+  height: 14px;
+  border-radius: 999px;
+  width: 76%;
+}
+
+body.tasks-v2 .tv2-points-skeleton-row__line--lg{
+  width: 92%;
+}
+
+body.tasks-v2 .tv2-points-skeleton-row__line--md{
+  width: 64%;
+}
+
+body.tasks-v2 .tv2-points-skeleton-row__action{
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+  background: rgba(255,117,24,0.18);
+}
+
+body.tasks-v2 .tv2-points-skeleton-row__action--light{
+  background: rgba(148,163,184,0.2);
+}
+
+body.tasks-v2 .tv2-point-row.is-checking{
+  opacity: 0.96;
+}
+
+body.tasks-v2 .tv2-point-check{
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  margin-top: 0;
+  border-width: 2.5px;
+  border-color: rgba(148,163,184,0.55);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.8);
+}
+
+body.tasks-v2 .tv2-point-check::before{
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  opacity: 0;
+}
+
+body.tasks-v2 .tv2-point-check::after{
+  width: 12px;
+  height: 7px;
+  border-left-width: 3px;
+  border-bottom-width: 3px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -58%) rotate(-45deg);
+}
+
+body.tasks-v2 .tv2-point-check.is-loading{
+  background: #fff;
+  border-color: rgba(22,129,22,0.16);
+  box-shadow: inset 0 0 0 1px rgba(22,129,22,0.08);
+}
+
+body.tasks-v2 .tv2-point-check.is-loading::before{
+  opacity: 1;
+  border-color: rgba(22,129,22,0.14);
+  border-top-color: #168116;
+  border-right-color: #168116;
+  animation: tv2Spin .72s linear infinite;
+}
+
+body.tasks-v2 .tv2-point-check.is-loading::after{
+  opacity: 0;
+}
+
+body.tasks-v2 .tv2-point-row.is-checked .tv2-point-check{
+  background: #168116;
+  border-color: #168116;
+  box-shadow: 0 12px 24px rgba(22,129,22,0.22);
+}
+
+@keyframes tv2Shimmer{
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+@keyframes tv2ShimmerSweep{
+  100% { transform: translateX(100%); }
+}
+
+@media (max-width: 640px){
+  body.tasks-v2 .main-header{
+    padding-top: calc(env(safe-area-inset-top, 0px) + 8px) !important;
+    padding-bottom: 8px !important;
+  }
+
+  body.tasks-v2 .tv2-points-overlay{
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  body.tasks-v2 .tv2-points{
+    width: min(100%, calc(100vw - 24px));
+    max-height: min(80vh, 680px);
+  }
+
+  body.tasks-v2 .tv2-points-loading__hero{
+    padding: 12px 14px;
+    border-radius: 18px;
+  }
+
+  body.tasks-v2 .tv2-points-skeleton-row{
+    grid-template-columns: 40px minmax(0, 1fr) 42px 42px;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  body.tasks-v2 .tv2-point-check{
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+}
