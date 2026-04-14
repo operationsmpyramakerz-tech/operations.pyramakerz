@@ -2,6 +2,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const schoolNameEl = document.getElementById('schoolName');
   const detailsEl = document.getElementById('schoolDetails');
   const groupsEl = document.getElementById('school-stock-groups');
+  const schoolMetaChipsEl = document.getElementById('schoolMetaChips');
+  const stockSummaryEl = document.getElementById('stockSummary');
   const searchInput = document.getElementById('schoolStockSearch');
   const downloadPdfBtn = document.getElementById('downloadPdfBtn');
   const downloadExcelBtn = document.getElementById('downloadExcelBtn');
@@ -81,46 +83,76 @@ document.addEventListener('DOMContentLoaded', () => {
     return arr.concat(untagged);
   };
 
+  const getCheckedGrades = (grades) => {
+    const picked = [];
+
+    const isChecked = (i) => {
+      try {
+        if (!grades) return false;
+        if (Array.isArray(grades)) return !!grades[i - 1];
+        if (typeof grades === 'object') {
+          if (Object.prototype.hasOwnProperty.call(grades, i)) return !!grades[i];
+          if (Object.prototype.hasOwnProperty.call(grades, String(i))) return !!grades[String(i)];
+          if (Object.prototype.hasOwnProperty.call(grades, `G${i}`)) return !!grades[`G${i}`];
+          if (Object.prototype.hasOwnProperty.call(grades, `g${i}`)) return !!grades[`g${i}`];
+        }
+      } catch {}
+      return false;
+    };
+
+    for (let i = 1; i <= 12; i += 1) {
+      if (isChecked(i)) picked.push(i);
+    }
+    return picked;
+  };
+
+  const updateSchoolMeta = () => {
+    if (!schoolMetaChipsEl || !school) return;
+
+    const chips = [];
+    const grades = getCheckedGrades(school.grades);
+    const gov = school.governorate?.name || '';
+    const govColor = school.governorate?.color || 'default';
+    const program = school.programType || '';
+    const education = Array.isArray(school.educationSystem) ? school.educationSystem.filter(Boolean) : [];
+
+    if (gov) chips.push(makeInfoPill(gov, govColor).outerHTML);
+    if (program) chips.push(makeInfoPill(program, 'gray').outerHTML);
+    if (education.length) {
+      education.slice(0, 2).forEach((item) => chips.push(makeInfoPill(item, 'blue').outerHTML));
+      if (education.length > 2) chips.push(makeInfoPill(`+${education.length - 2} systems`, 'gray').outerHTML);
+    }
+    if (grades.length) chips.push(makeInfoPill(`${grades.length} grade${grades.length > 1 ? 's' : ''}`, 'orange').outerHTML);
+
+    schoolMetaChipsEl.innerHTML = chips.join('');
+  };
+
+  const updateStockSummary = (rows) => {
+    if (!stockSummaryEl) return;
+
+    const visibleRows = Array.isArray(rows) ? rows : [];
+    const visibleGroups = groupByTag(visibleRows);
+    const pills = [
+      makeInfoPill(`${visibleGroups.length} tag${visibleGroups.length === 1 ? '' : 's'}`, 'gray').outerHTML,
+      makeInfoPill(`${visibleRows.length} item${visibleRows.length === 1 ? '' : 's'}`, 'blue').outerHTML,
+    ];
+
+    const searchValue = norm(searchInput ? searchInput.value : '');
+    if (searchValue) pills.push(makeInfoPill(`Filtered by “${searchValue}”`, 'orange').outerHTML);
+    if (inventoryMode) pills.push(makeInfoPill('Inventory mode on', 'green').outerHTML);
+
+    stockSummaryEl.innerHTML = pills.join('');
+  };
+
   const renderDetails = () => {
     if (!detailsEl) return;
     if (!school) {
       detailsEl.innerHTML = `<div class="error-block">School details not found.</div>`;
+      if (schoolMetaChipsEl) schoolMetaChipsEl.innerHTML = '';
       return;
     }
 
-    const renderGradesBar = (grades) => {
-      const get = (i) => {
-        try {
-          if (!grades) return false;
-          if (Array.isArray(grades)) return !!grades[i - 1];
-          if (typeof grades === 'object') {
-            if (Object.prototype.hasOwnProperty.call(grades, i)) return !!grades[i];
-            if (Object.prototype.hasOwnProperty.call(grades, String(i))) return !!grades[String(i)];
-            if (Object.prototype.hasOwnProperty.call(grades, `G${i}`)) return !!grades[`G${i}`];
-            if (Object.prototype.hasOwnProperty.call(grades, `g${i}`)) return !!grades[`g${i}`];
-          }
-        } catch {}
-        return false;
-      };
-
-      let html = `<div class="grades-stepper" role="list" aria-label="Grades">`;
-      for (let i = 1; i <= 12; i++) {
-        const checked = get(i);
-        html += `
-          <div class="grades-step ${checked ? 'is-checked' : ''}" role="listitem" aria-label="Grade ${i} ${checked ? 'checked' : 'not checked'}">
-            <div class="grades-step__cap"><span class="grades-step__num">${i}</span></div>
-            <div class="grades-step__dot" aria-hidden="true"></div>
-          </div>
-        `;
-        if (i < 12) {
-          const segActive = checked && get(i + 1);
-          html += `<div class="grades-connector ${segActive ? 'is-active' : ''}" aria-hidden="true"></div>`;
-        }
-      }
-      html += `</div>`;
-      return html;
-    };
-
+    const grades = getCheckedGrades(school.grades);
     const gov = school.governorate?.name || '';
     const govColor = school.governorate?.color || 'default';
     const edu = Array.isArray(school.educationSystem) ? school.educationSystem.filter(Boolean) : [];
@@ -131,12 +163,14 @@ document.addEventListener('DOMContentLoaded', () => {
       ? `<a href="${location}" target="_blank" rel="noopener noreferrer">Open location</a>`
       : '—';
 
-    const gradesBarHtml = renderGradesBar(school.grades);
+    const gradesHtml = grades.length
+      ? `<div class="grades-pill-grid">${grades.map((grade) => `<span class="grade-pill">${grade}</span>`).join('')}</div><div class="grades-meta">${grades.length} grade${grades.length > 1 ? 's' : ''} selected for this school.</div>`
+      : '—';
 
     detailsEl.innerHTML = `
       <div class="detail-row grades-row">
         <div class="label">Grades</div>
-        <div class="value">${gradesBarHtml}</div>
+        <div class="value">${gradesHtml}</div>
       </div>
 
       <div class="detail-row">
@@ -159,6 +193,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="value">${program ? makeInfoPill(program, 'gray').outerHTML : '—'}</div>
       </div>
     `;
+
+    updateSchoolMeta();
 
     if (window.feather) feather.replace();
   };
@@ -495,6 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!Array.isArray(rows) || rows.length === 0) {
       groupsEl.innerHTML = `<div class="empty-block">No stock data found.</div>`;
+      updateStockSummary([]);
       return;
     }
 
@@ -560,11 +597,13 @@ document.addEventListener('DOMContentLoaded', () => {
           const tr = document.createElement('tr');
 
           const tdName = document.createElement('td');
+          tdName.setAttribute('data-label', 'Component');
           tdName.textContent = item.name || '-';
           tdName.style.fontWeight = '600';
 
           const tdDone = document.createElement('td');
           tdDone.className = 'col-num col-done';
+          tdDone.setAttribute('data-label', doneLabel);
           tdDone.textContent = String(item.doneQuantity ?? 0);
 
           tr.appendChild(tdName);
@@ -573,6 +612,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (showInventory) {
             const tdInv = document.createElement('td');
             tdInv.className = 'col-inventory col-inv';
+            tdInv.setAttribute('data-label', inventoryLabel || 'Inventory');
 
             const invInput = document.createElement('input');
             invInput.type = 'number';
@@ -618,6 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (showDefected) {
             const tdDef = document.createElement('td');
             tdDef.className = 'col-inventory col-def';
+            tdDef.setAttribute('data-label', defectedLabel || 'Defected');
 
             const defInput = document.createElement('input');
             defInput.type = 'number';
@@ -653,6 +694,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     groupsEl.appendChild(frag);
+    updateStockSummary(rows);
     if (window.feather) feather.replace();
   };
 
