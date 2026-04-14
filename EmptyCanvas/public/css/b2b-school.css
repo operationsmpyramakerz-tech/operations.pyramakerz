@@ -1,0 +1,570 @@
+/* B2B school dashboard polish + responsive layout */
+body {
+  overflow-x: hidden;
+}
+
+.main-content,
+.container-full-width,
+.b2b-school-layout,
+.b2b-two-cols,
+.b2b-two-cols > *,
+.stocktaking-card,
+.school-details-card,
+.stock-panel-head,
+.stock-panel-actions,
+.stock-search,
+.group-card,
+.group-card__head,
+.group-table-wrap,
+.detail-row,
+.b2b-school-title {
+  min-width: 0;
+}
+
+.b2b-school-layout {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: clamp(0.75rem, 1.4vw, 1.5rem) 0 2rem;
+  overflow-x: clip;
+}
+
+.b2b-school-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem 1.25rem;
+  align-items: start;
+  padding: clamp(1rem, 1.9vw, 1.5rem);
+  margin-bottom: 1.25rem;
+  border-radius: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(249, 115, 22, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 250, 251, 0.96));
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+}
+
+.back-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: start;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.b2b-school-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.section-kicker {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(249, 115, 22, 0.1);
+  color: #c2410c;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.b2b-school-title h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: clamp(2rem, 3.2vw, 2.9rem);
+  line-height: 1.05;
+  font-weight: 900;
+}
+
+.b2b-school-title p {
+  margin: 0;
+  max-width: 72ch;
+  color: #64748b;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.school-meta-chips,
+.stock-summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.school-meta-chips {
+  margin-top: 0.55rem;
+}
+
+.school-meta-chips .pill,
+.stock-summary-pills .pill {
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.b2b-two-cols {
+  display: grid;
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(1rem, 1.6vw, 1.5rem);
+}
+
+.school-details-card,
+.stocktaking-card {
+  padding: clamp(1rem, 1.8vw, 1.4rem);
+  border-radius: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.07);
+}
+
+@media (min-width: 1025px) {
+  .school-details-card {
+    position: sticky;
+    top: 1rem;
+  }
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.section-heading h2,
+.stock-heading h2 {
+  margin: 0.2rem 0 0;
+  color: #0f172a;
+  font-size: 1.28rem;
+  font-weight: 900;
+}
+
+.section-heading p,
+.stock-heading p {
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.96rem;
+  line-height: 1.6;
+}
+
+.details-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 0;
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px solid #e8edf4;
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.detail-row.grades-row {
+  grid-column: 1 / -1;
+}
+
+.detail-row .label {
+  margin: 0;
+  color: #475569;
+  font-size: 0.77rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.detail-row .value {
+  color: #0f172a;
+  font-size: 1rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.detail-row .value a {
+  text-underline-offset: 3px;
+}
+
+.grades-pill-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.grade-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  padding: 0.55rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 0.94rem;
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(249, 115, 22, 0.12);
+}
+
+.grades-meta {
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.stock-panel-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 430px);
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.stock-heading {
+  margin-bottom: 0;
+}
+
+.stock-panel-actions {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.card-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.card-toolbar .btn {
+  margin-left: 0 !important;
+  min-width: 0;
+  border-radius: 16px;
+}
+
+.stock-search {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0 !important;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.stock-search svg,
+.stock-search i {
+  flex: 0 0 auto;
+}
+
+.stock-search input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #0f172a;
+  font-size: 0.96rem;
+}
+
+.groups-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.group-card {
+  border-radius: 24px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.07);
+}
+
+.group-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+}
+
+.group-head-left,
+.group-head-right {
+  min-width: 0;
+}
+
+.group-head-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.group-title {
+  margin-right: 0;
+}
+
+.group-tag .tag-pill,
+.group-count {
+  box-shadow: none;
+}
+
+.group-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.group-table {
+  width: 100%;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.group-table thead th {
+  padding: 0.8rem 1rem;
+  white-space: nowrap;
+  font-size: 0.83rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.group-table tbody td {
+  padding: 0.9rem 1rem;
+  vertical-align: middle;
+}
+
+.group-table tbody td:first-child {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.group-table .col-num,
+.group-table .col-done {
+  text-align: center;
+  width: 150px;
+}
+
+.group-table .col-inventory {
+  width: 170px;
+}
+
+.inventory-input {
+  width: 100%;
+  max-width: 140px;
+}
+
+.empty-block,
+.error-block {
+  border-radius: 18px;
+}
+
+@media (max-width: 1120px) {
+  .b2b-two-cols {
+    grid-template-columns: 1fr;
+  }
+
+  .stock-panel-head {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .b2b-school-layout {
+    padding: 0.75rem 0 6rem;
+  }
+
+  .b2b-school-top {
+    grid-template-columns: 1fr;
+    gap: 0.9rem;
+    padding: 1rem;
+    border-radius: 24px;
+  }
+
+  .back-link-btn {
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .b2b-school-title h1 {
+    font-size: clamp(1.9rem, 8vw, 2.5rem);
+  }
+
+  .b2b-school-title p {
+    font-size: 0.96rem;
+    line-height: 1.65;
+  }
+
+  .school-details-card,
+  .stocktaking-card {
+    padding: 1rem;
+    border-radius: 24px;
+  }
+
+  .section-heading,
+  .stock-heading {
+    gap: 0.75rem;
+  }
+
+  .details-list {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-row {
+    padding: 0.95rem;
+    border-radius: 18px;
+  }
+
+  .grades-pill-grid {
+    gap: 0.5rem;
+  }
+
+  .grade-pill {
+    min-width: 38px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.88rem;
+  }
+
+  .card-toolbar {
+    justify-content: stretch;
+  }
+
+  .card-toolbar .btn {
+    flex: 1 1 calc(50% - 0.35rem);
+    justify-content: center;
+    padding-inline: 0.9rem;
+  }
+
+  .card-toolbar .btn span {
+    white-space: normal;
+    text-align: center;
+    line-height: 1.35;
+  }
+
+  .stock-search {
+    padding: 0.8rem 0.9rem;
+    border-radius: 16px;
+  }
+
+  .group-card {
+    border-radius: 20px;
+  }
+
+  .group-card__head {
+    padding: 0.95rem 1rem;
+  }
+
+  .group-table-wrap {
+    overflow: visible;
+  }
+
+  .group-table,
+  .group-table thead,
+  .group-table tbody,
+  .group-table tr,
+  .group-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .group-table thead {
+    display: none;
+  }
+
+  .group-table tbody {
+    display: grid;
+    gap: 0.85rem;
+    padding: 0.95rem;
+  }
+
+  .group-table tbody tr {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.95rem;
+    border: 1px solid #eef2f7;
+    border-radius: 18px;
+    background: linear-gradient(180deg, #ffffff, #fbfdff);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
+  }
+
+  .group-table tbody td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.85rem;
+    padding: 0;
+    border-bottom: 0;
+    text-align: left !important;
+  }
+
+  .group-table tbody td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    max-width: 48%;
+    color: #64748b;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .group-table tbody td:first-child {
+    display: block;
+    font-size: 1rem;
+  }
+
+  .group-table tbody td:first-child::before {
+    display: block;
+    max-width: none;
+    margin-bottom: 0.35rem;
+  }
+
+  .group-table .col-num,
+  .group-table .col-done,
+  .group-table .col-inventory {
+    width: 100%;
+  }
+
+  .inventory-input {
+    max-width: 100%;
+    min-height: 40px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #f8fafc;
+    padding: 0.55rem 0.75rem;
+    text-align: left;
+  }
+}
+
+@media (max-width: 520px) {
+  .card-toolbar .btn {
+    flex-basis: 100%;
+  }
+
+  .stock-summary-pills,
+  .school-meta-chips {
+    gap: 0.5rem;
+  }
+
+  .school-meta-chips .pill,
+  .stock-summary-pills .pill {
+    font-size: 0.8rem;
+  }
+}
