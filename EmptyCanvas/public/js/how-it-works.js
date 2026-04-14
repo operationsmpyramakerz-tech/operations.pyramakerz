@@ -16,6 +16,779 @@
     'account',
   ];
 
+  const MODULE_FLOWS = {
+  "operating-rules": [
+    {
+      "title": "Standard daily execution",
+      "summary": "Use one operating sequence for any order, expense, task, or maintenance action.",
+      "outcome": "Stable data in Notion",
+      "steps": [
+        {
+          "label": "Confirm the allowed page",
+          "note": "Start only from a module already visible to your account."
+        },
+        {
+          "label": "Do the action in its owner page",
+          "note": "Approve in review, execute in operations, log money in expenses."
+        },
+        {
+          "label": "Attach the required proof",
+          "note": "Receipts, screenshots, and signed reports are workflow evidence."
+        },
+        {
+          "label": "Refresh after direct Notion edits",
+          "note": "Use Hard Refresh when the source data was changed outside the app."
+        }
+      ]
+    },
+    {
+      "title": "Correction without duplication",
+      "summary": "Use the fix path instead of creating a second record for the same case.",
+      "outcome": "One clean record history",
+      "steps": [
+        {
+          "label": "Find the existing record",
+          "note": "Open the current order, task, or expense that already owns the case."
+        },
+        {
+          "label": "Use edit or page-specific correction",
+          "note": "Follow the protected correction workflow when available."
+        },
+        {
+          "label": "Save back into the same workflow",
+          "note": "Keep the same order group instead of opening a duplicate request."
+        },
+        {
+          "label": "Recheck the final status",
+          "note": "Confirm the tracker, quantity, or proof after the correction is saved."
+        }
+      ]
+    }
+  ],
+  "shared-controls": [
+    {
+      "title": "Quick navigation path",
+      "summary": "Use the common header controls to move fast without hunting through the sidebar.",
+      "outcome": "Faster page switching",
+      "steps": [
+        {
+          "label": "Open search or the profile menu",
+          "note": "Start from the top-right controls available across the app."
+        },
+        {
+          "label": "Jump to the required page",
+          "note": "Use quick search, notifications, or the page chips from this SOP."
+        },
+        {
+          "label": "Complete the page action",
+          "note": "Work inside the page that owns the workflow step."
+        }
+      ]
+    },
+    {
+      "title": "Fresh sync path",
+      "summary": "Use Hard Refresh when the app still shows old values after a direct Notion update.",
+      "outcome": "Latest cached data cleared",
+      "steps": [
+        {
+          "label": "Open the avatar menu",
+          "note": "The refresh action lives with account controls."
+        },
+        {
+          "label": "Tap Hard Refresh",
+          "note": "This clears app-side caches and reloads the current page."
+        },
+        {
+          "label": "Continue from the refreshed page",
+          "note": "Review live values before making the next action."
+        }
+      ]
+    }
+  ],
+  "home": [
+    {
+      "title": "Start-of-day review",
+      "summary": "Use Home as the first checkpoint before opening any operational page.",
+      "outcome": "Clear next action",
+      "steps": [
+        {
+          "label": "Open Home",
+          "note": "Load the role-based dashboard for your account."
+        },
+        {
+          "label": "Read KPI cards",
+          "note": "Check tasks, orders, stock, and expenses that belong to your scope."
+        },
+        {
+          "label": "Review recent lists",
+          "note": "Scan Next tasks and Recent orders for the next priority."
+        },
+        {
+          "label": "Launch the right module",
+          "note": "Use quick actions to jump directly into the workflow page."
+        }
+      ]
+    },
+    {
+      "title": "Scope confirmation",
+      "summary": "Use Home to confirm what pages and responsibilities are currently assigned to you.",
+      "outcome": "Permission-aware work",
+      "steps": [
+        {
+          "label": "Open the scope card",
+          "note": "Review department, position, and visible page chips."
+        },
+        {
+          "label": "Confirm allowed modules",
+          "note": "Work only with the pages shown for your account."
+        },
+        {
+          "label": "Refresh after permission changes",
+          "note": "Run Hard Refresh if Notion access was edited recently."
+        }
+      ]
+    }
+  ],
+  "current-orders": [
+    {
+      "title": "Track a live order",
+      "summary": "Use Current Orders for the clean, live view of an order already inside the system.",
+      "outcome": "Accurate live tracking",
+      "steps": [
+        {
+          "label": "Open the order card",
+          "note": "Confirm order number, reason, item count, and estimated total."
+        },
+        {
+          "label": "Read the tracker",
+          "note": "Follow Order Placed → Under Supervision → In progress → Shipped → Arrived."
+        },
+        {
+          "label": "Inspect the line items",
+          "note": "Open the modal and review product-level quantities and status."
+        },
+        {
+          "label": "Move to the owner page if action is needed",
+          "note": "Use review or execution pages for the next real workflow step."
+        }
+      ]
+    },
+    {
+      "title": "Export an order copy",
+      "summary": "Create a shareable copy when the order must be printed, sent, or archived outside the live screen.",
+      "outcome": "PDF or Excel copy ready",
+      "steps": [
+        {
+          "label": "Open the order modal",
+          "note": "Go to the full details first."
+        },
+        {
+          "label": "Use the Download menu",
+          "note": "Choose the format that matches the receiver’s need."
+        },
+        {
+          "label": "Share or archive the file",
+          "note": "Keep the live order itself as the system source of truth."
+        }
+      ]
+    },
+    {
+      "title": "Protected correction flow",
+      "summary": "Correct an existing order without creating a duplicate request.",
+      "outcome": "Same order fixed safely",
+      "steps": [
+        {
+          "label": "Open the current order",
+          "note": "Start from the exact live order that needs correction."
+        },
+        {
+          "label": "Tap Edit",
+          "note": "This is an admin-protected action."
+        },
+        {
+          "label": "Pass password verification",
+          "note": "The system opens the protected cart only after validation."
+        },
+        {
+          "label": "Save the corrected order",
+          "note": "Follow the same order group after it returns to the workflow."
+        }
+      ]
+    }
+  ],
+  "orders-review": [
+    {
+      "title": "Approve a request",
+      "summary": "Move a valid order from supervisor review into execution.",
+      "outcome": "Approved order ready for operations",
+      "steps": [
+        {
+          "label": "Start in Not Started",
+          "note": "Review only the groups still waiting for a supervisor decision."
+        },
+        {
+          "label": "Check reason and items",
+          "note": "Confirm the order is operationally valid."
+        },
+        {
+          "label": "Edit quantity if required",
+          "note": "Store the supervisor quantity without losing the original request."
+        },
+        {
+          "label": "Approve the group",
+          "note": "The order can now continue to the execution pages."
+        }
+      ]
+    },
+    {
+      "title": "Reject a request",
+      "summary": "Stop an order when the request should not continue in its current form.",
+      "outcome": "Rejected order clearly documented",
+      "steps": [
+        {
+          "label": "Open the group from Not Started",
+          "note": "Inspect the exact lines that need a decision."
+        },
+        {
+          "label": "Identify the blocking issue",
+          "note": "Quantity, reason, or operational mismatch must be clear."
+        },
+        {
+          "label": "Reject the item or group",
+          "note": "Use the rejection action instead of allowing bad data forward."
+        },
+        {
+          "label": "Monitor the Rejected tab",
+          "note": "Avoid reviewing the same rejected group again by mistake."
+        }
+      ]
+    },
+    {
+      "title": "Review follow-up tabs",
+      "summary": "Use Approved and Rejected as audit tabs after the decision is made.",
+      "outcome": "No double review",
+      "steps": [
+        {
+          "label": "Open Approved or Rejected",
+          "note": "Follow the final decision bucket, not the new-request bucket."
+        },
+        {
+          "label": "Confirm edited quantities",
+          "note": "Make sure the stored supervisor value is the intended one."
+        },
+        {
+          "label": "Leave new work in Not Started",
+          "note": "Keep review effort focused on pending groups."
+        }
+      ]
+    }
+  ],
+  "operations-orders": [
+    {
+      "title": "Execute a product order",
+      "summary": "Move a reviewed order through the main operations execution path.",
+      "outcome": "Delivered order with proof",
+      "steps": [
+        {
+          "label": "Open Not Started",
+          "note": "Start from the orders that still need their first execution move."
+        },
+        {
+          "label": "Use the correct receipt path",
+          "note": "Request Products needs receipt numbers when operations receives the items."
+        },
+        {
+          "label": "Confirm full receipt",
+          "note": "When the shipment is fully received, the order moves to Received."
+        },
+        {
+          "label": "Upload signed proof",
+          "note": "Mark the order delivered only after the signed report is attached."
+        }
+      ]
+    },
+    {
+      "title": "Handle a partial receipt",
+      "summary": "Use Remaining when a shipment is incomplete and quantity still needs follow-up.",
+      "outcome": "Remaining quantity stays accurate",
+      "steps": [
+        {
+          "label": "Open the order in Remaining",
+          "note": "This tab is for shipped but not fully received work."
+        },
+        {
+          "label": "Edit the received or missing quantity",
+          "note": "Keep Quantity Remaining accurate instead of using notes outside the field."
+        },
+        {
+          "label": "Recheck the tracker",
+          "note": "Stay in Remaining until the order becomes fully received."
+        },
+        {
+          "label": "Move back to Received when complete",
+          "note": "Only then should the final delivery proof step happen."
+        }
+      ]
+    },
+    {
+      "title": "Create the next movement",
+      "summary": "Use delivered orders to start the next controlled movement without rebuilding the request manually.",
+      "outcome": "Follow-up movement linked to the case",
+      "steps": [
+        {
+          "label": "Finish the current delivery first",
+          "note": "The base order should already be delivered with proof."
+        },
+        {
+          "label": "Choose Create Withdrawal or Create Delivery",
+          "note": "Use the built-in action that matches the next movement."
+        },
+        {
+          "label": "Review the new generated order",
+          "note": "Track the follow-up order as its own execution record."
+        }
+      ]
+    }
+  ],
+  "maintenance-orders": [
+    {
+      "title": "Close a maintenance case",
+      "summary": "Use the technical workflow to complete service work and close the request correctly.",
+      "outcome": "Delivered maintenance record",
+      "steps": [
+        {
+          "label": "Open the active case",
+          "note": "Start from Received while the maintenance request still needs work."
+        },
+        {
+          "label": "Log the maintenance details",
+          "note": "Fill resolution method, actual issue, repair action, and spare parts replaced."
+        },
+        {
+          "label": "Review the technical result",
+          "note": "Make sure the description explains what was found and what was fixed."
+        },
+        {
+          "label": "Upload the signed report",
+          "note": "Only then should the case move to Delivered."
+        }
+      ]
+    },
+    {
+      "title": "Preserve service history",
+      "summary": "Write maintenance data so later technical follow-up can rely on it.",
+      "outcome": "Useful historical record",
+      "steps": [
+        {
+          "label": "Use factual language",
+          "note": "Describe the actual issue and repair action clearly."
+        },
+        {
+          "label": "List replaced spare parts",
+          "note": "Keep the maintenance history auditable."
+        },
+        {
+          "label": "Archive in Delivered",
+          "note": "Use the delivered tab as the finished maintenance record."
+        }
+      ]
+    }
+  ],
+  "create-order": [
+    {
+      "title": "Create a product request or withdrawal",
+      "summary": "Build a normal product order with the correct type, reason, and protected checkout.",
+      "outcome": "New order group created",
+      "steps": [
+        {
+          "label": "Choose Request Products or Withdraw Products",
+          "note": "Set the order type before building the cart."
+        },
+        {
+          "label": "Add components to the cart",
+          "note": "Search, review quantities, and keep the cart clean before checkout."
+        },
+        {
+          "label": "Fill the required reason",
+          "note": "Use the global reason field required by the selected type."
+        },
+        {
+          "label": "Checkout with password",
+          "note": "The app reads Notion for the highest Order - ID and allocates the next number."
+        }
+      ]
+    },
+    {
+      "title": "Create a maintenance request",
+      "summary": "Use the maintenance-specific cart rules so the technical request enters the right workflow.",
+      "outcome": "Maintenance request ready for follow-up",
+      "steps": [
+        {
+          "label": "Choose Request Maintenance",
+          "note": "Switch the form into maintenance mode first."
+        },
+        {
+          "label": "Select the school and machine",
+          "note": "Maintenance requests allow one machine only in the cart."
+        },
+        {
+          "label": "Write the issue description",
+          "note": "The system derives the reason from the issue text."
+        },
+        {
+          "label": "Submit and track later pages",
+          "note": "Follow the request in review and maintenance workflows after creation."
+        }
+      ]
+    },
+    {
+      "title": "Protected edit flow",
+      "summary": "Reopen an existing order safely from the current-order correction path.",
+      "outcome": "Existing order updated",
+      "steps": [
+        {
+          "label": "Arrive from Edit",
+          "note": "The protected edit entry point should come from Current Orders."
+        },
+        {
+          "label": "Review the loaded cart",
+          "note": "Confirm the existing order lines before changing them."
+        },
+        {
+          "label": "Apply the correction",
+          "note": "Update quantities, items, or reason as needed."
+        },
+        {
+          "label": "Save back to the same workflow",
+          "note": "Track the corrected order instead of creating a duplicate request."
+        }
+      ]
+    }
+  ],
+  "stocktaking": [
+    {
+      "title": "Check stock before ordering",
+      "summary": "Use stocktaking as the availability checkpoint before requesting or withdrawing products.",
+      "outcome": "Better order decision",
+      "steps": [
+        {
+          "label": "Open Stocktaking",
+          "note": "Load the live stock search page."
+        },
+        {
+          "label": "Search by item or tag",
+          "note": "Filter the stock list down to the needed component."
+        },
+        {
+          "label": "Review quantities and groups",
+          "note": "Check whether stock already covers the requirement."
+        },
+        {
+          "label": "Decide the next action",
+          "note": "Open Create New Order only after the stock picture is clear."
+        }
+      ]
+    },
+    {
+      "title": "Export a stock snapshot",
+      "summary": "Use exports when someone needs a stock view outside the live page.",
+      "outcome": "Shareable stock copy",
+      "steps": [
+        {
+          "label": "Filter the visible stock",
+          "note": "Narrow the list to the relevant group or search result."
+        },
+        {
+          "label": "Export the current view",
+          "note": "Create the snapshot that matches what you are reviewing."
+        },
+        {
+          "label": "Keep the live page as source of truth",
+          "note": "Use the export for sharing, not as a replacement for the system record."
+        }
+      ]
+    }
+  ],
+  "b2b": [
+    {
+      "title": "Review a school stock file",
+      "summary": "Use B2B to inspect a school’s stock profile and grouped components.",
+      "outcome": "Clear school stock picture",
+      "steps": [
+        {
+          "label": "Search the school",
+          "note": "Use name, governorate, education system, or program filters."
+        },
+        {
+          "label": "Open the school folder",
+          "note": "Load school details and grouped stock tags."
+        },
+        {
+          "label": "Review grouped items",
+          "note": "Inspect quantities by the stock tag and export if needed."
+        },
+        {
+          "label": "Share the correct file",
+          "note": "Use PDF or Excel when the school stock view must be sent externally."
+        }
+      ]
+    },
+    {
+      "title": "Run an inventory session",
+      "summary": "Use the protected inventory mode when a school stock check must be recorded.",
+      "outcome": "Inventory and defected counts saved",
+      "steps": [
+        {
+          "label": "Open the school page",
+          "note": "Start from the exact school record that needs inventory work."
+        },
+        {
+          "label": "Verify admin password",
+          "note": "Inventory mode is protected before editable columns appear."
+        },
+        {
+          "label": "Fill Inventory and Defected",
+          "note": "Update the visible editable columns carefully."
+        },
+        {
+          "label": "Finish inventory and export",
+          "note": "Close the session cleanly and create the result file if required."
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "title": "Create and assign a task",
+      "summary": "Turn operational work into an owned assignment with dates, priority, and checkpoints.",
+      "outcome": "Task ready for execution",
+      "steps": [
+        {
+          "label": "Choose the correct task scope",
+          "note": "Work from My tasks or Delegated tasks depending on your role."
+        },
+        {
+          "label": "Create the task",
+          "note": "Set subject, assignee, due date, priority, and any attachments."
+        },
+        {
+          "label": "Add checklist points",
+          "note": "Break multi-step work into visible checkpoints."
+        },
+        {
+          "label": "Save and monitor status",
+          "note": "The task can now move through the execution tabs."
+        }
+      ]
+    },
+    {
+      "title": "Update task execution",
+      "summary": "Use the task detail view to keep progress and status accurate while work is happening.",
+      "outcome": "Reliable progress tracking",
+      "steps": [
+        {
+          "label": "Open the task detail",
+          "note": "Review the current owner, due date, and checklist."
+        },
+        {
+          "label": "Update status honestly",
+          "note": "Move between Not started, In progress, Paused, Done, or Canceled."
+        },
+        {
+          "label": "Mark checklist progress",
+          "note": "Use checkpoints instead of hiding progress in comments only."
+        },
+        {
+          "label": "Close finished work",
+          "note": "Do not leave completed tasks inside active tabs."
+        }
+      ]
+    },
+    {
+      "title": "Manager follow-up",
+      "summary": "Use Delegated tasks to review work assigned to others without mixing it with your own list.",
+      "outcome": "Clear accountability",
+      "steps": [
+        {
+          "label": "Open Delegated tasks",
+          "note": "Start from the manager-facing follow-up view."
+        },
+        {
+          "label": "Filter by status or date",
+          "note": "Focus on overdue, paused, or high-priority work first."
+        },
+        {
+          "label": "Open the task detail",
+          "note": "Review blockers and next checkpoints before escalating."
+        }
+      ]
+    }
+  ],
+  "expenses": [
+    {
+      "title": "Record Cash In",
+      "summary": "Use Cash In for money received into your operational balance.",
+      "outcome": "Cash-in movement stored with proof",
+      "steps": [
+        {
+          "label": "Choose + CASH IN",
+          "note": "Open the incoming money form first."
+        },
+        {
+          "label": "Select funds type and amount",
+          "note": "Fill the date, amount, and payment-by details."
+        },
+        {
+          "label": "Attach the matching proof",
+          "note": "Cash payment needs a receipt number; transfer needs screenshots."
+        },
+        {
+          "label": "Submit the movement",
+          "note": "The balance updates after the valid cash-in record is saved."
+        }
+      ]
+    },
+    {
+      "title": "Record Cash Out",
+      "summary": "Use Cash Out for operational spending and connect it to the real reason or order.",
+      "outcome": "Cash-out movement linked correctly",
+      "steps": [
+        {
+          "label": "Choose - CASH OUT",
+          "note": "Start the outgoing money flow."
+        },
+        {
+          "label": "Link an order or use Other reason",
+          "note": "Prefer the real order when one exists."
+        },
+        {
+          "label": "Select funds type",
+          "note": "Some types require screenshots or Google Maps proof."
+        },
+        {
+          "label": "Submit with evidence",
+          "note": "Own car needs kilometer logic and a Maps screenshot before saving."
+        }
+      ]
+    },
+    {
+      "title": "Settle the balance",
+      "summary": "Close the current balance cleanly when handing the account back to the company.",
+      "outcome": "Settlement point stored",
+      "steps": [
+        {
+          "label": "Review current balance",
+          "note": "Check the outstanding recent amount first."
+        },
+        {
+          "label": "Tap Settled my account",
+          "note": "Open the settlement modal."
+        },
+        {
+          "label": "Enter receipt number",
+          "note": "Settlement requires this proof before submission."
+        },
+        {
+          "label": "Submit and verify history split",
+          "note": "Recent and older movements separate around the settlement point."
+        }
+      ]
+    }
+  ],
+  "expenses-users": [
+    {
+      "title": "Audit a user balance",
+      "summary": "Use the management view to compare balances and find where follow-up is needed.",
+      "outcome": "Better team balance oversight",
+      "steps": [
+        {
+          "label": "Review user tiles",
+          "note": "Check item count, balance, and last settlement date."
+        },
+        {
+          "label": "Open the selected user",
+          "note": "Move into that person’s detailed expense history."
+        },
+        {
+          "label": "Read recent versus past",
+          "note": "Interpret the history around the latest settlement point."
+        },
+        {
+          "label": "Flag the next follow-up",
+          "note": "Use the evidence and balance picture for offline action with the user."
+        }
+      ]
+    },
+    {
+      "title": "Review user evidence",
+      "summary": "Inspect screenshots, linked reasons, and dates when checking a user’s transactions.",
+      "outcome": "Cleaner audit trail",
+      "steps": [
+        {
+          "label": "Filter the history",
+          "note": "Use dates and sort controls to narrow the review period."
+        },
+        {
+          "label": "Open proof files",
+          "note": "Inspect screenshots and linked order reasons line by line."
+        },
+        {
+          "label": "Compare with balance behavior",
+          "note": "Make sure the evidence supports the recorded totals."
+        }
+      ]
+    }
+  ],
+  "account": [
+    {
+      "title": "Update profile information",
+      "summary": "Keep the account identity and contact details aligned with the real user.",
+      "outcome": "Current profile data",
+      "steps": [
+        {
+          "label": "Open Account",
+          "note": "Start from the profile and security page."
+        },
+        {
+          "label": "Review visible details",
+          "note": "Check name, photo, phone, email, department, and position."
+        },
+        {
+          "label": "Edit the needed fields",
+          "note": "Update only the data that has changed."
+        },
+        {
+          "label": "Save with verification",
+          "note": "Sensitive updates may require the current password."
+        }
+      ]
+    },
+    {
+      "title": "Change password safely",
+      "summary": "Use the account security flow to protect daily app access and protected actions.",
+      "outcome": "Updated account security",
+      "steps": [
+        {
+          "label": "Open the password section",
+          "note": "Start the security-specific update."
+        },
+        {
+          "label": "Enter the current password",
+          "note": "Verification protects the account before changes apply."
+        },
+        {
+          "label": "Set and confirm the new password",
+          "note": "Use a value you can reliably use for protected workflows."
+        },
+        {
+          "label": "Continue future actions with the new password",
+          "note": "Protected edits and checkouts depend on correct credentials."
+        }
+      ]
+    }
+  ]
+};
+
   const MODULES = [
     {
       id: 'operating-rules',
@@ -718,6 +1491,12 @@
     },
   ];
 
+  MODULES.forEach((module) => {
+    module.flows = Array.isArray(module.flows)
+      ? module.flows
+      : (Array.isArray(MODULE_FLOWS[module.id]) ? MODULE_FLOWS[module.id] : []);
+  });
+
   function normalize(value) {
     return String(value || '').trim().toLowerCase();
   }
@@ -801,6 +1580,27 @@
         'Use this page only when your role requires it and after checking the shared controls and operating rules above.',
       result:
         'The user stays aware of the page scope even before a detailed SOP is added.',
+      flows: [
+      {
+            "title": "Use the page carefully",
+            "summary": "Follow the live interface while keeping to the shared operating rules until a page-specific SOP is authored.",
+            "outcome": "Safe use inside your permission scope",
+            "steps": [
+                  {
+                        "label": "Open it from allowed navigation",
+                        "note": "Stay inside the page already assigned to your account."
+                  },
+                  {
+                        "label": "Read visible tabs and actions first",
+                        "note": "Understand the page owner step before changing data."
+                  },
+                  {
+                        "label": "Escalate if the workflow is unclear",
+                        "note": "Ask the operations lead before making uncertain updates."
+                  }
+            ]
+      }
+],
       steps: [
         {
           title: 'Open the page from your allowed navigation',
@@ -981,6 +1781,50 @@
     `;
   }
 
+  function renderFlows(module) {
+    const flows = Array.isArray(module.flows) ? module.flows : [];
+    if (!flows.length) return '';
+    return `
+      <div class="sop-block">
+        <div class="sop-block-title">Process flows</div>
+        <div class="sop-process-grid">
+          ${flows.map((flow, flowIndex) => {
+            const flowSteps = Array.isArray(flow.steps) ? flow.steps : [];
+            return `
+              <article class="sop-process-card">
+                <div class="sop-process-head">
+                  <div>
+                    <div class="sop-process-kicker">Flow ${flowIndex + 1}</div>
+                    <h4>${escapeHtml(flow.title || `Process ${flowIndex + 1}`)}</h4>
+                  </div>
+                  ${flow.outcome ? `<div class="sop-process-outcome">${escapeHtml(flow.outcome)}</div>` : ''}
+                </div>
+                ${flow.summary ? `<div class="sop-process-summary">${escapeHtml(flow.summary)}</div>` : ''}
+                <div class="sop-process-track">
+                  ${flowSteps.map((step, stepIndex) => {
+                    const label = typeof step === 'string'
+                      ? step
+                      : (step.label || step.title || `Step ${stepIndex + 1}`);
+                    const note = typeof step === 'string'
+                      ? ''
+                      : String(step.note || step.body || '').trim();
+                    return `
+                      <div class="sop-process-step">
+                        <div class="sop-process-step-no">${stepIndex + 1}</div>
+                        <div class="sop-process-step-label">${escapeHtml(label)}</div>
+                        ${note ? `<div class="sop-process-step-note">${escapeHtml(note)}</div>` : ''}
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </article>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   function renderSteps(module) {
     const steps = Array.isArray(module.steps) ? module.steps : [];
     if (!steps.length) return '';
@@ -1042,6 +1886,15 @@
       ...(module.controls || []),
       ...(module.rules || []),
       ...(module.keywords || []),
+      ...((module.flows || []).flatMap((flow) => [
+        flow.title,
+        flow.summary,
+        flow.outcome,
+        ...((flow.steps || []).flatMap((step) => [
+          typeof step === 'string' ? step : step.label,
+          typeof step === 'string' ? '' : step.note,
+        ])),
+      ])),
       ...((module.steps || []).flatMap((step) => [step.title, step.body])),
     ];
     return parts.filter(Boolean).join(' ').toLowerCase();
@@ -1065,6 +1918,7 @@
 
         ${renderControls(module)}
         ${renderSummaryCards(module)}
+        ${renderFlows(module)}
         ${renderSteps(module)}
         ${renderRules(module)}
       </section>
