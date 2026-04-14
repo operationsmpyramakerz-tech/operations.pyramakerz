@@ -137,6 +137,13 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    try {
+      const themeMeta = document.querySelector('meta[name="theme-color"]');
+      if (themeMeta) themeMeta.setAttribute("content", "#000000");
+      const appleStatusMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (appleStatusMeta) appleStatusMeta.setAttribute("content", "black-translucent");
+    } catch {}
+
     const daysEl = $("tasksV2Days");
     const monthLabelEl = $("tasksV2MonthLabel");
     const monthBtn = $("tasksV2MonthBtn");
@@ -1564,6 +1571,7 @@ const toolbarHTML = `
     function tv2ClosePointsModal() {
       if (!tv2PointsOverlay) return;
       tv2CloseAllPointFilesMenus();
+      tv2SetPointsLoadingState(false);
       tv2PointsOverlay.hidden = true;
       tv2PointsOverlay.style.display = "none";
       document.body.classList.remove("tv2-modal-open");
@@ -1571,17 +1579,45 @@ const toolbarHTML = `
       tv2PointsTaskId = "";
     }
 
-    function tv2RenderPointsLoading() {
-      if (tv2PointsTitleEl) tv2PointsTitleEl.textContent = "Loading...";
-      if (tv2PointsCountEl) tv2PointsCountEl.textContent = "—";
-      if (tv2PointsPctEl) tv2PointsPctEl.textContent = "";
+    function tv2RenderPointsLoading(taskTitle) {
+      const safeTitle = String(taskTitle || "Task").trim() || "Task";
+      tv2SetPointsLoadingState(true);
+      if (tv2PointsTitleEl) tv2PointsTitleEl.textContent = safeTitle;
+      if (tv2PointsCountEl) tv2PointsCountEl.textContent = "Preparing checklist";
+      if (tv2PointsPctEl) tv2PointsPctEl.textContent = "…";
       if (tv2PointsBarEl) tv2PointsBarEl.setAttribute("aria-valuenow", "0");
-      if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = "0%";
+      if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = "36%";
       if (tv2PointsListEl) {
         tv2PointsListEl.innerHTML = `
-          <div class="modern-loading" role="status" aria-live="polite">
-            <div class="modern-loading__spinner" aria-hidden="true"></div>
-            <div class="modern-loading__text">Loading task points <span class="modern-loading__dots" aria-hidden="true"><span></span><span></span><span></span></span></div>
+          <div class="tv2-points-loading" role="status" aria-live="polite">
+            <div class="tv2-points-loading__hero">
+              <div class="tv2-points-loading__ring" aria-hidden="true"></div>
+              <div class="tv2-points-loading__copy">
+                <div class="tv2-points-loading__title">Loading task points</div>
+                <div class="tv2-points-loading__sub">Syncing checkpoints and attachments</div>
+              </div>
+            </div>
+
+            <div class="tv2-points-loading__stack" aria-hidden="true">
+              <div class="tv2-points-skeleton-row">
+                <span class="tv2-points-skeleton-row__circle"></span>
+                <span class="tv2-points-skeleton-row__line tv2-points-skeleton-row__line--lg"></span>
+                <span class="tv2-points-skeleton-row__action"></span>
+                <span class="tv2-points-skeleton-row__action tv2-points-skeleton-row__action--light"></span>
+              </div>
+              <div class="tv2-points-skeleton-row">
+                <span class="tv2-points-skeleton-row__circle"></span>
+                <span class="tv2-points-skeleton-row__line"></span>
+                <span class="tv2-points-skeleton-row__action"></span>
+                <span class="tv2-points-skeleton-row__action tv2-points-skeleton-row__action--light"></span>
+              </div>
+              <div class="tv2-points-skeleton-row">
+                <span class="tv2-points-skeleton-row__circle"></span>
+                <span class="tv2-points-skeleton-row__line tv2-points-skeleton-row__line--md"></span>
+                <span class="tv2-points-skeleton-row__action"></span>
+                <span class="tv2-points-skeleton-row__action tv2-points-skeleton-row__action--light"></span>
+              </div>
+            </div>
           </div>
         `;
       }
@@ -1593,6 +1629,13 @@ const toolbarHTML = `
       const checked = list.reduce((acc, t) => acc + (t?.checked ? 1 : 0), 0);
       const pct = total ? Math.max(0, Math.min(100, Math.round((checked / total) * 100))) : 0;
       return { total, checked, pct };
+    }
+
+    function tv2SetPointsLoadingState(isLoading) {
+      const shell = tv2PointsOverlay?.querySelector?.(".tv2-points") || null;
+      if (shell) shell.classList.toggle("is-loading", !!isLoading);
+      if (tv2PointsBarEl) tv2PointsBarEl.classList.toggle("is-loading", !!isLoading);
+      if (tv2PointsBarFillEl) tv2PointsBarFillEl.classList.toggle("is-loading", !!isLoading);
     }
 
     function tv2PointFilesMenuHtml(files) {
@@ -1718,14 +1761,22 @@ const toolbarHTML = `
       if (!pointId) return;
       if (!tv2PointsTask || !Array.isArray(tv2PointsTask.todos)) return;
 
-      // Find item
       const item = tv2PointsTask.todos.find((t) => String(t?.id || "") === String(pointId));
       if (!item) return;
 
-      // Optimistic update
-      item.checked = !!checked;
-      if (rowEl) rowEl.classList.toggle("is-checked", !!checked);
-      tv2UpdatePointsStatsUI();
+      const prevChecked = !!item.checked;
+      const checkBtn = rowEl?.querySelector?.(".tv2-point-check") || null;
+      const prevDisabled = !!(checkBtn && checkBtn.disabled);
+
+      if (rowEl) {
+        rowEl.classList.add("is-checking");
+        rowEl.classList.remove("is-checked");
+      }
+      if (checkBtn) {
+        checkBtn.disabled = true;
+        checkBtn.classList.add("is-loading");
+        checkBtn.setAttribute("aria-busy", "true");
+      }
 
       try {
         const r = await fetch(`/api/task-points/${encodeURIComponent(pointId)}/check`, {
@@ -1740,8 +1791,11 @@ const toolbarHTML = `
         }
 
         const data = await r.json().catch(() => ({}));
+        item.checked = !!checked;
+        if (rowEl) rowEl.classList.toggle("is-checked", !!checked);
+        tv2UpdatePointsStatsUI();
+
         if (typeof data?.completionPct === "number" && Number.isFinite(data.completionPct)) {
-          // Align modal + cards with server-calculated completion
           const pct = Math.max(0, Math.min(100, Math.round(Number(data.completionPct))));
           if (tv2PointsTask) tv2PointsTask.completion = pct;
           const idx = state.tasks.findIndex((t) => t && t.id === tv2PointsTaskId);
@@ -1749,26 +1803,21 @@ const toolbarHTML = `
             state.tasks[idx].completion = pct;
             renderTasksList();
           }
-          // Update UI from the todos list (already updated) but ensure bar matches pct
           if (tv2PointsPctEl) tv2PointsPctEl.textContent = `${pct}%`;
           if (tv2PointsBarEl) tv2PointsBarEl.setAttribute("aria-valuenow", String(pct));
           if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = `${pct}%`;
         }
 
-        // Auto-update task status in the UI when the backend updates the Notion page.
-        // Server may return { taskStatus: { name, color } }.
         const nextStatusName = String(data?.taskStatus?.name || data?.statusName || data?.newStatusName || "").trim();
         const nextStatusColor = String(data?.taskStatus?.color || "").trim();
 
         if (nextStatusName) {
-          // Update the currently open task details (modal state)
           if (tv2PointsTask) {
             if (!tv2PointsTask.status) tv2PointsTask.status = { name: nextStatusName, color: nextStatusColor || "default" };
             tv2PointsTask.status.name = nextStatusName;
             if (nextStatusColor) tv2PointsTask.status.color = nextStatusColor;
           }
 
-          // Update the list card state
           const idx = state.tasks.findIndex((t) => t && t.id === tv2PointsTaskId);
           if (idx !== -1) {
             if (!state.tasks[idx].status) state.tasks[idx].status = { name: nextStatusName, color: nextStatusColor || "default" };
@@ -1776,16 +1825,21 @@ const toolbarHTML = `
             if (nextStatusColor) state.tasks[idx].status.color = nextStatusColor;
           }
 
-          // Re-render (task may move across status tabs)
           renderTasksList();
         }
       } catch (err) {
-        // Revert
-        item.checked = !checked;
-        if (rowEl) rowEl.classList.toggle("is-checked", !!item.checked);
+        item.checked = prevChecked;
+        if (rowEl) rowEl.classList.toggle("is-checked", prevChecked);
         tv2UpdatePointsStatsUI();
         console.error(err);
         if (window.toast) window.toast.error("Failed to update point");
+      } finally {
+        if (rowEl) rowEl.classList.remove("is-checking");
+        if (checkBtn) {
+          checkBtn.disabled = prevDisabled;
+          checkBtn.classList.remove("is-loading");
+          checkBtn.removeAttribute("aria-busy");
+        }
       }
     }
 
@@ -1874,6 +1928,7 @@ const toolbarHTML = `
     }
 
     function tv2RenderPointsModal(task, { canEdit } = {}) {
+      tv2SetPointsLoadingState(false);
       tv2PointsTask = task || null;
       if (tv2PointsTitleEl) tv2PointsTitleEl.textContent = task?.title || "Task";
 
@@ -2010,12 +2065,14 @@ const toolbarHTML = `
       if (!id) return;
       tv2EnsurePointsModal();
 
+      const taskSummary = state.tasks.find((t) => t && t.id === id) || null;
+
       // Highlight selection in list
       state.selectedTaskId = id;
       renderTasksList();
 
       tv2PointsTaskId = id;
-      tv2RenderPointsLoading();
+      tv2RenderPointsLoading(taskSummary?.title || "Task");
       tv2OpenPointsModal();
 
       try {
@@ -2035,6 +2092,11 @@ const toolbarHTML = `
         }
       } catch (e) {
         console.error(e);
+        tv2SetPointsLoadingState(false);
+        if (tv2PointsCountEl) tv2PointsCountEl.textContent = "Failed to load";
+        if (tv2PointsPctEl) tv2PointsPctEl.textContent = "";
+        if (tv2PointsBarEl) tv2PointsBarEl.setAttribute("aria-valuenow", "0");
+        if (tv2PointsBarFillEl) tv2PointsBarFillEl.style.width = "0%";
         if (tv2PointsListEl) tv2PointsListEl.innerHTML = `<div class="tv2-empty">Failed to load task points</div>`;
         if (window.toast) window.toast.error("Failed to load task points");
       }
