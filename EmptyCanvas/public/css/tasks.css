@@ -2319,3 +2319,184 @@ body.tasks-v2 .tv2-point-file-item:disabled{
     border-radius: 14px;
   }
 }
+
+
+/* =================================
+   Tasks V2 - Final polish overrides
+   ================================= */
+body.tasks-v2 .tasks-v2-hero{
+  background: #000 !important;
+  background-image: none !important;
+}
+
+body.tasks-v2 .tv2-week-jump{
+  display: none !important;
+}
+
+body.tasks-v2 .tv2-card--prio-high::before{
+  background: #ef4444;
+}
+
+body.tasks-v2 .tv2-card--prio-medium::before{
+  background: #16a34a;
+}
+
+body.tasks-v2 .tv2-card--prio-low::before{
+  background: #eab308;
+}
+
+body.tasks-v2 .tv2-card{
+  padding: 16px 16px 18px;
+}
+
+body.tasks-v2 .tv2-card__top{
+  align-items: center;
+  gap: 12px;
+}
+
+body.tasks-v2 .tv2-time{
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(17,24,39,0.58);
+}
+
+body.tasks-v2 .tv2-created-pill{
+  max-width: 62%;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #111827;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 14px 28px rgba(15,23,42,0.18);
+}
+
+body.tasks-v2 .tv2-created-pill svg{
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+body.tasks-v2 .tv2-created-pill span{
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+body.tasks-v2 .tv2-created-pill--empty{
+  visibility: hidden;
+}
+
+body.tasks-v2 .tv2-card__title{
+  margin-top: 10px;
+}
+
+body.tasks-v2 .tv2-progress-row{
+  margin-top: 14px;
+}
+
+body.tasks-v2 .tv2-card__sub,
+body.tasks-v2 .tv2-card__bottom,
+body.tasks-v2 .tv2-tags{
+  display: none !important;
+}
+
+body.tasks-v2 .tv2-point-row{
+  align-items: center;
+  gap: 12px;
+}
+
+body.tasks-v2 .tv2-point-check{
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  margin-top: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 0 0 1px rgba(17,24,39,0.08);
+}
+
+body.tasks-v2 .tv2-point-check::after{
+  width: 12px;
+  height: 7px;
+  border-left-width: 3px;
+  border-bottom-width: 3px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -58%) rotate(-45deg);
+}
+
+body.tasks-v2 .tv2-point-row.is-checked .tv2-point-check{
+  box-shadow: 0 10px 20px rgba(22,129,22,0.18);
+}
+
+body.tasks-v2 .tv2-point-actions{
+  align-self: center;
+}
+
+body.tasks-v2 .tv2-point-upload,
+body.tasks-v2 .tv2-point-files-btn{
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+
+body.tasks-v2 .tv2-point-upload svg,
+body.tasks-v2 .tv2-point-files-btn svg{
+  margin: 0;
+  display: block;
+}
+
+body.tasks-v2 .tv2-point-upload.is-loading{
+  color: transparent;
+  pointer-events: none;
+  position: relative;
+}
+
+body.tasks-v2 .tv2-point-upload.is-loading svg{
+  opacity: 0;
+}
+
+body.tasks-v2 .tv2-point-upload.is-loading::after{
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2.5px solid rgba(255,255,255,0.34);
+  border-top-color: #fff;
+  animation: tv2Spin .8s linear infinite;
+}
+
+@keyframes tv2Spin{
+  to{ transform: rotate(360deg); }
+}
+
+@media (max-width: 640px){
+  body.tasks-v2 .tv2-created-pill{
+    max-width: 60%;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  body.tasks-v2 .tv2-created-pill span{
+    font-size: 11px;
+  }
+
+  body.tasks-v2 .tv2-point-check{
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+  }
+}
