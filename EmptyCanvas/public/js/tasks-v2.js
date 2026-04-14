@@ -32,6 +32,10 @@
     return m ? `${m[1]}-${m[2]}-${m[3]}` : "";
   }
 
+  function getTodayIso() {
+    return isoDayFromAny(new Date());
+  }
+
   // Parse an ISO date or datetime string into a LOCAL Date using only YYYY-MM-DD
   // (Avoids timezone shifts when Notion returns date-only strings.)
   function parseIsoDayToLocalDate(iso) {
@@ -199,6 +203,12 @@ const STATUS_TABS = [
   { key: "done", label: "Done", notion: "Done" },
   { key: "canceled", label: "Canceled", notion: "Canceled" },
 ];
+
+const SORT_META = {
+  priority: { label: "By Priority Level", icon: "flag" },
+  delivery: { label: "By Delivery Date", icon: "calendar" },
+  created: { label: "By Created time", icon: "clock" },
+};
 
     let monthPickerYear = new Date().getFullYear();
 
@@ -781,16 +791,9 @@ function filterTasksByStatus(list) {
     }
 
     function pickInitialDayFromTasks(tasks) {
-      let stored = "";
-      try {
-        stored = String(localStorage.getItem(LS_DAY) || "");
-      } catch {}
-
       // UX request:
-      // Default marked day should be TODAY (not the first day that has a task).
-      // If the user previously selected a day, keep it.
-      const today = isoDayFromAny(new Date());
-      return stored || today;
+      // Always open the calendar on TODAY by default.
+      return getTodayIso();
     }
 
     function setSelectedDay(dayIso, opts) {
@@ -1017,17 +1020,21 @@ function filterTasksByStatus(list) {
       }
 
       const sortItems = [
-        { key: "priority", label: "By Priority Level" },
-        { key: "delivery", label: "By Delivery Date" },
-        { key: "created", label: "By Created time" },
+        { key: "priority", label: "By Priority Level", icon: "flag" },
+        { key: "delivery", label: "By Delivery Date", icon: "calendar" },
+        { key: "created", label: "By Created time", icon: "clock" },
       ];
+      const currentSortMeta = SORT_META[state.sortKey] || SORT_META.delivery;
 
       const sortMenuHTML = sortItems
         .map((it) => {
           const active = it.key === state.sortKey ? "is-active" : "";
           return `
             <button class="tasks-v2-dropdown-item ${active}" type="button" role="menuitem" data-sort="${escapeHtml(it.key)}">
-              <span>${escapeHtml(it.label)}</span>
+              <span class="tasks-v2-dropdown-item__main">
+                <i data-feather="${escapeHtml(it.icon)}"></i>
+                <span>${escapeHtml(it.label)}</span>
+              </span>
             </button>
           `;
         })
@@ -1060,7 +1067,7 @@ function filterTasksByStatus(list) {
                 aria-haspopup="menu"
                 aria-expanded="false"
               >
-                <i data-feather="arrow-up-down"></i>
+                <i data-feather="${escapeHtml(currentSortMeta.icon)}"></i>
                 <span class="tv2-sort-label">Sort</span>
               </button>
               <div class="tasks-v2-dropdown" id="tasksV2SortMenu" role="menu" aria-label="Sort tasks" hidden>
@@ -1114,10 +1121,7 @@ const toolbarHTML = `
 
       const cards = visible
         .map((t) => {
-          const topBits = [];
-          if (t?.status?.name) topBits.push(t.status.name);
-          if (t?.priority?.name) topBits.push(t.priority.name);
-          const top = topBits.join(" • ") || (t?.idText ? `ID: ${t.idText}` : "Task");
+          const top = t?.idText ? `ID: ${t.idText}` : "";
 
           const subBits = [];
           if (t?.createdBy) subBits.push(`Created by ${t.createdBy}`);
@@ -1149,7 +1153,7 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
             dueIso
           )}" aria-label="${escapeHtml(t.title || "Task")}">
               <div class="tv2-card__top">
-                <div class="tv2-time">${escapeHtml(top)}</div>
+                ${top ? `<div class="tv2-time">${escapeHtml(top)}</div>` : `<span class="tv2-time tv2-time--empty" aria-hidden="true"></span>`}
                 ${avatars}
               </div>
 
@@ -1206,6 +1210,17 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
     let tv2NewTaskFiles = null;
     let tv2NewTaskPriority = null;
     let tv2NewTaskFilesMeta = null;
+    let tv2NewTaskAssigneePicker = null;
+    let tv2NewTaskAssigneeTrigger = null;
+    let tv2NewTaskAssigneeTriggerLabel = null;
+    let tv2NewTaskAssigneeDropdown = null;
+    let tv2NewTaskAssigneeOptions = null;
+    let tv2NewTaskPriorityPicker = null;
+    let tv2NewTaskPriorityTrigger = null;
+    let tv2NewTaskPriorityTriggerLabel = null;
+    let tv2NewTaskPriorityDropdown = null;
+    let tv2NewTaskPriorityOptions = null;
+    let tv2NewTaskSelectDocBound = false;
     let tv2ChecklistList = null;
     let tv2AddCheckpointBtn = null;
     let tv2NewTaskCancelBtn = null;
@@ -1256,11 +1271,17 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
                 </div>
 
                 <div class="tv2-form-row">
-                  <label class="tv2-label" for="tv2TaskAssignee">Assignee To</label>
-                  <div class="tv2-field tv2-field--select">
-                    <span class="tv2-field__icon" aria-hidden="true"><i data-feather="user"></i></span>
-                    <select class="tv2-select" id="tv2TaskAssignee"></select>
-                    <span class="tv2-field__chevron" aria-hidden="true"><i data-feather="chevron-down"></i></span>
+                  <label class="tv2-label" for="tv2TaskAssigneeTrigger">Assignee To</label>
+                  <div class="tv2-order-select" id="tv2TaskAssigneePicker">
+                    <button class="tv2-order-select__trigger" type="button" id="tv2TaskAssigneeTrigger" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="tv2-order-select__trigger-icon" aria-hidden="true"><i data-feather="user"></i></span>
+                      <span class="tv2-order-select__trigger-label" id="tv2TaskAssigneeTriggerLabel">Auto (me)</span>
+                      <span class="tv2-order-select__trigger-caret" aria-hidden="true"><i data-feather="chevron-down"></i></span>
+                    </button>
+                    <div class="tv2-order-select__dropdown" id="tv2TaskAssigneeDropdown" role="listbox" aria-label="Assignee" hidden>
+                      <div class="tv2-order-select__options" id="tv2TaskAssigneeOptions"></div>
+                    </div>
+                    <select class="tv2-select tv2-select--hidden" id="tv2TaskAssignee"></select>
                   </div>
                 </div>
 
@@ -1282,16 +1303,22 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
                 </div>
 
                 <div class="tv2-form-row">
-                  <label class="tv2-label" for="tv2TaskPriority">Priority Level</label>
-                  <div class="tv2-field tv2-field--select">
-                    <span class="tv2-field__icon" aria-hidden="true"><i data-feather="flag"></i></span>
-                    <select class="tv2-select" id="tv2TaskPriority">
-                      <option value="">Select priority</option>
+                  <label class="tv2-label" for="tv2TaskPriorityTrigger">Priority Level</label>
+                  <div class="tv2-order-select" id="tv2TaskPriorityPicker">
+                    <button class="tv2-order-select__trigger" type="button" id="tv2TaskPriorityTrigger" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="tv2-order-select__trigger-icon" aria-hidden="true"><i data-feather="flag"></i></span>
+                      <span class="tv2-order-select__trigger-label" id="tv2TaskPriorityTriggerLabel">Select priority</span>
+                      <span class="tv2-order-select__trigger-caret" aria-hidden="true"><i data-feather="chevron-down"></i></span>
+                    </button>
+                    <div class="tv2-order-select__dropdown" id="tv2TaskPriorityDropdown" role="listbox" aria-label="Priority" hidden>
+                      <div class="tv2-order-select__options" id="tv2TaskPriorityOptions"></div>
+                    </div>
+                    <select class="tv2-select tv2-select--hidden" id="tv2TaskPriority">
+                      <option value="" data-tv2-placeholder="1">Select priority</option>
                       <option value="High">High</option>
                       <option value="Medium">Medium</option>
                       <option value="Low">Low</option>
                     </select>
-                    <span class="tv2-field__chevron" aria-hidden="true"><i data-feather="chevron-down"></i></span>
                   </div>
                 </div>
 
@@ -1337,6 +1364,16 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       tv2NewTaskFiles = tv2NewTaskOverlay.querySelector("#tv2TaskFiles");
       tv2NewTaskPriority = tv2NewTaskOverlay.querySelector("#tv2TaskPriority");
       tv2NewTaskFilesMeta = tv2NewTaskOverlay.querySelector("#tv2TaskFilesMeta");
+      tv2NewTaskAssigneePicker = tv2NewTaskOverlay.querySelector("#tv2TaskAssigneePicker");
+      tv2NewTaskAssigneeTrigger = tv2NewTaskOverlay.querySelector("#tv2TaskAssigneeTrigger");
+      tv2NewTaskAssigneeTriggerLabel = tv2NewTaskOverlay.querySelector("#tv2TaskAssigneeTriggerLabel");
+      tv2NewTaskAssigneeDropdown = tv2NewTaskOverlay.querySelector("#tv2TaskAssigneeDropdown");
+      tv2NewTaskAssigneeOptions = tv2NewTaskOverlay.querySelector("#tv2TaskAssigneeOptions");
+      tv2NewTaskPriorityPicker = tv2NewTaskOverlay.querySelector("#tv2TaskPriorityPicker");
+      tv2NewTaskPriorityTrigger = tv2NewTaskOverlay.querySelector("#tv2TaskPriorityTrigger");
+      tv2NewTaskPriorityTriggerLabel = tv2NewTaskOverlay.querySelector("#tv2TaskPriorityTriggerLabel");
+      tv2NewTaskPriorityDropdown = tv2NewTaskOverlay.querySelector("#tv2TaskPriorityDropdown");
+      tv2NewTaskPriorityOptions = tv2NewTaskOverlay.querySelector("#tv2TaskPriorityOptions");
       tv2ChecklistList = tv2NewTaskOverlay.querySelector("#tv2ChecklistList");
       tv2AddCheckpointBtn = tv2NewTaskOverlay.querySelector("#tv2AddCheckpointBtn");
       tv2NewTaskCancelBtn = tv2NewTaskOverlay.querySelector("#tv2NewTaskCancelBtn");
@@ -1388,6 +1425,8 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
         });
       }
 
+      tv2WireNewTaskSelects();
+
       if (window.feather) window.feather.replace();
     }
 
@@ -1412,7 +1451,7 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
 
       // Reset fields
       if (tv2NewTaskSubject) tv2NewTaskSubject.value = "";
-      if (tv2NewTaskDueDate) tv2NewTaskDueDate.value = state.selectedDay || "";
+      if (tv2NewTaskDueDate) tv2NewTaskDueDate.value = getTodayIso();
       if (tv2NewTaskFiles) tv2NewTaskFiles.value = "";
       if (tv2NewTaskPriority) {
         tv2NewTaskPriority.value = "Medium";
@@ -1420,6 +1459,8 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       tv2RenderFileSelectionMeta();
 
       tv2RenderAssigneeOptions();
+      tv2SyncNewTaskSelect("priority");
+      tv2CloseAllNewTaskSelects();
 
       tv2ResetChecklist();
       tv2AddChecklistRow("");
@@ -1442,6 +1483,7 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
 
     function tv2CloseNewTaskModal() {
       if (!tv2NewTaskOverlay) return;
+      tv2CloseAllNewTaskSelects();
       tv2NewTaskOverlay.hidden = true;
       tv2NewTaskOverlay.style.display = "none";
       document.body.classList.remove("tv2-modal-open");
@@ -1573,11 +1615,71 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
           const name = escapeHtml(f.name || "file");
           const url = String(f.url || "");
           if (url) {
-            return `<a class="tv2-point-file-item" role="menuitem" href="${escapeHtml(url)}" target="_blank" rel="noopener">${name}</a>`;
+            return `
+              <button
+                class="tv2-point-file-item"
+                type="button"
+                role="menuitem"
+                data-file-url="${escapeHtml(url)}"
+                data-file-name="${name}"
+              >
+                <span class="tv2-point-file-item__main">
+                  <span class="tv2-point-file-item__icon" aria-hidden="true"><i data-feather="download"></i></span>
+                  <span class="tv2-point-file-item__name">${name}</span>
+                </span>
+              </button>
+            `;
           }
-          return `<span class="tv2-point-file-item is-disabled" role="menuitem">${name}</span>`;
+          return `
+            <button class="tv2-point-file-item is-disabled" type="button" role="menuitem" disabled>
+              <span class="tv2-point-file-item__main">
+                <span class="tv2-point-file-item__icon" aria-hidden="true"><i data-feather="file"></i></span>
+                <span class="tv2-point-file-item__name">${name}</span>
+              </span>
+            </button>
+          `;
         })
         .join("");
+    }
+
+    async function tv2DownloadFile(url, fileName) {
+      const href = String(url || "").trim();
+      if (!href) return;
+
+      const safeName = String(fileName || "attachment").trim() || "attachment";
+      const fallback = () => {
+        try {
+          const link = document.createElement("a");
+          link.href = href;
+          link.download = safeName;
+          link.target = "_blank";
+          link.rel = "noopener";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        } catch {}
+      };
+
+      try {
+        const r = await fetch(href, { mode: "cors" });
+        if (!r.ok) throw new Error("DOWNLOAD_FAILED");
+        const blob = await r.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = safeName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => {
+          try {
+            URL.revokeObjectURL(objectUrl);
+          } catch {}
+        }, 1200);
+      } catch (err) {
+        console.warn("Task point file download fallback:", err);
+        fallback();
+      }
     }
 
     function tv2CloseAllPointFilesMenus() {
@@ -1720,13 +1822,6 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
 
         // Update badge count (best-effort)
         const count = Number(data?.filesCount);
-        if (uploadBtnEl) {
-          const badge = uploadBtnEl.querySelector(".tv2-point-badge");
-          if (Number.isFinite(count) && count > 0) {
-            if (badge) badge.textContent = String(count);
-            else uploadBtnEl.insertAdjacentHTML("beforeend", `<span class="tv2-point-badge">${escapeHtml(String(count))}</span>`);
-          }
-        }
 
         // Update in-memory list + dropdown menu so the user can view attachments immediately.
         const files = Array.isArray(data?.files) ? data.files : null;
@@ -1742,12 +1837,20 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
             const menu = row.querySelector(".tv2-point-files-menu");
             if (filesBtn) {
               filesBtn.disabled = !(Array.isArray(files) && files.length);
+              const badge = filesBtn.querySelector(".tv2-point-badge");
+              if (Number.isFinite(count) && count > 0) {
+                if (badge) badge.textContent = String(count);
+                else filesBtn.insertAdjacentHTML("beforeend", `<span class="tv2-point-badge">${escapeHtml(String(count))}</span>`);
+              } else if (badge) {
+                badge.remove();
+              }
             }
             if (menu) {
               menu.innerHTML = tv2PointFilesMenuHtml(files);
               menu.hidden = true;
               if (filesBtn) filesBtn.setAttribute("aria-expanded", "false");
             }
+            if (window.feather) window.feather.replace();
           }
         }
       } catch (e) {
@@ -1797,15 +1900,14 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
               <button class="tv2-point-check" type="button" aria-label="Mark complete" ${disabledAttr}></button>
               <div class="tv2-point-text">${escapeHtml(t.text)}</div>
               <div class="tv2-point-actions">
-                <button class="tv2-point-upload" type="button" aria-label="Upload attachment" ${disabledAttr}>
-                  <i data-feather="paperclip"></i>
-                  <span class="tv2-point-upload__label">Upload</span>
-                  ${badge}
+                <button class="tv2-point-upload" type="button" aria-label="Upload files and media" title="Upload files and media" ${disabledAttr}>
+                  <i data-feather="plus"></i>
                 </button>
 
                 <div class="tv2-point-files-wrap">
-                  <button class="tv2-point-files-btn" type="button" aria-label="View attachments" aria-haspopup="menu" aria-expanded="false" ${filesBtnDisabled}>
-                    <i data-feather="chevron-down"></i>
+                  <button class="tv2-point-files-btn" type="button" aria-label="View uploaded files" title="View uploaded files" aria-haspopup="menu" aria-expanded="false" ${filesBtnDisabled}>
+                    <i data-feather="paperclip"></i>
+                    ${badge}
                   </button>
                   <div class="tv2-point-files-menu" role="menu" hidden>
                     ${menuHtml}
@@ -1876,8 +1978,17 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
             }
           });
 
-          // Keep clicks inside the menu from bubbling to the overlay (optional UX)
-          filesMenu.addEventListener("click", (e) => {
+          // Keep clicks inside the menu from bubbling to the overlay and download files on tap.
+          filesMenu.addEventListener("click", async (e) => {
+            const fileBtn = e.target?.closest ? e.target.closest("[data-file-url]") : null;
+            if (fileBtn) {
+              e.preventDefault();
+              e.stopPropagation();
+              const fileUrl = String(fileBtn.getAttribute("data-file-url") || "");
+              const fileName = String(fileBtn.getAttribute("data-file-name") || "attachment");
+              await tv2DownloadFile(fileUrl, fileName);
+              return;
+            }
             e.stopPropagation();
           });
         }
@@ -1917,6 +2028,198 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
         console.error(e);
         if (tv2PointsListEl) tv2PointsListEl.innerHTML = `<div class="tv2-empty">Failed to load task points</div>`;
         if (window.toast) window.toast.error("Failed to load task points");
+      }
+    }
+
+    function tv2GetNewTaskSelectConfig(kind) {
+      if (kind === "assignee") {
+        return {
+          kind,
+          picker: tv2NewTaskAssigneePicker,
+          trigger: tv2NewTaskAssigneeTrigger,
+          triggerLabel: tv2NewTaskAssigneeTriggerLabel,
+          dropdown: tv2NewTaskAssigneeDropdown,
+          optionsEl: tv2NewTaskAssigneeOptions,
+          select: tv2NewTaskAssignee,
+          fallbackLabel: "Auto (me)",
+        };
+      }
+
+      if (kind === "priority") {
+        return {
+          kind,
+          picker: tv2NewTaskPriorityPicker,
+          trigger: tv2NewTaskPriorityTrigger,
+          triggerLabel: tv2NewTaskPriorityTriggerLabel,
+          dropdown: tv2NewTaskPriorityDropdown,
+          optionsEl: tv2NewTaskPriorityOptions,
+          select: tv2NewTaskPriority,
+          fallbackLabel: "Select priority",
+        };
+      }
+
+      return null;
+    }
+
+    function tv2AllNewTaskSelectKinds() {
+      return ["assignee", "priority"];
+    }
+
+    function tv2CloseNewTaskSelect(kind) {
+      const meta = tv2GetNewTaskSelectConfig(kind);
+      if (!meta?.dropdown || !meta.trigger) return;
+      meta.dropdown.hidden = true;
+      meta.trigger.classList.remove("is-open");
+      meta.trigger.setAttribute("aria-expanded", "false");
+      if (meta.picker) meta.picker.classList.remove("is-dropup");
+    }
+
+    function tv2CloseAllNewTaskSelects(exceptKind) {
+      tv2AllNewTaskSelectKinds().forEach((kind) => {
+        if (kind === exceptKind) return;
+        tv2CloseNewTaskSelect(kind);
+      });
+    }
+
+    function tv2PositionNewTaskSelect(kind) {
+      const meta = tv2GetNewTaskSelectConfig(kind);
+      if (!meta?.picker || !meta.trigger || !meta.dropdown) return;
+
+      const rect = meta.trigger.getBoundingClientRect();
+      const viewportPad = 16;
+      const dropdownHeight = Math.min(320, Math.max(180, meta.dropdown.scrollHeight || 0));
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPad;
+      const spaceAbove = rect.top - viewportPad;
+      const openUp = spaceBelow < Math.min(220, dropdownHeight) && spaceAbove > spaceBelow;
+
+      meta.picker.classList.toggle("is-dropup", openUp);
+    }
+
+    function tv2RenderNewTaskSelectOptions(kind) {
+      const meta = tv2GetNewTaskSelectConfig(kind);
+      if (!meta?.optionsEl || !meta.select) return;
+
+      const options = Array.from(meta.select.options || []);
+      meta.optionsEl.innerHTML = options
+        .map((opt, index) => {
+          const selected = !!opt.selected;
+          const placeholder = String(opt.dataset?.tv2Placeholder || "") === "1";
+          return `
+            <button
+              class="tv2-order-select__option${selected ? " is-selected" : ""}${placeholder ? " is-placeholder-option" : ""}"
+              type="button"
+              role="option"
+              aria-selected="${selected ? "true" : "false"}"
+              data-select-index="${index}"
+            >
+              <span class="tv2-order-select__option-main">
+                <span class="tv2-order-select__option-label">${escapeHtml(opt.textContent || "")}</span>
+              </span>
+              <span class="tv2-order-select__option-check">${selected ? `<i data-feather="check"></i>` : ""}</span>
+            </button>
+          `;
+        })
+        .join("");
+
+      if (window.feather) window.feather.replace();
+    }
+
+    function tv2SyncNewTaskSelect(kind) {
+      const meta = tv2GetNewTaskSelectConfig(kind);
+      if (!meta?.select || !meta.triggerLabel || !meta.trigger) return;
+
+      const selectedIndex = Number(meta.select.selectedIndex);
+      const selectedOpt = selectedIndex >= 0 ? meta.select.options[selectedIndex] : null;
+      const label = String(selectedOpt?.textContent || meta.fallbackLabel || "").trim() || meta.fallbackLabel || "";
+      const isPlaceholder = !selectedOpt || String(selectedOpt.dataset?.tv2Placeholder || "") === "1";
+
+      meta.triggerLabel.textContent = label;
+      meta.trigger.classList.toggle("is-placeholder", isPlaceholder);
+      meta.trigger.classList.toggle("is-selected", !isPlaceholder);
+
+      tv2RenderNewTaskSelectOptions(kind);
+    }
+
+    function tv2OpenNewTaskSelect(kind) {
+      const meta = tv2GetNewTaskSelectConfig(kind);
+      if (!meta?.dropdown || !meta.trigger) return;
+
+      tv2SyncNewTaskSelect(kind);
+      tv2CloseAllNewTaskSelects(kind);
+
+      meta.dropdown.hidden = false;
+      meta.trigger.classList.add("is-open");
+      meta.trigger.setAttribute("aria-expanded", "true");
+      tv2PositionNewTaskSelect(kind);
+      window.requestAnimationFrame(() => tv2PositionNewTaskSelect(kind));
+    }
+
+    function tv2ToggleNewTaskSelect(kind) {
+      const meta = tv2GetNewTaskSelectConfig(kind);
+      if (!meta?.dropdown) return;
+      if (meta.dropdown.hidden) tv2OpenNewTaskSelect(kind);
+      else tv2CloseNewTaskSelect(kind);
+    }
+
+    function tv2WireNewTaskSelect(kind) {
+      const meta = tv2GetNewTaskSelectConfig(kind);
+      if (!meta?.trigger || !meta.dropdown || !meta.optionsEl || !meta.select) return;
+      if (meta.trigger.dataset.tv2Bound === "1") return;
+      meta.trigger.dataset.tv2Bound = "1";
+
+      meta.trigger.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        tv2ToggleNewTaskSelect(kind);
+      });
+
+      meta.optionsEl.addEventListener("click", (e) => {
+        const btn = e.target?.closest ? e.target.closest("[data-select-index]") : null;
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const index = Number(btn.getAttribute("data-select-index"));
+        if (!Number.isFinite(index) || index < 0 || index >= meta.select.options.length) return;
+
+        meta.select.selectedIndex = index;
+        meta.select.dispatchEvent(new Event("change", { bubbles: true }));
+        tv2CloseNewTaskSelect(kind);
+      });
+
+      meta.dropdown.addEventListener("click", (e) => {
+        e.stopPropagation();
+      });
+
+      meta.select.addEventListener("change", () => {
+        tv2SyncNewTaskSelect(kind);
+      });
+    }
+
+    function tv2WireNewTaskSelects() {
+      tv2WireNewTaskSelect("assignee");
+      tv2WireNewTaskSelect("priority");
+
+      if (!tv2NewTaskSelectDocBound) {
+        tv2NewTaskSelectDocBound = true;
+
+        document.addEventListener("click", (e) => {
+          if (!tv2NewTaskOverlay || tv2NewTaskOverlay.hidden) return;
+          const target = e.target;
+          const insideAnyPicker = tv2AllNewTaskSelectKinds().some((kind) => {
+            const meta = tv2GetNewTaskSelectConfig(kind);
+            return !!(meta?.picker && target && meta.picker.contains(target));
+          });
+          if (!insideAnyPicker) tv2CloseAllNewTaskSelects();
+        });
+
+        window.addEventListener("resize", () => {
+          if (!tv2NewTaskOverlay || tv2NewTaskOverlay.hidden) return;
+          tv2AllNewTaskSelectKinds().forEach((kind) => {
+            const meta = tv2GetNewTaskSelectConfig(kind);
+            if (meta?.dropdown && meta.dropdown.hidden === false) tv2PositionNewTaskSelect(kind);
+          });
+        });
       }
     }
 
@@ -1966,6 +2269,8 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       } else {
         tv2NewTaskAssignee.value = "";
       }
+
+      tv2SyncNewTaskSelect("assignee");
     }
 
     function tv2ResetChecklist() {
@@ -2070,9 +2375,9 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       }
 
       const payload = { title };
-      // If user didn't pick a date, default to selected day (calendar UX)
+      // If user didn't pick a date, default to today.
       if (deliveryDate) payload.deliveryDate = deliveryDate;
-      else if (state.selectedDay) payload.deliveryDate = state.selectedDay;
+      else payload.deliveryDate = getTodayIso();
 
       if (assigneeId) payload.assigneeId = assigneeId;
       if (priority) payload.priority = priority;
