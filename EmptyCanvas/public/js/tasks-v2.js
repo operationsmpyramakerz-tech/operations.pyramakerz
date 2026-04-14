@@ -319,8 +319,15 @@ const SORT_META = {
     // Small arrow (orange) that appears when there are tasks outside the current week.
     // Clicking it jumps to the nearest day that has a task outside the displayed week.
     let tv2WeekJumpBtn = null;
-
+    const TV2_ENABLE_WEEK_JUMP = false;
     function tv2EnsureWeekJumpBtn() {
+      if (!TV2_ENABLE_WEEK_JUMP) {
+        if (tv2WeekJumpBtn) {
+          tv2WeekJumpBtn.hidden = true;
+          tv2WeekJumpBtn.style.display = "none";
+        }
+        return;
+      }
       if (tv2WeekJumpBtn) return;
       if (!daysEl) return;
       const cal = daysEl.parentElement; // .tasks-v2-calendar
@@ -632,8 +639,8 @@ function filterTasksByStatus(list) {
       if (!filterMenuEl) return;
 
       const items = [
-        { key: "mine", label: "My tasks" },
-        { key: "delegated", label: "Delegated tasks" },
+        { key: "mine", label: "My tasks", icon: "user" },
+        { key: "delegated", label: "Delegated tasks", icon: "users" },
       ];
 
       const activeKey = state.mode === "delegated" ? "delegated" : "mine";
@@ -643,7 +650,10 @@ function filterTasksByStatus(list) {
           const active = it.key === activeKey ? "is-active" : "";
           return `
             <button class="tasks-v2-dropdown-item ${active}" type="button" role="menuitem" data-filter="${escapeHtml(it.key)}">
-              <span>${escapeHtml(it.label)}</span>
+              <span class="tasks-v2-dropdown-item__main">
+                <i data-feather="${escapeHtml(it.icon || "user")}"></i>
+                <span>${escapeHtml(it.label)}</span>
+              </span>
             </button>
           `;
         })
@@ -876,39 +886,43 @@ function filterTasksByStatus(list) {
       const dueSet = new Set(
         tasksForCalendar.map((t) => isoDayFromAny(t?.dueDate)).filter(Boolean)
       );
+      // Optional week jump button is disabled in the current mobile layout.
+      if (TV2_ENABLE_WEEK_JUMP) {
+        tv2EnsureWeekJumpBtn();
+        if (tv2WeekJumpBtn) {
+          const dueDaysSorted = Array.from(dueSet).sort();
+          const weekStartIso = isoDayFromAny(weekStart);
+          const weekEndIso = isoDayFromAny(addDays(weekStart, 6));
 
-      // If there are tasks outside the currently displayed week, show a small jump arrow.
-      // - Prefer jumping forward (next week that contains tasks).
-      // - If there are only past tasks, jump backward.
-      tv2EnsureWeekJumpBtn();
-      if (tv2WeekJumpBtn) {
-        const dueDaysSorted = Array.from(dueSet).sort();
-        const weekStartIso = isoDayFromAny(weekStart);
-        const weekEndIso = isoDayFromAny(addDays(weekStart, 6));
+          let nextOutside = "";
+          let prevOutside = "";
+          for (const d of dueDaysSorted) {
+            if (d < weekStartIso) prevOutside = d;
+            if (!nextOutside && d > weekEndIso) nextOutside = d;
+          }
 
-        let nextOutside = "";
-        let prevOutside = "";
-        for (const d of dueDaysSorted) {
-          if (d < weekStartIso) prevOutside = d; // keep the closest previous
-          if (!nextOutside && d > weekEndIso) nextOutside = d;
+          const target = nextOutside || prevOutside;
+          const dir = nextOutside ? "next" : prevOutside ? "prev" : "";
+
+          if (target && dir) {
+            tv2WeekJumpBtn.hidden = false;
+            tv2WeekJumpBtn.style.display = "inline-flex";
+            tv2WeekJumpBtn.setAttribute("data-target-day", target);
+            tv2WeekJumpBtn.setAttribute("data-week-dir", dir);
+            tv2WeekJumpBtn.setAttribute("aria-label", dir === "prev" ? "Jump to previous tasks" : "Jump to next tasks");
+            tv2WeekJumpBtn.innerHTML = dir === "prev" ? `<i data-feather="chevron-left"></i>` : `<i data-feather="chevron-right"></i>`;
+          } else {
+            tv2WeekJumpBtn.hidden = true;
+            tv2WeekJumpBtn.style.display = "none";
+            tv2WeekJumpBtn.removeAttribute("data-target-day");
+            tv2WeekJumpBtn.removeAttribute("data-week-dir");
+          }
         }
-
-        const target = nextOutside || prevOutside;
-        const dir = nextOutside ? "next" : prevOutside ? "prev" : "";
-
-        if (target && dir) {
-          tv2WeekJumpBtn.hidden = false;
-          tv2WeekJumpBtn.style.display = "inline-flex";
-          tv2WeekJumpBtn.setAttribute("data-target-day", target);
-          tv2WeekJumpBtn.setAttribute("data-week-dir", dir);
-          tv2WeekJumpBtn.setAttribute("aria-label", dir === "prev" ? "Jump to previous tasks" : "Jump to next tasks");
-          tv2WeekJumpBtn.innerHTML = dir === "prev" ? `<i data-feather="chevron-left"></i>` : `<i data-feather="chevron-right"></i>`;
-        } else {
-          tv2WeekJumpBtn.hidden = true;
-          tv2WeekJumpBtn.style.display = "none";
-          tv2WeekJumpBtn.removeAttribute("data-target-day");
-          tv2WeekJumpBtn.removeAttribute("data-week-dir");
-        }
+      } else if (tv2WeekJumpBtn) {
+        tv2WeekJumpBtn.hidden = true;
+        tv2WeekJumpBtn.style.display = "none";
+        tv2WeekJumpBtn.removeAttribute("data-target-day");
+        tv2WeekJumpBtn.removeAttribute("data-week-dir");
       }
 
       const btns = [];
@@ -1122,43 +1136,41 @@ const toolbarHTML = `
       const cards = visible
         .map((t) => {
           const top = t?.idText ? `ID: ${t.idText}` : "";
-
-          const subBits = [];
-          if (t?.createdBy) subBits.push(`Created by ${t.createdBy}`);
-          const sub = subBits.join(" • ") || "";
+          const creatorName = String(t?.createdBy || "").trim();
 
           const completionNum = Number(t?.completion);
           const pct = Number.isFinite(completionNum) ? Math.min(100, Math.max(0, Math.round(completionNum))) : 0;
           const dueIso = isoDayFromAny(t?.dueDate);
           const dueLabel = formatDueLabel(dueIso);
 
-          const tags = [];
-          if (t?.priority?.name) tags.push(`<span class="tv2-tag">${escapeHtml(t.priority.name)}</span>`);
-          if (t?.status?.name) tags.push(`<span class="tv2-tag">${escapeHtml(t.status.name)}</span>`);
+          const creatorPill = creatorName
+            ? `
+                <div class="tv2-created-pill" aria-label="Created by ${escapeHtml(creatorName)}">
+                  <i data-feather="user"></i>
+                  <span>${escapeHtml(creatorName)}</span>
+                </div>
+              `
+            : `<span class="tv2-created-pill tv2-created-pill--empty" aria-hidden="true"></span>`;
 
-          const avatars = renderAvatars(t?.assignees || [], { center: false, max: 3 });
-
-
-const prioName = String(t?.priority?.name || "");
-const prioNorm = prioName.trim().toLowerCase();
-let prioClass = "";
-if (prioNorm.includes("high")) prioClass = " tv2-card--prio-high";
-else if (prioNorm.includes("medium")) prioClass = " tv2-card--prio-medium";
-else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
+          const prioName = String(t?.priority?.name || "");
+          const prioNorm = prioName.trim().toLowerCase();
+          let prioClass = "";
+          if (prioNorm.includes("high")) prioClass = " tv2-card--prio-high";
+          else if (prioNorm.includes("medium")) prioClass = " tv2-card--prio-medium";
+          else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
 
           const selected = t.id === state.selectedTaskId ? " is-selected" : "";
 
           return `
             <article class="tv2-card${prioClass}${selected}" data-task-id="${escapeHtml(t.id)}" data-due-day="${escapeHtml(
-            dueIso
-          )}" aria-label="${escapeHtml(t.title || "Task")}">
+              dueIso
+            )}" aria-label="${escapeHtml(t.title || "Task")}">
               <div class="tv2-card__top">
                 ${top ? `<div class="tv2-time">${escapeHtml(top)}</div>` : `<span class="tv2-time tv2-time--empty" aria-hidden="true"></span>`}
-                ${avatars}
+                ${creatorPill}
               </div>
 
               <div class="tv2-card__title">${escapeHtml(t.title || "Untitled")}</div>
-              <div class="tv2-card__sub">${escapeHtml(sub)}</div>
 
               <div class="tv2-progress-row" aria-label="Progress">
                 <div class="tv2-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
@@ -1166,10 +1178,6 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
                   <div class="tv2-progress__pct">${pct}%</div>
                 </div>
                 <div class="tv2-progress__due">${escapeHtml(dueLabel)}</div>
-              </div>
-
-              <div class="tv2-card__bottom">
-                <div class="tv2-tags" aria-hidden="true">${tags.join("")}</div>
               </div>
             </article>
           `;
@@ -1319,13 +1327,6 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
                       <option value="Medium">Medium</option>
                       <option value="Low">Low</option>
                     </select>
-                  </div>
-                </div>
-
-                <div class="tv2-form-row">
-                  <div class="tv2-form-hint-card">
-                    <div class="tv2-form-hint-card__title">Task setup</div>
-                    <div class="tv2-form-hint-card__text">Add the owner, due date, files, and checkpoints so the task is clear and easy to follow.</div>
                   </div>
                 </div>
 
@@ -1804,7 +1805,11 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       if (!attachments.length) return;
 
       const prevDisabled = !!(uploadBtnEl && uploadBtnEl.disabled);
-      if (uploadBtnEl) uploadBtnEl.disabled = true;
+      if (uploadBtnEl) {
+        uploadBtnEl.disabled = true;
+        uploadBtnEl.classList.add("is-loading");
+        uploadBtnEl.setAttribute("aria-busy", "true");
+      }
 
       try {
         const r = await fetch(`/api/task-points/${encodeURIComponent(pointId)}/attachments`, {
@@ -1857,7 +1862,11 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
         console.error(e);
         if (window.toast) window.toast.error("Failed to upload attachment");
       } finally {
-        if (uploadBtnEl) uploadBtnEl.disabled = prevDisabled;
+        if (uploadBtnEl) {
+          uploadBtnEl.disabled = prevDisabled;
+          uploadBtnEl.classList.remove("is-loading");
+          uploadBtnEl.removeAttribute("aria-busy");
+        }
         try {
           fileInputEl.value = "";
         } catch {}
