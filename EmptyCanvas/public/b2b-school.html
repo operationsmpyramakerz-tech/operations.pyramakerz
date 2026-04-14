@@ -265,6 +265,7 @@
       color: #111827;
     }
   </style>
+  <link href="/css/b2b-school.css" rel="stylesheet"/>
 </head>
 <body class="permissions-loading">
 <script>
@@ -328,22 +329,30 @@
 
     <main class="container-full-width">
       <div class="b2b-school-layout">
-        <div class="b2b-school-top">
-          <a href="/b2b" class="btn btn--light" style="display:inline-flex; align-items:center; gap:8px;">
+        <div class="b2b-school-top card card--elevated">
+          <a href="/b2b" class="btn btn--light back-link-btn">
             <i data-feather="arrow-left"></i>
             <span>Back to schools</span>
           </a>
 
           <div class="b2b-school-title">
+            <span class="section-kicker">B2B school workspace</span>
             <h1 id="schoolName">School</h1>
-            <p>School details &amp; stocktaking</p>
+            <p>School details, stocktaking, exports, and inventory actions in one organized workspace.</p>
+            <div id="schoolMetaChips" class="school-meta-chips" aria-live="polite"></div>
           </div>
         </div>
 
         <div class="b2b-two-cols">
           <!-- Details -->
-          <section class="card">
-            <h2 style="margin:0; font-size:1.05rem; font-weight:800;">School Details</h2>
+          <section class="card card--elevated school-details-card">
+            <div class="section-heading">
+              <div>
+                <span class="section-kicker">Reference</span>
+                <h2>School Details</h2>
+                <p>Core information synced from Notion for this school profile.</p>
+              </div>
+            </div>
             <div id="schoolDetails" class="details-list">
               <div class="modern-loading" role="status" aria-live="polite">
                 <div class="modern-loading__spinner" aria-hidden="true"></div>
@@ -356,31 +365,42 @@
           </section>
 
           <!-- Stocktaking -->
-          <section class="card">
-            <div class="card-toolbar">
-              <button class="btn btn--light" id="downloadPdfBtn">
-                <i data-feather="download"></i>
-                <span>Download PDF</span>
-              </button>
+          <section class="card card--elevated stocktaking-card">
+            <div class="stock-panel-head">
+              <div class="section-heading stock-heading">
+                <div>
+                  <span class="section-kicker">Live stock</span>
+                  <h2>Stocktaking</h2>
+                  <p>Search components, export reports, and manage inventory from the same panel.</p>
+                </div>
+                <div id="stockSummary" class="stock-summary-pills" aria-live="polite"></div>
+              </div>
 
-              <button class="btn btn--light" id="downloadExcelBtn" style="margin-left:10px;">
-                <i data-feather="download"></i>
-                <span>Download Excel</span>
-              </button>
+              <div class="stock-panel-actions">
+                <div class="card-toolbar">
+                  <button class="btn btn--light" id="downloadPdfBtn">
+                    <i data-feather="download"></i>
+                    <span>Download PDF</span>
+                  </button>
 
-              <button class="btn btn--light" id="makeInventoryBtn" style="margin-left:10px;">
-                <i data-feather="plus-square"></i>
-                <span>Make inventory</span>
-              </button>
-            </div>
+                  <button class="btn btn--light" id="downloadExcelBtn">
+                    <i data-feather="download"></i>
+                    <span>Download Excel</span>
+                  </button>
 
-            <div class="stock-head">
-              <h2 style="margin:0; font-size:1.05rem; font-weight:800;">Stocktaking</h2>
-              <div class="stock-search" role="search">
-                <i data-feather="search"></i>
-                <input id="schoolStockSearch" type="search" placeholder="Search components or tags..." aria-label="Search stocktaking" />
+                  <button class="btn btn--light" id="makeInventoryBtn">
+                    <i data-feather="plus-square"></i>
+                    <span>Make inventory</span>
+                  </button>
+                </div>
+
+                <div class="stock-search" role="search">
+                  <i data-feather="search"></i>
+                  <input id="schoolStockSearch" type="search" placeholder="Search components or tags..." aria-label="Search stocktaking" />
+                </div>
               </div>
             </div>
+
             <div class="groups-grid" id="school-stock-groups">
               <div class="modern-loading" role="status" aria-live="polite">
                 <div class="modern-loading__spinner" aria-hidden="true"></div>
