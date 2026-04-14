@@ -1035,41 +1035,45 @@ function filterTasksByStatus(list) {
 
       const actionsHTML = `
         <div class="tv2-actionsbar" aria-label="List actions">
-          <div class="tv2-view-wrap">
-            <button
-              class="tv2-view-btn"
-              type="button"
-              id="tasksV2FilterBtn"
-              aria-label="View"
-              aria-haspopup="menu"
-              aria-expanded="false"
-            >
-              <i data-feather="sliders"></i>
-              <span class="tv2-view-label">View</span>
-            </button>
-            <div class="tasks-v2-dropdown" id="tasksV2FilterMenu" role="menu" aria-label="Tasks view" hidden></div>
+          <div class="tv2-actionsbar__group tv2-actionsbar__group--start">
+            <div class="tv2-view-wrap">
+              <button
+                class="tv2-view-btn"
+                type="button"
+                id="tasksV2FilterBtn"
+                aria-label="View"
+                aria-haspopup="menu"
+                aria-expanded="false"
+              >
+                <i data-feather="sliders"></i>
+                <span class="tv2-view-label">View</span>
+              </button>
+              <div class="tasks-v2-dropdown" id="tasksV2FilterMenu" role="menu" aria-label="Tasks view" hidden></div>
+            </div>
+
+            <div class="tv2-sort-wrap">
+              <button
+                class="tv2-sort-btn"
+                type="button"
+                id="tasksV2SortBtn"
+                aria-label="Sort"
+                aria-haspopup="menu"
+                aria-expanded="false"
+              >
+                <i data-feather="arrow-up-down"></i>
+                <span class="tv2-sort-label">Sort</span>
+              </button>
+              <div class="tasks-v2-dropdown" id="tasksV2SortMenu" role="menu" aria-label="Sort tasks" hidden>
+                ${sortMenuHTML}
+              </div>
+            </div>
           </div>
 
-          <button class="tv2-newtask-btn" type="button" id="tasksV2NewTaskBtn" aria-label="New task">
-            <span class="tv2-newtask-plus">+</span>
-            <span>New task</span>
-          </button>
-
-          <div class="tv2-sort-wrap">
-            <button
-              class="tv2-sort-btn"
-              type="button"
-              id="tasksV2SortBtn"
-              aria-label="Sort"
-              aria-haspopup="menu"
-              aria-expanded="false"
-            >
-              <i data-feather="arrow-up-down"></i>
-              <span class="tv2-sort-label">Sort</span>
+          <div class="tv2-actionsbar__group tv2-actionsbar__group--end">
+            <button class="tv2-newtask-btn" type="button" id="tasksV2NewTaskBtn" aria-label="New task">
+              <i data-feather="plus"></i>
+              <span>New task</span>
             </button>
-            <div class="tasks-v2-dropdown" id="tasksV2SortMenu" role="menu" aria-label="Sort tasks" hidden>
-              ${sortMenuHTML}
-            </div>
           </div>
         </div>
       `;
@@ -1201,6 +1205,7 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
     let tv2NewTaskDueDate = null;
     let tv2NewTaskFiles = null;
     let tv2NewTaskPriority = null;
+    let tv2NewTaskFilesMeta = null;
     let tv2ChecklistList = null;
     let tv2AddCheckpointBtn = null;
     let tv2NewTaskCancelBtn = null;
@@ -1241,43 +1246,77 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
 
           <form class="tv2-modal-form" id="tv2NewTaskForm">
             <div class="tv2-modal-body">
-              <div class="tv2-form-row">
-                <label class="tv2-label" for="tv2TaskSubject">Subject</label>
-                <input class="tv2-input" type="text" id="tv2TaskSubject" placeholder="Write task subject" required />
-              </div>
-
-              <div class="tv2-form-row">
-                <label class="tv2-label" for="tv2TaskAssignee">Assignee To</label>
-                <select class="tv2-select" id="tv2TaskAssignee"></select>
-              </div>
-
-              <div class="tv2-form-row">
-                <label class="tv2-label" for="tv2TaskDeliveryDate">Delivery Date</label>
-                <input class="tv2-input" type="date" id="tv2TaskDeliveryDate" />
-              </div>
-
-              <div class="tv2-form-row">
-                <label class="tv2-label" for="tv2TaskFiles">Files &amp; media</label>
-                <input class="tv2-input" type="file" id="tv2TaskFiles" multiple />
-                <div class="tv2-help">You can select more than one file.</div>
-              </div>
-
-              <div class="tv2-form-row">
-                <label class="tv2-label" for="tv2TaskPriority">Priority Level</label>
-                <select class="tv2-select" id="tv2TaskPriority">
-                  <option value="">Select priority</option>
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
-                </select>
-              </div>
-
-              <div class="tv2-form-row">
-                <div class="tv2-label-row">
-                  <label class="tv2-label">Task checklist</label>
-                  <button class="tv2-link-btn" type="button" id="tv2AddCheckpointBtn">+ Add checkpoint</button>
+              <div class="tv2-form-grid">
+                <div class="tv2-form-row tv2-form-row--full">
+                  <label class="tv2-label" for="tv2TaskSubject">Subject</label>
+                  <div class="tv2-field tv2-field--text">
+                    <span class="tv2-field__icon" aria-hidden="true"><i data-feather="edit-3"></i></span>
+                    <input class="tv2-input" type="text" id="tv2TaskSubject" placeholder="Write task subject" required />
+                  </div>
                 </div>
-                <div class="tv2-checklist" id="tv2ChecklistList"></div>
+
+                <div class="tv2-form-row">
+                  <label class="tv2-label" for="tv2TaskAssignee">Assignee To</label>
+                  <div class="tv2-field tv2-field--select">
+                    <span class="tv2-field__icon" aria-hidden="true"><i data-feather="user"></i></span>
+                    <select class="tv2-select" id="tv2TaskAssignee"></select>
+                    <span class="tv2-field__chevron" aria-hidden="true"><i data-feather="chevron-down"></i></span>
+                  </div>
+                </div>
+
+                <div class="tv2-form-row">
+                  <label class="tv2-label" for="tv2TaskDeliveryDate">Delivery Date</label>
+                  <div class="tv2-field tv2-field--date">
+                    <span class="tv2-field__icon" aria-hidden="true"><i data-feather="calendar"></i></span>
+                    <input class="tv2-input tv2-input--date" type="date" id="tv2TaskDeliveryDate" />
+                  </div>
+                </div>
+
+                <div class="tv2-form-row tv2-form-row--full">
+                  <label class="tv2-label" for="tv2TaskFiles">Files &amp; media</label>
+                  <div class="tv2-file-wrap">
+                    <input class="tv2-file-input" type="file" id="tv2TaskFiles" multiple />
+                    <div class="tv2-file-meta" id="tv2TaskFilesMeta">No files selected yet</div>
+                    <div class="tv2-help">You can select more than one file.</div>
+                  </div>
+                </div>
+
+                <div class="tv2-form-row">
+                  <label class="tv2-label" for="tv2TaskPriority">Priority Level</label>
+                  <div class="tv2-field tv2-field--select">
+                    <span class="tv2-field__icon" aria-hidden="true"><i data-feather="flag"></i></span>
+                    <select class="tv2-select" id="tv2TaskPriority">
+                      <option value="">Select priority</option>
+                      <option value="High">High</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Low">Low</option>
+                    </select>
+                    <span class="tv2-field__chevron" aria-hidden="true"><i data-feather="chevron-down"></i></span>
+                  </div>
+                </div>
+
+                <div class="tv2-form-row">
+                  <div class="tv2-form-hint-card">
+                    <div class="tv2-form-hint-card__title">Task setup</div>
+                    <div class="tv2-form-hint-card__text">Add the owner, due date, files, and checkpoints so the task is clear and easy to follow.</div>
+                  </div>
+                </div>
+
+                <div class="tv2-form-row tv2-form-row--full">
+                  <div class="tv2-checklist-panel">
+                    <div class="tv2-label-row">
+                      <div>
+                        <label class="tv2-label">Task checklist</label>
+                        <div class="tv2-help tv2-help--tight">Break the task into clear checkpoints.</div>
+                      </div>
+                      <button class="tv2-link-btn" type="button" id="tv2AddCheckpointBtn">
+                        <i data-feather="plus"></i>
+                        <span>Add checkpoint</span>
+                      </button>
+                    </div>
+                    <div class="tv2-checklist" id="tv2ChecklistList"></div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1297,6 +1336,7 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       tv2NewTaskDueDate = tv2NewTaskOverlay.querySelector("#tv2TaskDeliveryDate");
       tv2NewTaskFiles = tv2NewTaskOverlay.querySelector("#tv2TaskFiles");
       tv2NewTaskPriority = tv2NewTaskOverlay.querySelector("#tv2TaskPriority");
+      tv2NewTaskFilesMeta = tv2NewTaskOverlay.querySelector("#tv2TaskFilesMeta");
       tv2ChecklistList = tv2NewTaskOverlay.querySelector("#tv2ChecklistList");
       tv2AddCheckpointBtn = tv2NewTaskOverlay.querySelector("#tv2AddCheckpointBtn");
       tv2NewTaskCancelBtn = tv2NewTaskOverlay.querySelector("#tv2NewTaskCancelBtn");
@@ -1319,6 +1359,12 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
         tv2NewTaskCancelBtn.addEventListener("click", (e) => {
           e.preventDefault();
           tv2CloseNewTaskModal();
+        });
+      }
+
+      if (tv2NewTaskFiles) {
+        tv2NewTaskFiles.addEventListener("change", () => {
+          tv2RenderFileSelectionMeta();
         });
       }
 
@@ -1345,6 +1391,22 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       if (window.feather) window.feather.replace();
     }
 
+    function tv2RenderFileSelectionMeta() {
+      if (!tv2NewTaskFilesMeta) return;
+      const files = Array.from(tv2NewTaskFiles?.files || []);
+      if (!files.length) {
+        tv2NewTaskFilesMeta.textContent = "No files selected yet";
+        tv2NewTaskFilesMeta.classList.remove("has-files");
+        return;
+      }
+      if (files.length === 1) {
+        tv2NewTaskFilesMeta.textContent = String(files[0]?.name || "1 file selected");
+      } else {
+        tv2NewTaskFilesMeta.textContent = `${files.length} files selected`;
+      }
+      tv2NewTaskFilesMeta.classList.add("has-files");
+    }
+
     function tv2OpenNewTaskModal() {
       if (!tv2NewTaskOverlay) return;
 
@@ -1352,9 +1414,10 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       if (tv2NewTaskSubject) tv2NewTaskSubject.value = "";
       if (tv2NewTaskDueDate) tv2NewTaskDueDate.value = state.selectedDay || "";
       if (tv2NewTaskFiles) tv2NewTaskFiles.value = "";
-      if (tv2NewTaskPriority && !tv2NewTaskPriority.value) {
+      if (tv2NewTaskPriority) {
         tv2NewTaskPriority.value = "Medium";
       }
+      tv2RenderFileSelectionMeta();
 
       tv2RenderAssigneeOptions();
 
@@ -1923,7 +1986,7 @@ else if (prioNorm.includes("low")) prioClass = " tv2-card--prio-low";
       const input = document.createElement("input");
       input.type = "text";
       input.className = "tv2-check-input";
-      input.placeholder = "Checkpoint details";
+      input.placeholder = "Add a checkpoint for this task";
       input.value = String(initialValue || "");
       row.appendChild(input);
 
