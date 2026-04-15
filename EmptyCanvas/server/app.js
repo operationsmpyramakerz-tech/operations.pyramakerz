@@ -3348,6 +3348,18 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
       })
       .filter((x) => x && x.text);
 
+    const invalidChecklistItem = normalizedChecklist.find((item) => {
+      if (!String(item?.text || "").trim()) return true;
+      if (!String(item?.assigneeId || item?.assigneeName || "").trim()) return true;
+      if (!String(item?.dueDate || "").trim()) return true;
+      if (!String(item?.priority || "").trim()) return true;
+      return false;
+    });
+
+    if (invalidChecklistItem) {
+      return res.status(400).json({ error: "Each checkpoint requires assignee, delivery date, and priority." });
+    }
+
     const hasStructuredPoints = normalizedChecklist.some(
       (x) => x.assigneeId || x.dueDate || x.priority || (Array.isArray(x.attachments) && x.attachments.length)
     );
