@@ -2444,34 +2444,87 @@ const TASK_POINTS_TABLE = Object.freeze({
   title: "Task Point",
   checkbox: "Checkbox",
   files: "Files & media",
+  assignee: "Assignee To",
+  deliveryDate: "Delivery Date",
+  priority: "Priority Level",
 });
+
+const TASK_POINTS_PRIORITY_OPTIONS = Object.freeze([
+  { name: "High", color: "red" },
+  { name: "Medium", color: "green" },
+  { name: "Low", color: "yellow" },
+]);
 
 async function createTaskPointsInlineDatabase({ parentPageId, taskTitle }) {
   const safeTitle = String(taskTitle || "Task").trim() || "Task";
   const pageId = String(parentPageId || "").trim();
   if (!pageId) throw new Error("Missing parentPageId");
 
-  const basePayload = {
-    parent: { type: "page_id", page_id: pageId },
-    title: [{ type: "text", text: { content: safeTitle } }],
-    properties: {
+  const buildProperties = (useRelationAssignee = !!teamMembersDatabaseId) => {
+    const props = {
       [TASK_POINTS_TABLE.title]: { title: {} },
       [TASK_POINTS_TABLE.checkbox]: { checkbox: {} },
       [TASK_POINTS_TABLE.files]: { files: {} },
-    },
+      [TASK_POINTS_TABLE.deliveryDate]: { date: {} },
+      [TASK_POINTS_TABLE.priority]: {
+        select: {
+          options: TASK_POINTS_PRIORITY_OPTIONS.map((o) => ({ name: o.name, color: o.color })),
+        },
+      },
+    };
+
+    if (useRelationAssignee && teamMembersDatabaseId) {
+      props[TASK_POINTS_TABLE.assignee] = {
+        relation: {
+          database_id: teamMembersDatabaseId,
+          type: "single_property",
+          single_property: {},
+        },
+      };
+    } else {
+      props[TASK_POINTS_TABLE.assignee] = { rich_text: {} };
+    }
+
+    return props;
   };
 
-  // Notion supports `is_inline` on create database in newer API versions.
-  // If it's not supported in the current workspace/version, retry without it.
-  try {
-    return await notion.databases.create({ ...basePayload, is_inline: true });
-  } catch (e) {
-    const msg = JSON.stringify(e?.body || e || "");
-    if (msg && msg.toLowerCase().includes("is_inline")) {
-      return await notion.databases.create(basePayload);
-    }
-    throw e;
+  const attempts = [
+    { useRelationAssignee: !!teamMembersDatabaseId, isInline: true },
+    { useRelationAssignee: !!teamMembersDatabaseId, isInline: false },
+  ];
+
+  if (teamMembersDatabaseId) {
+    attempts.push({ useRelationAssignee: false, isInline: true });
+    attempts.push({ useRelationAssignee: false, isInline: false });
   }
+
+  let lastErr = null;
+
+  for (const attempt of attempts) {
+    try {
+      const payload = {
+        parent: { type: "page_id", page_id: pageId },
+        title: [{ type: "text", text: { content: safeTitle } }],
+        properties: buildProperties(attempt.useRelationAssignee),
+      };
+
+      if (attempt.isInline) {
+        return await notion.databases.create({ ...payload, is_inline: true });
+      }
+      return await notion.databases.create(payload);
+    } catch (e) {
+      lastErr = e;
+      const msg = JSON.stringify(e?.body || e || "").toLowerCase();
+      const inlineIssue = msg.includes("is_inline");
+      const relationIssue = msg.includes("relation") || msg.includes("database_id") || msg.includes("single_property") || msg.includes("permission");
+
+      if (attempt.isInline && inlineIssue) continue;
+      if (attempt.useRelationAssignee && relationIssue) continue;
+      if (attempt.isInline) continue;
+    }
+  }
+
+  throw lastErr || new Error("Failed to create task points database");
 }
 
 function _findDatabasePropNameByType(dbProps, type) {
@@ -2502,6 +2555,18 @@ async function queryTaskPointsFromDatabase(databaseId) {
       props?.[TASK_POINTS_TABLE.files]?.type === "files"
         ? TASK_POINTS_TABLE.files
         : _findDatabasePropNameByType(props, "files");
+    const assigneeProp =
+      props?.[TASK_POINTS_TABLE.assignee]?.type === "relation" || props?.[TASK_POINTS_TABLE.assignee]?.type === "rich_text"
+        ? TASK_POINTS_TABLE.assignee
+        : _findDatabasePropNameByType(props, "relation") || _findDatabasePropNameByType(props, "rich_text");
+    const dateProp =
+      props?.[TASK_POINTS_TABLE.deliveryDate]?.type === "date"
+        ? TASK_POINTS_TABLE.deliveryDate
+        : _findDatabasePropNameByType(props, "date");
+    const priorityProp =
+      props?.[TASK_POINTS_TABLE.priority]?.type === "select" || props?.[TASK_POINTS_TABLE.priority]?.type === "status" || props?.[TASK_POINTS_TABLE.priority]?.type === "multi_select"
+        ? TASK_POINTS_TABLE.priority
+        : _findDatabasePropNameByType(props, "select") || _findDatabasePropNameByType(props, "status") || _findDatabasePropNameByType(props, "multi_select");
 
     if (!titleProp) return null;
 
@@ -2523,17 +2588,54 @@ async function queryTaskPointsFromDatabase(databaseId) {
       if (!hasMore) break;
     }
 
+    const relationIds = [];
+    if (assigneeProp) {
+      for (const p of rows) {
+        const rel = p?.properties?.[assigneeProp];
+        if (!rel || rel.type !== "relation") continue;
+        for (const item of rel.relation || []) {
+          if (item?.id) relationIds.push(item.id);
+        }
+      }
+    }
+
+    const uniqueRelationIds = Array.from(new Set(relationIds.filter(Boolean)));
+    const nameMap = uniqueRelationIds.length ? await mapWithConcurrency(uniqueRelationIds, 4, getTeamMemberNameCached) : new Map();
+
     const todos = rows
       .map((p) => {
         const pp = p?.properties || {};
         const text = _titleTextFromProp(pp?.[titleProp]) || "";
         const checked = checkboxProp ? _checkboxFromProp(pp?.[checkboxProp]) : null;
         const files = filesProp ? _filesFromProp(pp?.[filesProp]) : [];
+        const dueDate = dateProp ? _dateStartFromProp(pp?.[dateProp]) : null;
+        const priority = priorityProp ? _selectFromProp(pp?.[priorityProp]) : null;
+
+        let assigneeIds = [];
+        let assigneeNames = [];
+        if (assigneeProp && pp?.[assigneeProp]) {
+          if (pp[assigneeProp].type === "relation") {
+            assigneeIds = (pp[assigneeProp].relation || []).map((x) => x?.id).filter(Boolean);
+            assigneeNames = assigneeIds.map((id) => nameMap.get(id) || "").filter(Boolean);
+          } else if (pp[assigneeProp].type === "rich_text") {
+            const txt = _firstTextFromProp(pp[assigneeProp]) || "";
+            if (String(txt).trim()) assigneeNames = [String(txt).trim()];
+          }
+        }
+
         return {
           id: p.id,
           text,
           checked: checked === null ? false : !!checked,
           files,
+          assigneeIds,
+          assigneeId: assigneeIds[0] || "",
+          assigneeNames,
+          assigneeName: assigneeNames[0] || "",
+          dueDate,
+          priority,
+          createdTime: p.created_time,
+          lastEditedTime: p.last_edited_time,
         };
       })
       .filter((t) => String(t.text || "").trim());
@@ -2555,6 +2657,192 @@ function _completionPercentFromTodos(todos) {
   if (!total) return 0;
   const checked = todos.reduce((acc, t) => acc + (t && t.checked ? 1 : 0), 0);
   return Math.max(0, Math.min(100, Math.round((checked / total) * 100)));
+}
+
+
+function _uniqueStrings(list) {
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(list) ? list : []) {
+    const val = String(item || "").trim();
+    const key = val.toLowerCase();
+    if (!val || seen.has(key)) continue;
+    seen.add(key);
+    out.push(val);
+  }
+  return out;
+}
+
+function _todoHasAssignee(todo) {
+  if (!todo || typeof todo !== "object") return false;
+  const ids = Array.isArray(todo.assigneeIds) ? todo.assigneeIds.filter(Boolean) : [];
+  const names = Array.isArray(todo.assigneeNames) ? todo.assigneeNames.filter(Boolean) : [];
+  if (ids.length || names.length) return true;
+  if (String(todo.assigneeId || "").trim()) return true;
+  if (String(todo.assigneeName || "").trim()) return true;
+  return false;
+}
+
+function _todosUseAssignee(todos) {
+  return (Array.isArray(todos) ? todos : []).some((t) => _todoHasAssignee(t));
+}
+
+function _filterTodosForUser(todos, userId, userName = "") {
+  const uid = normalizeNotionId(userId);
+  const uname = String(userName || "").trim().toLowerCase();
+  const list = Array.isArray(todos) ? todos : [];
+  if (!uid && !uname) return list;
+  if (!_todosUseAssignee(list)) return list;
+
+  return list.filter((t) => {
+    const ids = Array.isArray(t?.assigneeIds) ? t.assigneeIds.filter(Boolean) : [];
+    if (String(t?.assigneeId || "").trim()) ids.push(String(t.assigneeId).trim());
+    const names = Array.isArray(t?.assigneeNames) ? t.assigneeNames.filter(Boolean) : [];
+    if (String(t?.assigneeName || "").trim()) names.push(String(t.assigneeName).trim());
+    if (uid && ids.some((id) => normalizeNotionId(id) === uid)) return true;
+    if (uname && names.some((name) => String(name || "").trim().toLowerCase() === uname)) return true;
+    return false;
+  });
+}
+
+function _normalizePriorityName(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+function _priorityRankFromName(name) {
+  const n = _normalizePriorityName(name);
+  if (n.includes("high")) return 3;
+  if (n.includes("medium")) return 2;
+  if (n.includes("low")) return 1;
+  return 0;
+}
+
+function _pickPriorityFromTodos(todos, fallbackPriority = null) {
+  const list = Array.isArray(todos) ? todos : [];
+  let best = null;
+  let bestRank = 0;
+  for (const t of list) {
+    const p = t?.priority || null;
+    const rank = _priorityRankFromName(p?.name || "");
+    if (rank > bestRank) {
+      bestRank = rank;
+      best = p;
+    }
+  }
+  return best || fallbackPriority || null;
+}
+
+function _pickEarliestDueDateFromTodos(todos, fallbackDueDate = null) {
+  const list = (Array.isArray(todos) ? todos : [])
+    .map((t) => _dateStartFromProp({ type: "date", date: t?.dueDate ? { start: t.dueDate } : null }) || String(t?.dueDate || "").trim())
+    .filter(Boolean)
+    .sort();
+  return list[0] || fallbackDueDate || null;
+}
+
+function _deriveStatusFromPct(pct, fallbackStatus = null) {
+  const n = Number(pct);
+  if (!Number.isFinite(n)) return fallbackStatus || null;
+  if (n >= 100) return { name: "Done", color: "green" };
+  if (n > 0) return { name: "In progress", color: "yellow" };
+  return { name: "Not started", color: "default" };
+}
+
+function _collectAssigneeNamesFromTodos(todos) {
+  const names = [];
+  for (const t of Array.isArray(todos) ? todos : []) {
+    if (Array.isArray(t?.assigneeNames) && t.assigneeNames.length) names.push(...t.assigneeNames);
+    else if (String(t?.assigneeName || "").trim()) names.push(String(t.assigneeName).trim());
+  }
+  return _uniqueStrings(names);
+}
+
+async function getTaskPointsBundleCached(pageId, taskTitle) {
+  const pid = String(pageId || "").trim();
+  if (!pid) return { legacyTodos: [], tableTodos: null, todos: [] };
+
+  const key = `cache:tasks:pointsbundle:${pid}:v1`;
+  return await cacheGetOrSet(key, 15, async () => {
+    const legacyTodos = [];
+    const childDatabases = [];
+    let cursor = undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+      const resp = await notion.blocks.children.list({
+        block_id: pid,
+        page_size: 100,
+        start_cursor: cursor,
+      });
+
+      for (const b of resp.results || []) {
+        if (b.type === "to_do") {
+          const rt = b.to_do?.rich_text || [];
+          const txt = Array.isArray(rt) ? rt.map((t) => t.plain_text).join("") : "";
+          legacyTodos.push({ text: txt, checked: !!b.to_do?.checked });
+        }
+
+        if (b.type === "child_database") {
+          childDatabases.push({
+            id: b.id,
+            title: b.child_database?.title || "",
+          });
+        }
+      }
+
+      hasMore = !!resp.has_more;
+      cursor = resp.next_cursor || undefined;
+      if (!hasMore) break;
+    }
+
+    let tableTodos = null;
+    let pointDbId = "";
+    if (childDatabases.length) {
+      const norm = (s) => String(s || "").trim().toLowerCase();
+      const want = norm(taskTitle);
+      const exact = childDatabases.find((d) => norm(d.title) === want);
+      const ordered = exact ? [exact, ...childDatabases.filter((d) => d !== exact)] : childDatabases;
+
+      for (const d of ordered) {
+        const t = await queryTaskPointsFromDatabase(d.id);
+        if (Array.isArray(t) && t.length) {
+          tableTodos = t;
+          pointDbId = d.id;
+          break;
+        }
+        if (Array.isArray(t) && tableTodos === null) {
+          tableTodos = t;
+          pointDbId = d.id;
+        }
+      }
+    }
+
+    let todos = legacyTodos;
+    if (Array.isArray(tableTodos)) {
+      if (tableTodos.length) todos = tableTodos;
+      else if (!legacyTodos.length) todos = tableTodos;
+    }
+
+    return {
+      legacyTodos,
+      tableTodos,
+      todos,
+      pointDbId,
+      childDatabases,
+      hasInlineDb: childDatabases.length > 0,
+    };
+  });
+}
+
+async function invalidateTaskPointsCaches(taskPageId) {
+  const pid = String(taskPageId || "").trim();
+  if (!pid) return;
+  try {
+    await cacheDel(`cache:tasks:completion:${pid}:v2`);
+  } catch {}
+  try {
+    await cacheDel(`cache:tasks:pointsbundle:${pid}:v1`);
+  } catch {}
 }
 
 // Lightweight Task Points DB stats (avoids an extra databases.retrieve call).
@@ -2769,70 +3057,24 @@ app.get("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
   try {
     const schema = await getTasksSchemaCached();
     const userId = await getSessionUserNotionId(req);
+    const viewerName = String(req.session?.username || "").trim();
     const scope = String(req.query.scope || "mine").trim().toLowerCase();
     const rawAssignee = String(req.query.assignee || req.query.assigneeId || req.query.userId || "").trim();
-    const assigneeId = looksLikeNotionId(rawAssignee) ? toHyphenatedUUID(rawAssignee) : null;
+    const assigneeId = looksLikeNotionId(rawAssignee) ? toHyphenatedUUID(rawAssignee) : "";
 
-    // Filter rules:
-    // - scope=mine       => tasks where Assignee To contains current user
-    // - scope=delegated  => tasks where Created By contains current user
-    // - scope=all        => tasks where Assignee To contains any user in SAME Department as current user (legacy)
-    // - assignee=ID      => tasks where Assignee To contains that user (must be in same Department) (legacy)
     let filter = undefined;
-
-    const def = schema.assigneeProp ? schema.props?.[schema.assigneeProp] : null;
-    const canFilterByAssignee = !!(schema.assigneeProp && def && def.type === "relation");
-
     const defCreatedBy = schema.createdByProp ? schema.props?.[schema.createdByProp] : null;
     const canFilterByCreatedBy = !!(schema.createdByProp && defCreatedBy && defCreatedBy.type === "relation");
 
-    // Build same-department member IDs (only if we need them)
-    let deptMemberIds = [];
-    if (canFilterByAssignee && (scope === "all" || !!assigneeId)) {
-      const dept = await getSessionUserDepartment(req);
-      if (dept) {
-        const members = await getTeamMembersByDepartmentCached(dept);
-        deptMemberIds = (members || []).map((m) => m?.id).filter(Boolean);
-      }
-    }
-
-    if (scope === "delegated") {
-      if (canFilterByCreatedBy && userId) {
-        filter = { property: schema.createdByProp, relation: { contains: userId } };
-      } else if (canFilterByAssignee && userId) {
-        // Fallback: if "Created By" relation is missing, at least show mine
-        filter = { property: schema.assigneeProp, relation: { contains: userId } };
-      }
-    } else if (canFilterByAssignee && assigneeId) {
-      // Security: only allow selecting users from the same department
-      if (deptMemberIds.length) {
-        const allowed = new Set(deptMemberIds.map((x) => normalizeNotionId(x)));
-        if (!allowed.has(normalizeNotionId(assigneeId))) {
-          return res.status(403).json({ error: "Assignee is not in the same department." });
-        }
-      }
-      filter = { property: schema.assigneeProp, relation: { contains: assigneeId } };
-    } else if (canFilterByAssignee && scope === "all") {
-      // All Tasks = same department
-      if (deptMemberIds.length) {
-        // Notion filter: OR across department members
-        filter = {
-          or: deptMemberIds.map((id) => ({ property: schema.assigneeProp, relation: { contains: id } })),
-        };
-      } else if (userId) {
-        // Fallback: if dept is unknown, at least show mine
-        filter = { property: schema.assigneeProp, relation: { contains: userId } };
-      }
-    } else if (canFilterByAssignee && userId) {
-      // Default = mine
-      filter = { property: schema.assigneeProp, relation: { contains: userId } };
+    if (scope === "delegated" && canFilterByCreatedBy && userId) {
+      filter = { property: schema.createdByProp, relation: { contains: userId } };
     }
 
     const sorts = [];
     if (schema.deliveryDateProp) sorts.push({ property: schema.deliveryDateProp, direction: "ascending" });
     sorts.push({ timestamp: "created_time", direction: "descending" });
 
-    const all = [];
+    const pages = [];
     let hasMore = true;
     let cursor = undefined;
 
@@ -2845,77 +3087,122 @@ app.get("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
         sorts,
       });
 
-      for (const p of r.results || []) {
-        const props = p.properties || {};
-        const title = _titleTextFromProp(props?.[schema.titleProp]) || "Untitled";
-
-        const priority = schema.priorityProp ? _selectFromProp(props?.[schema.priorityProp]) : null;
-        const status = schema.statusProp ? _selectFromProp(props?.[schema.statusProp]) : null;
-
-        const dueDate = schema.deliveryDateProp ? _dateStartFromProp(props?.[schema.deliveryDateProp]) : null;
-        const completion = schema.completionProp ? _parseNumberProp(props?.[schema.completionProp]) : null;
-
-        const idText = schema.idProp ? _formatUniqueId(props?.[schema.idProp]) : "";
-
-        // Relations → names (best-effort)
-        let createdBy = "";
-        if (schema.createdByProp && props?.[schema.createdByProp]?.type === "relation") {
-          const rid = props[schema.createdByProp].relation?.[0]?.id;
-          if (rid) createdBy = await getTeamMemberNameCached(rid);
-        }
-
-        let assignees = [];
-        if (schema.assigneeProp && props?.[schema.assigneeProp]?.type === "relation") {
-          const ids = (props[schema.assigneeProp].relation || []).map((x) => x?.id).filter(Boolean);
-          if (ids.length) {
-            const map = await mapWithConcurrency(ids, 4, getTeamMemberNameCached);
-            assignees = ids.map((id) => map.get(id) || "").filter(Boolean);
-          }
-        }
-
-        all.push({
-          id: p.id,
-          url: p.url,
-          title,
-          idText,
-          priority,
-          status,
-          dueDate,
-          completion,
-          createdTime: p.created_time,
-          lastEditedTime: p.last_edited_time,
-          createdBy,
-          assignees,
-        });
-      }
-
+      for (const p of r.results || []) pages.push(p);
       hasMore = !!r.has_more;
       cursor = r.next_cursor || undefined;
       if (!hasMore) break;
     }
 
-    // Completion % should reflect checked items inside the task page table (or legacy checklist).
-    // We compute it server-side so the UI can render cards without extra per-task HTTP calls.
-    try {
-      const titleById = new Map(all.map((t) => [t.id, t.title]));
-      const ids = all.map((t) => t.id).filter(Boolean);
-      // Keep concurrency conservative to reduce the chance of hitting Notion rate limits.
-      const pctMap = await mapWithConcurrency(ids, 3, async (pid) => {
-        const title = titleById.get(pid) || "";
-        return await getTaskCompletionPercentCached(pid, title);
-      });
+    const enrichedMap = await mapWithConcurrency(pages, 3, async (page) => {
+      const props = page.properties || {};
+      const title = _titleTextFromProp(props?.[schema.titleProp]) || "Untitled";
+      const outerPriority = schema.priorityProp ? _selectFromProp(props?.[schema.priorityProp]) : null;
+      const outerStatus = schema.statusProp ? _selectFromProp(props?.[schema.statusProp]) : null;
+      const outerDueDate = schema.deliveryDateProp ? _dateStartFromProp(props?.[schema.deliveryDateProp]) : null;
+      const outerCompletion = schema.completionProp ? _parseNumberProp(props?.[schema.completionProp]) : null;
+      const idText = schema.idProp ? _formatUniqueId(props?.[schema.idProp]) : "";
 
-      for (const t of all) {
-        const pct = pctMap.get(t.id);
-        if (typeof pct === "number" && Number.isFinite(pct)) {
-          t.completion = pct;
+      let createdById = "";
+      let createdBy = "";
+      if (schema.createdByProp && props?.[schema.createdByProp]?.type === "relation") {
+        createdById = props[schema.createdByProp].relation?.[0]?.id || "";
+        if (createdById) createdBy = await getTeamMemberNameCached(createdById);
+      }
+
+      let outerAssigneeIds = [];
+      let assignees = [];
+      if (schema.assigneeProp && props?.[schema.assigneeProp]?.type === "relation") {
+        outerAssigneeIds = (props[schema.assigneeProp].relation || []).map((x) => x?.id).filter(Boolean);
+        if (outerAssigneeIds.length) {
+          const map = await mapWithConcurrency(outerAssigneeIds, 4, getTeamMemberNameCached);
+          assignees = outerAssigneeIds.map((id) => map.get(id) || "").filter(Boolean);
         }
       }
-    } catch (e) {
-      console.warn("[tasks] completion percent enrichment failed:", e?.message || e);
-    }
 
-    return res.json({ tasks: all });
+      const bundle = await getTaskPointsBundleCached(page.id, title);
+      const allPoints = Array.isArray(bundle?.todos) ? bundle.todos : [];
+      const pointsUseAssignee = _todosUseAssignee(allPoints);
+      const targetUserId = assigneeId || userId;
+      let visiblePoints = allPoints;
+      if (scope === "mine" || assigneeId) {
+        visiblePoints = _filterTodosForUser(allPoints, targetUserId, viewerName);
+      }
+
+      let include = true;
+      if (scope === "mine") {
+        if (allPoints.length) {
+          if (pointsUseAssignee) {
+            include = visiblePoints.length > 0;
+          } else if (outerAssigneeIds.length) {
+            include = outerAssigneeIds.some((id) => normalizeNotionId(id) === normalizeNotionId(targetUserId));
+          } else {
+            include = normalizeNotionId(createdById) === normalizeNotionId(targetUserId);
+          }
+        } else if (outerAssigneeIds.length) {
+          include = outerAssigneeIds.some((id) => normalizeNotionId(id) === normalizeNotionId(targetUserId));
+        } else if (createdById && targetUserId) {
+          include = normalizeNotionId(createdById) === normalizeNotionId(targetUserId);
+        }
+      } else if (assigneeId) {
+        include = visiblePoints.length > 0;
+      }
+
+      let cardPoints = [];
+      if (scope === "mine" || assigneeId) cardPoints = visiblePoints;
+      else if (scope === "delegated") cardPoints = allPoints;
+
+      let priority = outerPriority;
+      let status = outerStatus;
+      let dueDate = outerDueDate;
+      let completion = outerCompletion;
+      let cardAssignees = assignees;
+
+      if (cardPoints.length) {
+        const pct = _completionPercentFromTodos(cardPoints);
+        if (typeof pct === "number" && Number.isFinite(pct)) completion = pct;
+        priority = _pickPriorityFromTodos(cardPoints, outerPriority);
+        dueDate = _pickEarliestDueDateFromTodos(cardPoints, outerDueDate);
+        status = _deriveStatusFromPct(completion, outerStatus) || outerStatus;
+        const pointAssignees = _collectAssigneeNamesFromTodos(cardPoints);
+        if (pointAssignees.length) cardAssignees = pointAssignees;
+      }
+
+      return {
+        include,
+        id: page.id,
+        url: page.url,
+        title,
+        idText,
+        priority,
+        status,
+        dueDate,
+        completion,
+        createdTime: page.created_time,
+        lastEditedTime: page.last_edited_time,
+        createdBy,
+        assignees: cardAssignees,
+      };
+    });
+
+    const tasks = pages
+      .map((page) => enrichedMap.get(page))
+      .filter((t) => t && t.include)
+      .map((t) => ({
+        id: t.id,
+        url: t.url,
+        title: t.title,
+        idText: t.idText,
+        priority: t.priority,
+        status: t.status,
+        dueDate: t.dueDate,
+        completion: t.completion,
+        createdTime: t.createdTime,
+        lastEditedTime: t.lastEditedTime,
+        createdBy: t.createdBy,
+        assignees: t.assignees,
+      }));
+
+    return res.json({ tasks });
   } catch (e) {
     console.error("Tasks list error:", e?.body || e);
     return res.status(500).json({ error: "Failed to load tasks." });
@@ -2929,14 +3216,17 @@ app.get("/api/tasks/:id", requireAuth, requirePage("Tasks"), async (req, res) =>
 
   try {
     const schema = await getTasksSchemaCached();
+    const scope = String(req.query.scope || "mine").trim().toLowerCase();
+    const viewerId = await getSessionUserNotionId(req);
+    const viewerName = String(req.session?.username || "").trim();
     const page = await notion.pages.retrieve({ page_id: id });
     const props = page.properties || {};
 
     const title = _titleTextFromProp(props?.[schema.titleProp]) || "Untitled";
-    const priority = schema.priorityProp ? _selectFromProp(props?.[schema.priorityProp]) : null;
-    const status = schema.statusProp ? _selectFromProp(props?.[schema.statusProp]) : null;
-    const dueDate = schema.deliveryDateProp ? _dateStartFromProp(props?.[schema.deliveryDateProp]) : null;
-    const completion = schema.completionProp ? _parseNumberProp(props?.[schema.completionProp]) : null;
+    const outerPriority = schema.priorityProp ? _selectFromProp(props?.[schema.priorityProp]) : null;
+    const outerStatus = schema.statusProp ? _selectFromProp(props?.[schema.statusProp]) : null;
+    const outerDueDate = schema.deliveryDateProp ? _dateStartFromProp(props?.[schema.deliveryDateProp]) : null;
+    const outerCompletion = schema.completionProp ? _parseNumberProp(props?.[schema.completionProp]) : null;
     const idText = schema.idProp ? _formatUniqueId(props?.[schema.idProp]) : "";
 
     let createdBy = "";
@@ -2950,88 +3240,38 @@ app.get("/api/tasks/:id", requireAuth, requirePage("Tasks"), async (req, res) =>
       const ids = (props[schema.assigneeProp].relation || []).map((x) => x?.id).filter(Boolean);
       if (ids.length) {
         const map = await mapWithConcurrency(ids, 4, getTeamMemberNameCached);
-        assignees = ids.map((id) => map.get(id) || "").filter(Boolean);
+        assignees = ids.map((rid) => map.get(rid) || "").filter(Boolean);
       }
     }
 
-    // Pull "Task Points" from the inline table (preferred) OR legacy to-do blocks (fallback)
-    const todos = [];
-    const childDatabases = [];
-    let cursor = undefined;
-    let hasMore = true;
+    const bundle = await getTaskPointsBundleCached(id, title);
+    const allTodos = Array.isArray(bundle?.todos) ? bundle.todos : [];
 
-    while (hasMore) {
-      const resp = await notion.blocks.children.list({
-        block_id: id,
-        page_size: 100,
-        start_cursor: cursor,
-      });
-
-      for (const b of resp.results || []) {
-        if (b.type === "to_do") {
-          const rt = b.to_do?.rich_text || [];
-          const txt = Array.isArray(rt) ? rt.map((t) => t.plain_text).join("") : "";
-          todos.push({ text: txt, checked: !!b.to_do?.checked });
-        }
-
-        if (b.type === "child_database") {
-          childDatabases.push({
-            id: b.id,
-            title: b.child_database?.title || "",
-          });
-        }
-      }
-
-      hasMore = !!resp.has_more;
-      cursor = resp.next_cursor || undefined;
-      if (!hasMore) break;
+    let finalTodos = allTodos;
+    if (scope === "mine" && allTodos.length && _todosUseAssignee(allTodos)) {
+      finalTodos = _filterTodosForUser(allTodos, viewerId, viewerName);
     }
 
-    // If a child database exists, try to read task points from it.
-    // - Prefer the database whose title matches the task title.
-    // - If empty, fall back to legacy to-do blocks.
-    let tableTodos = null;
-    if (childDatabases.length) {
-      const norm = (s) => String(s || "").trim().toLowerCase();
-      const want = norm(title);
-      const exact = childDatabases.find((d) => norm(d.title) === want);
-      const ordered = exact ? [exact, ...childDatabases.filter((d) => d !== exact)] : childDatabases;
-
-      for (const d of ordered) {
-        const t = await queryTaskPointsFromDatabase(d.id);
-        if (Array.isArray(t) && t.length) {
-          tableTodos = t;
-          break;
-        }
-        // Keep an empty array as a fallback if there are no legacy to-dos.
-        if (Array.isArray(t) && tableTodos === null) tableTodos = t;
-      }
-    }
-
-    let finalTodos = todos;
-    if (Array.isArray(tableTodos)) {
-      if (tableTodos.length) finalTodos = tableTodos;
-      else if (!todos.length) finalTodos = tableTodos;
-    }
-
-    // For the UI: completion should reflect checked items in the inline Task Points table.
-    // If there are no points, it becomes 0% (instead of relying on a manual DB property).
     const computedCompletion = _completionPercentFromTodos(finalTodos);
-    const finalCompletion = typeof computedCompletion === "number" && Number.isFinite(computedCompletion) ? computedCompletion : completion;
+    const finalCompletion = typeof computedCompletion === "number" && Number.isFinite(computedCompletion) ? computedCompletion : outerCompletion;
+    const finalPriority = _pickPriorityFromTodos(finalTodos, outerPriority);
+    const finalDueDate = _pickEarliestDueDateFromTodos(finalTodos, outerDueDate);
+    const finalStatus = _deriveStatusFromPct(finalCompletion, outerStatus) || outerStatus;
+    const pointAssignees = _collectAssigneeNamesFromTodos(finalTodos);
 
     return res.json({
       id: page.id,
       url: page.url,
       title,
       idText,
-      priority,
-      status,
-      dueDate,
+      priority: finalPriority,
+      status: finalStatus,
+      dueDate: finalDueDate,
       completion: finalCompletion,
       createdTime: page.created_time,
       lastEditedTime: page.last_edited_time,
       createdBy,
-      assignees,
+      assignees: pointAssignees.length ? pointAssignees : assignees,
       todos: finalTodos,
     });
   } catch (e) {
@@ -3070,74 +3310,107 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
 
     if (!title) return res.status(400).json({ error: "Title is required" });
 
+    const normalizedChecklist = (Array.isArray(checklist) ? checklist : [])
+      .map((x) => {
+        if (typeof x === "string") {
+          return {
+            text: x.trim(),
+            checked: false,
+            assigneeId: "",
+            assigneeName: "",
+            dueDate: "",
+            priority: "",
+            attachments: [],
+          };
+        }
+
+        if (x && typeof x === "object") {
+          const text = String(x.text || x.title || x.name || "").trim();
+          const rawPointAssignee = String(x.assigneeId || x.assignee || x.assigneeTo || "").trim();
+          return {
+            text,
+            checked: !!x.checked,
+            assigneeId: looksLikeNotionId(rawPointAssignee) ? toHyphenatedUUID(rawPointAssignee) : "",
+            assigneeName: String(x.assigneeName || x.assigneeLabel || "").trim(),
+            dueDate: String(x.dueDate || x.deliveryDate || "").trim(),
+            priority: String(x.priority || "").trim(),
+            attachments: Array.isArray(x.attachments)
+              ? x.attachments
+              : Array.isArray(x.files)
+                ? x.files
+                : Array.isArray(x.media)
+                  ? x.media
+                  : [],
+          };
+        }
+
+        return null;
+      })
+      .filter((x) => x && x.text);
+
+    const hasStructuredPoints = normalizedChecklist.some(
+      (x) => x.assigneeId || x.dueDate || x.priority || (Array.isArray(x.attachments) && x.attachments.length)
+    );
+
     const properties = {};
     properties[schema.titleProp] = { title: [{ text: { content: title } }] };
 
-    if (schema.priorityProp && priorityName) {
-      const def = schema.props?.[schema.priorityProp];
-      if (def?.type === "select") properties[schema.priorityProp] = { select: { name: priorityName } };
-      if (def?.type === "status") properties[schema.priorityProp] = { status: { name: priorityName } };
-      if (def?.type === "multi_select") properties[schema.priorityProp] = { multi_select: [{ name: priorityName }] };
-    }
-
-    if (schema.statusProp && statusName) {
+    if (schema.statusProp) {
+      const finalStatusName = statusName || "Not started";
       const def = schema.props?.[schema.statusProp];
-      if (def?.type === "select") properties[schema.statusProp] = { select: { name: statusName } };
-      if (def?.type === "status") properties[schema.statusProp] = { status: { name: statusName } };
+      if (def?.type === "select") properties[schema.statusProp] = { select: { name: finalStatusName } };
+      if (def?.type === "status") properties[schema.statusProp] = { status: { name: finalStatusName } };
     }
 
-    if (schema.deliveryDateProp && dueDate) {
-      properties[schema.deliveryDateProp] = { date: { start: dueDate } };
-    }
-
-    // Optional Files & media attachments (upload to Vercel Blob then attach as external files)
-    if (schema.filesProp && Array.isArray(attachments) && attachments.length) {
-      const filesToAttach = [];
-      for (let i = 0; i < attachments.length; i++) {
-        const a = attachments[i] || {};
-        const dataUrl = a.dataUrl || a.fileDataUrl || a.screenshotDataUrl || "";
-        if (!dataUrl) continue;
-
-        const originalName = String(a.name || a.filename || "attachment").trim() || "attachment";
-        const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
-        const filename = `task-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
-
-        const url = await uploadToBlobFromBase64(dataUrl, filename);
-        filesToAttach.push(makeExternalFile(originalName, url));
+    // Backward compatibility: if the UI still sends top-level task props and no structured checkpoint data,
+    // keep writing the outer task properties as before.
+    if (!hasStructuredPoints) {
+      if (schema.priorityProp && priorityName) {
+        const def = schema.props?.[schema.priorityProp];
+        if (def?.type === "select") properties[schema.priorityProp] = { select: { name: priorityName } };
+        if (def?.type === "status") properties[schema.priorityProp] = { status: { name: priorityName } };
+        if (def?.type === "multi_select") properties[schema.priorityProp] = { multi_select: [{ name: priorityName }] };
       }
 
-      if (filesToAttach.length) {
-        properties[schema.filesProp] = { files: filesToAttach };
+      if (schema.deliveryDateProp && dueDate) {
+        properties[schema.deliveryDateProp] = { date: { start: dueDate } };
       }
     }
 
-    // Created By = current user (if relation prop exists)
     const me = await getSessionUserNotionId(req);
     if (me && schema.createdByProp && schema.props?.[schema.createdByProp]?.type === "relation") {
       properties[schema.createdByProp] = { relation: [{ id: me }] };
     }
 
-    // Assignee To = selected user, fallback to current user
-    const finalAssignee = assigneeId || me;
-    if (finalAssignee && schema.assigneeProp && schema.props?.[schema.assigneeProp]?.type === "relation") {
-      properties[schema.assigneeProp] = { relation: [{ id: finalAssignee }] };
+    if (!hasStructuredPoints) {
+      const finalAssignee = assigneeId || me;
+      if (finalAssignee && schema.assigneeProp && schema.props?.[schema.assigneeProp]?.type === "relation") {
+        properties[schema.assigneeProp] = { relation: [{ id: finalAssignee }] };
+      }
+
+      if (schema.filesProp && Array.isArray(attachments) && attachments.length) {
+        const filesToAttach = [];
+        for (let i = 0; i < attachments.length; i++) {
+          const a = attachments[i] || {};
+          const dataUrl = a.dataUrl || a.fileDataUrl || a.screenshotDataUrl || "";
+          if (!dataUrl) continue;
+
+          const originalName = String(a.name || a.filename || "attachment").trim() || "attachment";
+          const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+          const filename = `task-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
+
+          const url = await uploadToBlobFromBase64(dataUrl, filename);
+          filesToAttach.push(makeExternalFile(originalName, url));
+        }
+
+        if (filesToAttach.length) properties[schema.filesProp] = { files: filesToAttach };
+      }
     }
 
     const created = await notion.pages.create({
       parent: { database_id: tasksDatabaseId },
       properties,
     });
-
-    // Checklist → Inline "Task Points" table (child database) inside the task page.
-    // We still accept `checklist` from the UI, but we store the items as rows in the table
-    // instead of legacy Notion `to_do` blocks.
-    const cleanTodos = (Array.isArray(checklist) ? checklist : [])
-      .map((x) => {
-        if (typeof x === "string") return x.trim();
-        if (x && typeof x === "object") return String(x.text || x.title || x.name || "").trim();
-        return "";
-      })
-      .filter(Boolean);
 
     let pointsDb = null;
     try {
@@ -3150,7 +3423,7 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
       pointsDb = null;
     }
 
-    if (pointsDb && pointsDb.id && cleanTodos.length) {
+    if (pointsDb && pointsDb.id && normalizedChecklist.length) {
       const dbProps = pointsDb?.properties || {};
       const titlePropName =
         dbProps?.[TASK_POINTS_TABLE.title]?.type === "title"
@@ -3160,27 +3433,79 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
         dbProps?.[TASK_POINTS_TABLE.checkbox]?.type === "checkbox"
           ? TASK_POINTS_TABLE.checkbox
           : _findDatabasePropNameByType(dbProps, "checkbox") || TASK_POINTS_TABLE.checkbox;
+      const filesPropName =
+        dbProps?.[TASK_POINTS_TABLE.files]?.type === "files"
+          ? TASK_POINTS_TABLE.files
+          : _findDatabasePropNameByType(dbProps, "files") || TASK_POINTS_TABLE.files;
+      const assigneePropName =
+        dbProps?.[TASK_POINTS_TABLE.assignee]?.type === "relation" || dbProps?.[TASK_POINTS_TABLE.assignee]?.type === "rich_text"
+          ? TASK_POINTS_TABLE.assignee
+          : _findDatabasePropNameByType(dbProps, "relation") || _findDatabasePropNameByType(dbProps, "rich_text");
+      const dueDatePropName =
+        dbProps?.[TASK_POINTS_TABLE.deliveryDate]?.type === "date"
+          ? TASK_POINTS_TABLE.deliveryDate
+          : _findDatabasePropNameByType(dbProps, "date") || TASK_POINTS_TABLE.deliveryDate;
+      const priorityPropName =
+        dbProps?.[TASK_POINTS_TABLE.priority]?.type === "select" || dbProps?.[TASK_POINTS_TABLE.priority]?.type === "status" || dbProps?.[TASK_POINTS_TABLE.priority]?.type === "multi_select"
+          ? TASK_POINTS_TABLE.priority
+          : _findDatabasePropNameByType(dbProps, "select") || _findDatabasePropNameByType(dbProps, "status") || _findDatabasePropNameByType(dbProps, "multi_select");
 
-      for (const txt of cleanTodos.slice(0, 50)) {
+      for (const item of normalizedChecklist.slice(0, 80)) {
         try {
+          const pointProps = {
+            [titlePropName]: { title: [{ text: { content: item.text } }] },
+            [checkboxPropName]: { checkbox: !!item.checked },
+          };
+
+          if (dueDatePropName && item.dueDate) {
+            pointProps[dueDatePropName] = { date: { start: item.dueDate } };
+          }
+
+          if (priorityPropName && item.priority) {
+            const def = dbProps?.[priorityPropName];
+            if (def?.type === "status") pointProps[priorityPropName] = { status: { name: item.priority } };
+            else if (def?.type === "multi_select") pointProps[priorityPropName] = { multi_select: [{ name: item.priority }] };
+            else pointProps[priorityPropName] = { select: { name: item.priority } };
+          }
+
+          if (assigneePropName && item.assigneeId) {
+            const def = dbProps?.[assigneePropName];
+            if (def?.type === "relation") {
+              pointProps[assigneePropName] = { relation: [{ id: item.assigneeId }] };
+            } else if (def?.type === "rich_text") {
+              pointProps[assigneePropName] = { rich_text: [{ text: { content: item.assigneeName || item.assigneeId } }] };
+            }
+          }
+
+          if (filesPropName && Array.isArray(item.attachments) && item.attachments.length) {
+            const filesToAttach = [];
+            for (let i = 0; i < item.attachments.length; i++) {
+              const a = item.attachments[i] || {};
+              const dataUrl = a.dataUrl || a.fileDataUrl || a.screenshotDataUrl || "";
+              if (!dataUrl) continue;
+              const originalName = String(a.name || a.filename || "attachment").trim() || "attachment";
+              const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+              const filename = `task-point-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
+              const url = await uploadToBlobFromBase64(dataUrl, filename);
+              filesToAttach.push(makeExternalFile(originalName, url));
+            }
+            if (filesToAttach.length) pointProps[filesPropName] = { files: filesToAttach };
+          }
+
           await notion.pages.create({
             parent: { database_id: pointsDb.id },
-            properties: {
-              [titlePropName]: { title: [{ text: { content: txt } }] },
-              [checkboxPropName]: { checkbox: false },
-            },
+            properties: pointProps,
           });
         } catch (e) {
           console.warn("[tasks] failed to create task point row:", e?.body || e);
         }
       }
-    } else if (!pointsDb && cleanTodos.length) {
-      // Fallback (legacy): checklist items as Notion to_do blocks inside the task page
-      const children = cleanTodos.slice(0, 50).map((txt) => ({
+    } else if (!pointsDb && normalizedChecklist.length) {
+      const children = normalizedChecklist.slice(0, 80).map((item) => ({
         object: "block",
         type: "to_do",
         to_do: {
-          rich_text: [{ type: "text", text: { content: txt } }],
+          rich_text: [{ type: "text", text: { content: item.text } }],
           checked: false,
         },
       }));
@@ -3191,6 +3516,8 @@ app.post("/api/tasks", requireAuth, requirePage("Tasks"), async (req, res) => {
         console.warn("Task checklist append error:", err?.body || err);
       }
     }
+
+    await invalidateTaskPointsCaches(created.id);
 
     return res.json({ ok: true, id: created.id, url: created.url });
   } catch (e) {
@@ -3226,7 +3553,7 @@ async function _resolveParentTaskIdFromPoint(pointPageId) {
   return taskPageId || null;
 }
 
-async function _assertSessionUserIsTaskAssignee(req, taskPageId) {
+async function _assertSessionUserIsTaskAssignee(req, taskPageId, pointPage = null) {
   const me = await getSessionUserNotionId(req);
   if (!me) return { ok: false, status: 401, error: "Unauthorized" };
 
@@ -3245,11 +3572,40 @@ async function _assertSessionUserIsTaskAssignee(req, taskPageId) {
     }
   } catch {}
 
-  // If we can't detect assignee property, allow (fallback), but normally we require it.
+  // Prefer the assignee on the Task Point row itself when available.
+  if (pointPage?.properties) {
+    const pointProps = pointPage.properties || {};
+    const pointAssigneePropName =
+      pointProps?.[TASK_POINTS_TABLE.assignee]?.type === "relation" || pointProps?.[TASK_POINTS_TABLE.assignee]?.type === "rich_text"
+        ? TASK_POINTS_TABLE.assignee
+        : _findPagePropNameByType(pointProps, "relation") || _findPagePropNameByType(pointProps, "rich_text");
+
+    if (pointAssigneePropName && pointProps?.[pointAssigneePropName]?.type === "relation") {
+      const rel = pointProps[pointAssigneePropName].relation || [];
+      if (rel.length) {
+        const isPointAssignee = rel.some((x) => normalizeNotionId(x?.id) === normalizeNotionId(me));
+        if (!isPointAssignee) return { ok: false, status: 403, error: "You are not assigned to this task point." };
+        return { ok: true, me, schema, taskPage };
+      }
+    }
+
+    if (pointAssigneePropName && pointProps?.[pointAssigneePropName]?.type === "rich_text") {
+      const assigneeName = _firstTextFromProp(pointProps[pointAssigneePropName]) || "";
+      const sessionName = String(req.session?.username || "").trim().toLowerCase();
+      if (String(assigneeName || "").trim()) {
+        if (sessionName && String(assigneeName).trim().toLowerCase() === sessionName) {
+          return { ok: true, me, schema, taskPage };
+        }
+        return { ok: false, status: 403, error: "You are not assigned to this task point." };
+      }
+    }
+  }
+
+  // Fallback to outer task assignee for legacy tasks.
   const ap = schema?.assigneeProp;
   const rel = ap && taskPage?.properties?.[ap]?.type === "relation" ? taskPage.properties[ap].relation || [] : null;
 
-  if (Array.isArray(rel)) {
+  if (Array.isArray(rel) && rel.length) {
     const isAssignee = rel.some((x) => normalizeNotionId(x?.id) === normalizeNotionId(me));
     if (!isAssignee) return { ok: false, status: 403, error: "You are not assigned to this task." };
   }
@@ -3274,11 +3630,11 @@ app.post("/api/task-points/:pointId/check", requireAuth, requirePage("Tasks"), a
     const taskPageId = await _resolveParentTaskIdFromPoint(pointId);
     if (!taskPageId) return res.status(404).json({ error: "Parent task not found" });
 
-    const authz = await _assertSessionUserIsTaskAssignee(req, taskPageId);
+    const pointPage = await notion.pages.retrieve({ page_id: pointId });
+    const authz = await _assertSessionUserIsTaskAssignee(req, taskPageId, pointPage);
     if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
     // Retrieve point page to locate the checkbox prop
-    const pointPage = await notion.pages.retrieve({ page_id: pointId });
     const props = pointPage?.properties || {};
     const checkboxPropName =
       props?.[TASK_POINTS_TABLE.checkbox]?.type === "checkbox"
@@ -3297,8 +3653,7 @@ app.post("/api/task-points/:pointId/check", requireAuth, requirePage("Tasks"), a
     // Invalidate + recompute completion so the UI can update the card progress immediately.
     let completionPct = null;
     try {
-      const key = `cache:tasks:completion:${taskPageId}:v2`;
-      await cacheDel(key);
+      await invalidateTaskPointsCaches(taskPageId);
 
       const title = authz?.schema?.titleProp
         ? _titleTextFromProp(authz.taskPage?.properties?.[authz.schema.titleProp]) || ""
@@ -3379,11 +3734,11 @@ app.post("/api/task-points/:pointId/attachments", requireAuth, requirePage("Task
     const taskPageId = await _resolveParentTaskIdFromPoint(pointId);
     if (!taskPageId) return res.status(404).json({ error: "Parent task not found" });
 
-    const authz = await _assertSessionUserIsTaskAssignee(req, taskPageId);
+    const pointPage = await notion.pages.retrieve({ page_id: pointId });
+    const authz = await _assertSessionUserIsTaskAssignee(req, taskPageId, pointPage);
     if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
     // Retrieve point page to locate Files property & existing items
-    const pointPage = await notion.pages.retrieve({ page_id: pointId });
     const props = pointPage?.properties || {};
 
     const filesPropName =
@@ -3421,6 +3776,8 @@ app.post("/api/task-points/:pointId/attachments", requireAuth, requirePage("Task
         [filesPropName]: { files: combined },
       },
     });
+
+    await invalidateTaskPointsCaches(taskPageId);
 
     // Return the updated list so the UI can populate the dropdown immediately.
     const files = (combined || [])
