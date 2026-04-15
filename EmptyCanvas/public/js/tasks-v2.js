@@ -405,6 +405,7 @@ function setStatusTab(key) {
   closeMenu();
   closeSortMenu();
   closeDetailView();
+  if (tv2DelegatedOverlay && tv2DelegatedOverlay.hidden === false) tv2CloseDelegatedModal();
 
   renderCalendar();
   renderTasksList();
@@ -481,7 +482,8 @@ function filterTasksByStatus(list) {
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
           // Close the top-most overlay first
-          if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) tv2ClosePointsModal();
+          if (tv2DelegatedOverlay && tv2DelegatedOverlay.hidden === false) tv2CloseDelegatedModal();
+          else if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) tv2ClosePointsModal();
           else if (tv2CheckpointComposerOverlay && tv2CheckpointComposerOverlay.hidden === false) tv2CloseCheckpointComposerModal();
           else if (tv2NewTaskOverlay && tv2NewTaskOverlay.hidden === false) tv2CloseNewTaskModal();
           else if (isMonthPickerOpen()) closeMonthPicker();
@@ -540,6 +542,8 @@ function filterTasksByStatus(list) {
       renderFilterMenu();
       closeMenu();
       closeSortMenu();
+      if (tv2DelegatedOverlay && tv2DelegatedOverlay.hidden === false) tv2CloseDelegatedModal();
+      if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) tv2ClosePointsModal();
       loadTasks();
     }
 
@@ -1203,12 +1207,12 @@ const toolbarHTML = `
 
         card.addEventListener("click", () => {
           // UX request:
-          // - My tasks (assignee = me): open a small Task Points window (check + upload per point)
-          // - Other scopes: keep the existing details view
+          // - My tasks: open the Task Points window (check + upload per point)
+          // - Delegated tasks: open a centered small window with checkpoint cards
           if (state.mode === "mine") {
             openTaskPointsForTask(id);
           } else {
-            selectTask(id, { open: true });
+            openDelegatedProjectModal(id);
           }
         });
       });
@@ -1269,6 +1273,19 @@ const toolbarHTML = `
     let tv2PointsCloseBtn = null;
     let tv2PointsTask = null; // current task details
     let tv2PointsTaskId = "";
+    let tv2CheckpointMenuDocBound = false;
+
+    // --- Delegated Project Modal (small window) ---
+    let tv2DelegatedOverlay = null;
+    let tv2DelegatedTitleEl = null;
+    let tv2DelegatedCountEl = null;
+    let tv2DelegatedBarEl = null;
+    let tv2DelegatedBarFillEl = null;
+    let tv2DelegatedPctEl = null;
+    let tv2DelegatedSummaryEl = null;
+    let tv2DelegatedListEl = null;
+    let tv2DelegatedCloseBtn = null;
+    let tv2DelegatedTask = null;
 
     function tv2EnsureNewTaskModal() {
       if (tv2NewTaskOverlay) return;
@@ -1336,6 +1353,7 @@ const toolbarHTML = `
       tv2NewTaskCloseBtn = tv2NewTaskOverlay.querySelector("#tv2NewTaskCloseBtn");
 
       tv2EnsureCheckpointComposerModal();
+      tv2BindCheckpointMenuDocCloseOnce();
 
       tv2NewTaskOverlay.addEventListener("click", (e) => {
         if (e.target === tv2NewTaskOverlay) tv2CloseNewTaskModal();
@@ -1567,6 +1585,7 @@ const toolbarHTML = `
 
     function tv2OpenCheckpointComposerModal(checkpointId) {
       tv2EnsureCheckpointComposerModal();
+      tv2CloseCheckpointMenus();
       const current = checkpointId ? tv2CheckpointDrafts.find((item) => item && item.id === checkpointId) || null : null;
       tv2CheckpointComposerEditingId = current?.id || "";
       if (tv2CheckpointComposerTitle) tv2CheckpointComposerTitle.value = current?.text || "";
@@ -1616,6 +1635,7 @@ const toolbarHTML = `
     function tv2CloseNewTaskModal() {
       if (!tv2NewTaskOverlay) return;
       tv2CloseCheckpointComposerModal();
+      tv2CloseCheckpointMenus();
       tv2CloseAllNewTaskSelects();
       tv2NewTaskOverlay.hidden = true;
       tv2NewTaskOverlay.style.display = "none";
@@ -1702,6 +1722,255 @@ const toolbarHTML = `
       document.body.classList.remove("tv2-modal-open");
       tv2PointsTask = null;
       tv2PointsTaskId = "";
+    }
+
+    function tv2NormalizePriorityKey(name) {
+      const s = String(name || "").trim().toLowerCase();
+      if (s.includes("high")) return "high";
+      if (s.includes("medium")) return "medium";
+      if (s.includes("low")) return "low";
+      return "";
+    }
+
+    function tv2TodoAssigneeLabel(todo) {
+      const names = [];
+      if (Array.isArray(todo?.assigneeNames)) names.push(...todo.assigneeNames.filter(Boolean));
+      if (String(todo?.assigneeName || "").trim()) names.push(String(todo.assigneeName).trim());
+      const unique = [];
+      const seen = new Set();
+      names.forEach((name) => {
+        const label = String(name || "").trim();
+        const key = label.toLowerCase();
+        if (!label || seen.has(key)) return;
+        seen.add(key);
+        unique.push(label);
+      });
+      return unique.length ? unique.join(", ") : "Unassigned";
+    }
+
+    function tv2EnsureDelegatedModal() {
+      if (tv2DelegatedOverlay) return;
+
+      tv2DelegatedOverlay = document.createElement("div");
+      tv2DelegatedOverlay.className = "tv2-modal-overlay tv2-points-overlay tv2-delegated-overlay";
+      tv2DelegatedOverlay.id = "tv2DelegatedOverlay";
+      tv2DelegatedOverlay.hidden = true;
+      tv2DelegatedOverlay.style.display = "none";
+
+      tv2DelegatedOverlay.innerHTML = `
+        <div class="tv2-points tv2-points--delegated" role="dialog" aria-modal="true" aria-labelledby="tv2DelegatedTitle">
+          <div class="tv2-points__header">
+            <div class="tv2-points__headtxt">
+              <div class="tv2-points__title" id="tv2DelegatedTitle">Project</div>
+              <div class="tv2-points__meta" id="tv2DelegatedCount">—</div>
+            </div>
+
+            <button class="tv2-modal-icon-btn" type="button" id="tv2DelegatedCloseBtn" aria-label="Close">
+              <span class="tv2-x" aria-hidden="true">×</span>
+            </button>
+          </div>
+
+          <div class="tv2-points__progress">
+            <div class="tv2-points__bar" id="tv2DelegatedBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="tv2-points__barfill" id="tv2DelegatedBarFill" style="width:0%"></div>
+            </div>
+            <div class="tv2-points__pct" id="tv2DelegatedPct">0%</div>
+          </div>
+
+          <div class="tv2-delegated-summary" id="tv2DelegatedSummary"></div>
+          <div class="tv2-delegated-list" id="tv2DelegatedList"></div>
+        </div>
+      `;
+
+      document.body.appendChild(tv2DelegatedOverlay);
+
+      tv2DelegatedTitleEl = tv2DelegatedOverlay.querySelector("#tv2DelegatedTitle");
+      tv2DelegatedCountEl = tv2DelegatedOverlay.querySelector("#tv2DelegatedCount");
+      tv2DelegatedBarEl = tv2DelegatedOverlay.querySelector("#tv2DelegatedBar");
+      tv2DelegatedBarFillEl = tv2DelegatedOverlay.querySelector("#tv2DelegatedBarFill");
+      tv2DelegatedPctEl = tv2DelegatedOverlay.querySelector("#tv2DelegatedPct");
+      tv2DelegatedSummaryEl = tv2DelegatedOverlay.querySelector("#tv2DelegatedSummary");
+      tv2DelegatedListEl = tv2DelegatedOverlay.querySelector("#tv2DelegatedList");
+      tv2DelegatedCloseBtn = tv2DelegatedOverlay.querySelector("#tv2DelegatedCloseBtn");
+
+      tv2DelegatedOverlay.addEventListener("click", (e) => {
+        if (e.target === tv2DelegatedOverlay) tv2CloseDelegatedModal();
+      });
+
+      if (tv2DelegatedCloseBtn) {
+        tv2DelegatedCloseBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          tv2CloseDelegatedModal();
+        });
+      }
+
+      if (window.feather) window.feather.replace();
+    }
+
+    function tv2OpenDelegatedModal() {
+      if (!tv2DelegatedOverlay) return;
+      tv2DelegatedOverlay.hidden = false;
+      tv2DelegatedOverlay.style.display = "flex";
+      document.body.classList.add("tv2-modal-open");
+    }
+
+    function tv2CloseDelegatedModal() {
+      if (!tv2DelegatedOverlay) return;
+      tv2DelegatedOverlay.hidden = true;
+      tv2DelegatedOverlay.style.display = "none";
+      document.body.classList.remove("tv2-modal-open");
+      tv2DelegatedTask = null;
+    }
+
+    function tv2RenderDelegatedLoading(taskTitle) {
+      const safeTitle = String(taskTitle || "Project").trim() || "Project";
+      if (tv2DelegatedTitleEl) tv2DelegatedTitleEl.textContent = safeTitle;
+      if (tv2DelegatedCountEl) tv2DelegatedCountEl.textContent = "Loading checkpoints…";
+      if (tv2DelegatedPctEl) tv2DelegatedPctEl.textContent = "";
+      if (tv2DelegatedBarEl) tv2DelegatedBarEl.setAttribute("aria-valuenow", "0");
+      if (tv2DelegatedBarFillEl) tv2DelegatedBarFillEl.style.width = "36%";
+      if (tv2DelegatedSummaryEl) tv2DelegatedSummaryEl.innerHTML = "";
+      if (tv2DelegatedListEl) {
+        tv2DelegatedListEl.innerHTML = `
+          <div class="tv2-points-loading" role="status" aria-live="polite">
+            <div class="tv2-points-loading__hero">
+              <div class="tv2-points-loading__ring" aria-hidden="true"></div>
+              <div class="tv2-points-loading__copy">
+                <div class="tv2-points-loading__title">Loading delegated checkpoints</div>
+                <div class="tv2-points-loading__sub">Preparing assignees, due dates, and progress</div>
+              </div>
+            </div>
+            <div class="tv2-points-loading__stack">
+              <div class="tv2-delegated-card tv2-delegated-card--skeleton">
+                <span class="tv2-delegated-card__skel tv2-delegated-card__skel--title"></span>
+                <div class="tv2-delegated-card__skel-row">
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip tv2-delegated-card__skel--chip-sm"></span>
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                </div>
+              </div>
+              <div class="tv2-delegated-card tv2-delegated-card--skeleton">
+                <span class="tv2-delegated-card__skel tv2-delegated-card__skel--title"></span>
+                <div class="tv2-delegated-card__skel-row">
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    function tv2RenderDelegatedModal(task) {
+      tv2DelegatedTask = task || null;
+      const todos = Array.isArray(task?.todos) ? task.todos.filter((t) => String(t?.text || "").trim()) : [];
+      const stats = tv2ComputePointsStats(todos);
+      const priorityName = String(task?.priority?.name || "").trim();
+      const priorityKey = tv2NormalizePriorityKey(priorityName);
+      const assignees = Array.isArray(task?.assignees) ? task.assignees.filter(Boolean) : [];
+
+      if (tv2DelegatedTitleEl) tv2DelegatedTitleEl.textContent = task?.title || "Project";
+      if (tv2DelegatedCountEl) {
+        const checkpointWord = stats.total === 1 ? "checkpoint" : "checkpoints";
+        const doneWord = stats.checked === 1 ? "done" : "done";
+        tv2DelegatedCountEl.textContent = `${stats.total} ${checkpointWord} • ${stats.checked} ${doneWord}`;
+      }
+      if (tv2DelegatedPctEl) tv2DelegatedPctEl.textContent = `${stats.pct}%`;
+      if (tv2DelegatedBarEl) tv2DelegatedBarEl.setAttribute("aria-valuenow", String(stats.pct));
+      if (tv2DelegatedBarFillEl) tv2DelegatedBarFillEl.style.width = `${stats.pct}%`;
+
+      if (tv2DelegatedSummaryEl) {
+        const chips = [];
+        if (task?.dueDate) {
+          chips.push(`<span class="tv2-checkpoint-chip"><i data-feather="calendar"></i><span>${escapeHtml(formatDueLabel(task.dueDate))}</span></span>`);
+        }
+        if (priorityName) {
+          chips.push(`<span class="tv2-checkpoint-chip tv2-checkpoint-chip--priority tv2-checkpoint-chip--${escapeHtml(priorityKey)}"><i data-feather="flag"></i><span>${escapeHtml(priorityName)}</span></span>`);
+        }
+        if (assignees.length) {
+          chips.push(`<span class="tv2-checkpoint-chip"><i data-feather="users"></i><span>${escapeHtml(assignees.join(", "))}</span></span>`);
+        }
+        tv2DelegatedSummaryEl.innerHTML = chips.join("");
+        tv2DelegatedSummaryEl.hidden = !chips.length;
+      }
+
+      if (!tv2DelegatedListEl) return;
+
+      if (!todos.length) {
+        tv2DelegatedListEl.innerHTML = `<div class="tv2-empty">No delegated checkpoints yet</div>`;
+        if (window.feather) window.feather.replace();
+        return;
+      }
+
+      tv2DelegatedListEl.innerHTML = todos
+        .map((item) => {
+          const assigneeLabel = tv2TodoAssigneeLabel(item);
+          const dueLabel = tv2FormatCheckpointDate(item?.dueDate || "");
+          const pointPriority = String(item?.priority?.name || item?.priority || "").trim() || "No priority";
+          const pointPriorityKey = tv2NormalizePriorityKey(pointPriority);
+          const filesCount = Array.isArray(item?.files) ? item.files.length : 0;
+          const done = !!item?.checked;
+          const stateLabel = done ? "Done" : "Open";
+          const stateClass = done ? " is-done" : "";
+          return `
+            <article class="tv2-delegated-card${stateClass}">
+              <div class="tv2-delegated-card__header">
+                <div class="tv2-delegated-card__title-wrap">
+                  <span class="tv2-delegated-card__dot" aria-hidden="true"></span>
+                  <div class="tv2-delegated-card__title">${escapeHtml(item?.text || "Checkpoint")}</div>
+                </div>
+                <span class="tv2-delegated-card__state${stateClass}">${escapeHtml(stateLabel)}</span>
+              </div>
+              <div class="tv2-delegated-card__meta">
+                <span class="tv2-checkpoint-chip"><i data-feather="user"></i><span>${escapeHtml(`Assigned to ${assigneeLabel}`)}</span></span>
+                <span class="tv2-checkpoint-chip"><i data-feather="calendar"></i><span>${escapeHtml(dueLabel)}</span></span>
+                ${pointPriority && pointPriority !== "No priority" ? `<span class="tv2-checkpoint-chip tv2-checkpoint-chip--priority tv2-checkpoint-chip--${escapeHtml(pointPriorityKey)}"><i data-feather="flag"></i><span>${escapeHtml(pointPriority)}</span></span>` : ""}
+                <span class="tv2-checkpoint-chip"><i data-feather="paperclip"></i><span>${escapeHtml(filesCount ? `${filesCount} file${filesCount > 1 ? "s" : ""}` : "No files")}</span></span>
+              </div>
+            </article>
+          `;
+        })
+        .join("");
+
+      if (window.feather) window.feather.replace();
+    }
+
+    async function openDelegatedProjectModal(id) {
+      if (!id) return;
+      tv2EnsureDelegatedModal();
+      if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) tv2ClosePointsModal();
+      closeDetailView();
+
+      const taskSummary = state.tasks.find((t) => t && t.id === id) || null;
+      state.selectedTaskId = id;
+      renderTasksList();
+
+      tv2RenderDelegatedLoading(taskSummary?.title || "Project");
+      tv2OpenDelegatedModal();
+
+      try {
+        const r = await fetch(`/api/tasks/${encodeURIComponent(id)}?scope=delegated`, { cache: "no-store" });
+        if (!r.ok) throw new Error("Failed to load delegated project");
+        const data = await r.json();
+        tv2RenderDelegatedModal(data);
+
+        const pct = tv2ComputePointsStats(data?.todos).pct;
+        const idx = state.tasks.findIndex((t) => t && t.id === id);
+        if (idx !== -1) {
+          state.tasks[idx].completion = pct;
+          renderTasksList();
+        }
+      } catch (e) {
+        console.error(e);
+        if (tv2DelegatedCountEl) tv2DelegatedCountEl.textContent = "Failed to load";
+        if (tv2DelegatedPctEl) tv2DelegatedPctEl.textContent = "";
+        if (tv2DelegatedBarEl) tv2DelegatedBarEl.setAttribute("aria-valuenow", "0");
+        if (tv2DelegatedBarFillEl) tv2DelegatedBarFillEl.style.width = "0%";
+        if (tv2DelegatedSummaryEl) tv2DelegatedSummaryEl.innerHTML = "";
+        if (tv2DelegatedListEl) tv2DelegatedListEl.innerHTML = `<div class="tv2-empty">Failed to load delegated checkpoints</div>`;
+        if (window.toast) window.toast.error("Failed to load delegated project");
+      }
     }
 
     function tv2RenderPointsLoading(taskTitle) {
@@ -2471,6 +2740,32 @@ const toolbarHTML = `
       }
     }
 
+    function tv2CloseCheckpointMenus(exceptWrap) {
+      if (!tv2ChecklistList) return;
+      const keep = exceptWrap || null;
+      tv2ChecklistList.querySelectorAll(".tv2-checkpoint-card__menu-wrap").forEach((wrap) => {
+        const menu = wrap.querySelector(".tv2-checkpoint-card__menu");
+        const btn = wrap.querySelector("[data-checkpoint-menu-toggle]");
+        const open = !!(keep && wrap === keep);
+        if (menu) menu.hidden = !open;
+        if (btn) {
+          btn.setAttribute("aria-expanded", open ? "true" : "false");
+          btn.classList.toggle("is-open", open);
+        }
+      });
+    }
+
+    function tv2BindCheckpointMenuDocCloseOnce() {
+      if (tv2CheckpointMenuDocBound) return;
+      tv2CheckpointMenuDocBound = true;
+
+      document.addEventListener("click", (e) => {
+        if (!tv2NewTaskOverlay || tv2NewTaskOverlay.hidden) return;
+        const insideMenu = e.target?.closest ? e.target.closest(".tv2-checkpoint-card__menu-wrap") : null;
+        if (!insideMenu) tv2CloseCheckpointMenus();
+      });
+    }
+
     function tv2RenderChecklist() {
       if (!tv2ChecklistList) return;
 
@@ -2491,39 +2786,67 @@ const toolbarHTML = `
           const assigneeLabel = item?.assigneeName || (item?.assigneeId && usersById.get(item.assigneeId)) || "Unassigned";
           const dueLabel = tv2FormatCheckpointDate(item?.dueDate || "");
           const priorityLabel = String(item?.priority || "Medium") || "Medium";
+          const priorityKey = String(priorityLabel || "").trim().toLowerCase();
           const filesCount = Array.isArray(item?.files) ? item.files.length : 0;
           return `
             <div class="tv2-checkpoint-card" data-checkpoint-id="${escapeHtml(item.id)}">
               <div class="tv2-checkpoint-card__body">
-                <div class="tv2-checkpoint-card__title-wrap">
-                  <span class="tv2-checkpoint-card__bullet" aria-hidden="true"></span>
-                  <div class="tv2-checkpoint-card__title">${escapeHtml(item.text || "Checkpoint")}</div>
+                <div class="tv2-checkpoint-card__header">
+                  <div class="tv2-checkpoint-card__title-wrap">
+                    <span class="tv2-checkpoint-card__bullet" aria-hidden="true"></span>
+                    <div class="tv2-checkpoint-card__title">${escapeHtml(item.text || "Checkpoint")}</div>
+                  </div>
+                  <div class="tv2-checkpoint-card__menu-wrap">
+                    <button class="tv2-checkpoint-card__menu-btn" type="button" data-checkpoint-menu-toggle="${escapeHtml(item.id)}" aria-haspopup="menu" aria-expanded="false" aria-label="Checkpoint options">
+                      <i data-feather="more-horizontal"></i>
+                    </button>
+                    <div class="tv2-checkpoint-card__menu" data-checkpoint-menu="${escapeHtml(item.id)}" role="menu" hidden>
+                      <button class="tv2-checkpoint-card__menu-item" type="button" data-checkpoint-edit="${escapeHtml(item.id)}" role="menuitem">
+                        <i data-feather="edit-2"></i>
+                        <span>Edit checkpoint</span>
+                      </button>
+                      <button class="tv2-checkpoint-card__menu-item is-danger" type="button" data-checkpoint-delete="${escapeHtml(item.id)}" role="menuitem">
+                        <i data-feather="trash-2"></i>
+                        <span>Delete checkpoint</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <div class="tv2-checkpoint-card__meta">
                   <span class="tv2-checkpoint-chip"><i data-feather="user"></i><span>${escapeHtml(assigneeLabel)}</span></span>
                   <span class="tv2-checkpoint-chip"><i data-feather="calendar"></i><span>${escapeHtml(dueLabel)}</span></span>
-                  <span class="tv2-checkpoint-chip tv2-checkpoint-chip--priority tv2-checkpoint-chip--${escapeHtml(String(priorityLabel).toLowerCase())}"><i data-feather="flag"></i><span>${escapeHtml(priorityLabel)}</span></span>
+                  <span class="tv2-checkpoint-chip tv2-checkpoint-chip--priority tv2-checkpoint-chip--${escapeHtml(priorityKey)}"><i data-feather="flag"></i><span>${escapeHtml(priorityLabel)}</span></span>
                   <span class="tv2-checkpoint-chip"><i data-feather="paperclip"></i><span>${filesCount ? `${filesCount} file${filesCount > 1 ? "s" : ""}` : "No files"}</span></span>
                 </div>
-              </div>
-              <div class="tv2-checkpoint-card__actions">
-                <button class="tv2-checkpoint-card__action" type="button" data-checkpoint-edit="${escapeHtml(item.id)}" aria-label="Edit checkpoint">
-                  <i data-feather="edit-2"></i>
-                </button>
-                <button class="tv2-checkpoint-card__action tv2-checkpoint-card__action--danger" type="button" data-checkpoint-delete="${escapeHtml(item.id)}" aria-label="Delete checkpoint">
-                  <i data-feather="trash-2"></i>
-                </button>
               </div>
             </div>
           `;
         })
         .join("");
 
+      tv2ChecklistList.querySelectorAll("[data-checkpoint-menu-toggle]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const wrap = btn.closest(".tv2-checkpoint-card__menu-wrap");
+          const menu = wrap?.querySelector(".tv2-checkpoint-card__menu");
+          if (!wrap || !menu) return;
+          const willOpen = menu.hidden;
+          tv2CloseCheckpointMenus(willOpen ? wrap : null);
+        });
+      });
+
+      tv2ChecklistList.querySelectorAll(".tv2-checkpoint-card__menu").forEach((menu) => {
+        menu.addEventListener("click", (e) => e.stopPropagation());
+      });
+
       tv2ChecklistList.querySelectorAll("[data-checkpoint-edit]").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.preventDefault();
+          e.stopPropagation();
           const id = btn.getAttribute("data-checkpoint-edit") || "";
           if (!id) return;
+          tv2CloseCheckpointMenus();
           tv2OpenCheckpointComposerModal(id);
         });
       });
@@ -2531,8 +2854,10 @@ const toolbarHTML = `
       tv2ChecklistList.querySelectorAll("[data-checkpoint-delete]").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.preventDefault();
+          e.stopPropagation();
           const id = btn.getAttribute("data-checkpoint-delete") || "";
           if (!id) return;
+          tv2CloseCheckpointMenus();
           tv2CheckpointDrafts = tv2CheckpointDrafts.filter((item) => item && item.id !== id);
           tv2RenderChecklist();
         });
@@ -2647,7 +2972,7 @@ const toolbarHTML = `
         if (data?.id && state.tasks.some((t) => t && String(t.id) === String(data.id))) {
           try {
             if (state.mode === "mine") await openTaskPointsForTask(String(data.id));
-            else await selectTask(String(data.id), { open: true });
+            else await openDelegatedProjectModal(String(data.id));
           } catch {}
         }
       } catch (err) {
@@ -2892,9 +3217,12 @@ try {
     async function loadTasks(opts) {
       showListLoading(gridEl, "Loading tasks");
 
-      // If the user changes filter/scope while a points window is open, close it.
+      // If the user changes filter/scope while an overlay is open, close it.
       if (tv2PointsOverlay && tv2PointsOverlay.hidden === false) {
         tv2ClosePointsModal();
+      }
+      if (tv2DelegatedOverlay && tv2DelegatedOverlay.hidden === false) {
+        tv2CloseDelegatedModal();
       }
 
       // Always start from the list screen when reloading tasks
