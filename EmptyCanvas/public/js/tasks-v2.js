@@ -1829,7 +1829,10 @@ const toolbarHTML = `
       if (tv2DelegatedPctEl) tv2DelegatedPctEl.textContent = "";
       if (tv2DelegatedBarEl) tv2DelegatedBarEl.setAttribute("aria-valuenow", "0");
       if (tv2DelegatedBarFillEl) tv2DelegatedBarFillEl.style.width = "36%";
-      if (tv2DelegatedSummaryEl) tv2DelegatedSummaryEl.innerHTML = "";
+      if (tv2DelegatedSummaryEl) {
+        tv2DelegatedSummaryEl.hidden = true;
+        tv2DelegatedSummaryEl.innerHTML = "";
+      }
       if (tv2DelegatedListEl) {
         tv2DelegatedListEl.innerHTML = `
           <div class="tv2-points-loading" role="status" aria-live="polite">
@@ -1842,18 +1845,26 @@ const toolbarHTML = `
             </div>
             <div class="tv2-points-loading__stack">
               <div class="tv2-delegated-card tv2-delegated-card--skeleton">
-                <span class="tv2-delegated-card__skel tv2-delegated-card__skel--title"></span>
-                <div class="tv2-delegated-card__skel-row">
-                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
-                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip tv2-delegated-card__skel--chip-sm"></span>
-                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                <span class="tv2-delegated-card__skel tv2-delegated-card__skel-status"></span>
+                <div class="tv2-delegated-card__skel-copy">
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--label"></span>
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--title"></span>
+                  <div class="tv2-delegated-card__skel-row">
+                    <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                    <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip tv2-delegated-card__skel--chip-sm"></span>
+                    <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                  </div>
                 </div>
               </div>
               <div class="tv2-delegated-card tv2-delegated-card--skeleton">
-                <span class="tv2-delegated-card__skel tv2-delegated-card__skel--title"></span>
-                <div class="tv2-delegated-card__skel-row">
-                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
-                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                <span class="tv2-delegated-card__skel tv2-delegated-card__skel-status"></span>
+                <div class="tv2-delegated-card__skel-copy">
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--label"></span>
+                  <span class="tv2-delegated-card__skel tv2-delegated-card__skel--title tv2-delegated-card__skel--title-sm"></span>
+                  <div class="tv2-delegated-card__skel-row">
+                    <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                    <span class="tv2-delegated-card__skel tv2-delegated-card__skel--chip"></span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1873,8 +1884,7 @@ const toolbarHTML = `
       if (tv2DelegatedTitleEl) tv2DelegatedTitleEl.textContent = task?.title || "Project";
       if (tv2DelegatedCountEl) {
         const checkpointWord = stats.total === 1 ? "checkpoint" : "checkpoints";
-        const doneWord = stats.checked === 1 ? "done" : "done";
-        tv2DelegatedCountEl.textContent = `${stats.total} ${checkpointWord} • ${stats.checked} ${doneWord}`;
+        tv2DelegatedCountEl.textContent = `${stats.total} ${checkpointWord} • ${stats.checked} done`;
       }
       if (tv2DelegatedPctEl) tv2DelegatedPctEl.textContent = `${stats.pct}%`;
       if (tv2DelegatedBarEl) tv2DelegatedBarEl.setAttribute("aria-valuenow", String(stats.pct));
@@ -1891,8 +1901,18 @@ const toolbarHTML = `
         if (assignees.length) {
           chips.push(`<span class="tv2-checkpoint-chip"><i data-feather="users"></i><span>${escapeHtml(assignees.join(", "))}</span></span>`);
         }
-        tv2DelegatedSummaryEl.innerHTML = chips.join("");
-        tv2DelegatedSummaryEl.hidden = !chips.length;
+        if (chips.length) {
+          tv2DelegatedSummaryEl.hidden = false;
+          tv2DelegatedSummaryEl.innerHTML = `
+            <section class="tv2-delegated-summary-card">
+              <div class="tv2-delegated-summary-card__label">Project overview</div>
+              <div class="tv2-delegated-summary-card__chips">${chips.join("")}</div>
+            </section>
+          `;
+        } else {
+          tv2DelegatedSummaryEl.innerHTML = "";
+          tv2DelegatedSummaryEl.hidden = true;
+        }
       }
 
       if (!tv2DelegatedListEl) return;
@@ -1904,29 +1924,44 @@ const toolbarHTML = `
       }
 
       tv2DelegatedListEl.innerHTML = todos
-        .map((item) => {
+        .map((item, index) => {
           const assigneeLabel = tv2TodoAssigneeLabel(item);
           const dueLabel = tv2FormatCheckpointDate(item?.dueDate || "");
           const pointPriority = String(item?.priority?.name || item?.priority || "").trim() || "No priority";
           const pointPriorityKey = tv2NormalizePriorityKey(pointPriority);
           const filesCount = Array.isArray(item?.files) ? item.files.length : 0;
           const done = !!item?.checked;
-          const stateLabel = done ? "Done" : "Open";
+          const stateLabel = done ? "Completed" : "In progress";
           const stateClass = done ? " is-done" : "";
+          const statusInner = done
+            ? `<i data-feather="check"></i>`
+            : `<span class="tv2-delegated-card__check-dot"></span>`;
+          const fileChip = filesCount
+            ? `<span class="tv2-checkpoint-chip"><i data-feather="paperclip"></i><span>${escapeHtml(`${filesCount} file${filesCount > 1 ? "s" : ""}`)}</span></span>`
+            : "";
+
           return `
             <article class="tv2-delegated-card${stateClass}">
-              <div class="tv2-delegated-card__header">
-                <div class="tv2-delegated-card__title-wrap">
-                  <span class="tv2-delegated-card__dot" aria-hidden="true"></span>
-                  <div class="tv2-delegated-card__title">${escapeHtml(item?.text || "Checkpoint")}</div>
-                </div>
-                <span class="tv2-delegated-card__state${stateClass}">${escapeHtml(stateLabel)}</span>
+              <div class="tv2-delegated-card__status-col">
+                <span class="tv2-delegated-card__check${stateClass}" aria-hidden="true">${statusInner}</span>
               </div>
-              <div class="tv2-delegated-card__meta">
-                <span class="tv2-checkpoint-chip"><i data-feather="user"></i><span>${escapeHtml(`Assigned to ${assigneeLabel}`)}</span></span>
-                <span class="tv2-checkpoint-chip"><i data-feather="calendar"></i><span>${escapeHtml(dueLabel)}</span></span>
-                ${pointPriority && pointPriority !== "No priority" ? `<span class="tv2-checkpoint-chip tv2-checkpoint-chip--priority tv2-checkpoint-chip--${escapeHtml(pointPriorityKey)}"><i data-feather="flag"></i><span>${escapeHtml(pointPriority)}</span></span>` : ""}
-                <span class="tv2-checkpoint-chip"><i data-feather="paperclip"></i><span>${escapeHtml(filesCount ? `${filesCount} file${filesCount > 1 ? "s" : ""}` : "No files")}</span></span>
+              <div class="tv2-delegated-card__content">
+                <div class="tv2-delegated-card__header">
+                  <div class="tv2-delegated-card__title-wrap">
+                    <div class="tv2-delegated-card__eyebrow">Checkpoint ${index + 1}</div>
+                    <div class="tv2-delegated-card__title">${escapeHtml(item?.text || "Checkpoint")}</div>
+                  </div>
+                  <span class="tv2-delegated-card__state${stateClass}">
+                    <i data-feather="${done ? "check-circle" : "clock"}"></i>
+                    <span>${escapeHtml(stateLabel)}</span>
+                  </span>
+                </div>
+                <div class="tv2-delegated-card__meta">
+                  <span class="tv2-checkpoint-chip"><i data-feather="user"></i><span>${escapeHtml(`Assigned to ${assigneeLabel}`)}</span></span>
+                  <span class="tv2-checkpoint-chip"><i data-feather="calendar"></i><span>${escapeHtml(dueLabel)}</span></span>
+                  ${pointPriority && pointPriority !== "No priority" ? `<span class="tv2-checkpoint-chip tv2-checkpoint-chip--priority tv2-checkpoint-chip--${escapeHtml(pointPriorityKey)}"><i data-feather="flag"></i><span>${escapeHtml(pointPriority)}</span></span>` : ""}
+                  ${fileChip}
+                </div>
               </div>
             </article>
           `;
