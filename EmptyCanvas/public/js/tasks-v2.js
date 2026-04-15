@@ -1281,6 +1281,7 @@ const toolbarHTML = `
     let tv2CheckpointComposerFiles = null;
     let tv2CheckpointComposerFilesField = null;
     let tv2CheckpointComposerFilesMeta = null;
+    let tv2CheckpointComposerFilesClearBtn = null;
     let tv2CheckpointComposerSaveBtn = null;
     let tv2CheckpointComposerCancelBtn = null;
     let tv2CheckpointComposerCloseBtn = null;
@@ -1515,10 +1516,13 @@ const toolbarHTML = `
               <div class="tv2-form-row tv2-form-row--full">
                 <label class="tv2-label" for="tv2CheckpointFiles">Files &amp; media</label>
                 <div class="tv2-file-wrap tv2-file-wrap--compact">
-                  <button class="tv2-file-field" type="button" id="tv2CheckpointFilesField">
+                  <div class="tv2-file-field" id="tv2CheckpointFilesField" role="button" tabindex="0" aria-controls="tv2CheckpointFiles" aria-label="Choose files">
                     <span class="tv2-file-field__icon" aria-hidden="true"><i data-feather="paperclip"></i></span>
-                    <span class="tv2-file-field__label tv2-file-meta" id="tv2CheckpointFilesMeta">No files selected</span>
-                  </button>
+                    <span class="tv2-file-field__label tv2-file-meta" id="tv2CheckpointFilesMeta">No file selected</span>
+                    <button class="tv2-file-field__clear" type="button" id="tv2CheckpointFilesClearBtn" aria-label="Remove selected files" hidden>
+                      <span class="tv2-x" aria-hidden="true">×</span>
+                    </button>
+                  </div>
                   <input class="tv2-file-input tv2-file-input--hidden" type="file" id="tv2CheckpointFiles" multiple />
                 </div>
               </div>
@@ -1553,6 +1557,7 @@ const toolbarHTML = `
       tv2CheckpointComposerFiles = tv2CheckpointComposerOverlay.querySelector("#tv2CheckpointFiles");
       tv2CheckpointComposerFilesField = tv2CheckpointComposerOverlay.querySelector("#tv2CheckpointFilesField");
       tv2CheckpointComposerFilesMeta = tv2CheckpointComposerOverlay.querySelector("#tv2CheckpointFilesMeta");
+      tv2CheckpointComposerFilesClearBtn = tv2CheckpointComposerOverlay.querySelector("#tv2CheckpointFilesClearBtn");
       tv2CheckpointComposerSaveBtn = tv2CheckpointComposerOverlay.querySelector("#tv2CheckpointComposerSaveBtn");
       tv2CheckpointComposerCancelBtn = tv2CheckpointComposerOverlay.querySelector("#tv2CheckpointComposerCancelBtn");
       tv2CheckpointComposerCloseBtn = tv2CheckpointComposerOverlay.querySelector("#tv2CheckpointComposerCloseBtn");
@@ -1585,11 +1590,30 @@ const toolbarHTML = `
       }
 
       if (tv2CheckpointComposerFilesField && tv2CheckpointComposerFiles) {
-        tv2CheckpointComposerFilesField.addEventListener("click", (e) => {
-          e.preventDefault();
+        const openCheckpointFilesPicker = () => {
           try {
             tv2CheckpointComposerFiles.click();
           } catch {}
+        };
+
+        tv2CheckpointComposerFilesField.addEventListener("click", (e) => {
+          if (e.target?.closest && e.target.closest("#tv2CheckpointFilesClearBtn")) return;
+          e.preventDefault();
+          openCheckpointFilesPicker();
+        });
+
+        tv2CheckpointComposerFilesField.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          openCheckpointFilesPicker();
+        });
+      }
+
+      if (tv2CheckpointComposerFilesClearBtn) {
+        tv2CheckpointComposerFilesClearBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          tv2ClearCheckpointComposerFiles();
         });
       }
 
@@ -1667,19 +1691,29 @@ const toolbarHTML = `
       tv2SyncCheckpointComposerSelect("assignee");
     }
 
+    function tv2ClearCheckpointComposerFiles() {
+      tv2CheckpointComposerFilesBuffer = [];
+      if (tv2CheckpointComposerFiles) tv2CheckpointComposerFiles.value = "";
+      tv2RenderCheckpointFilesMeta();
+    }
+
     function tv2RenderCheckpointFilesMeta() {
       if (!tv2CheckpointComposerFilesMeta) return;
       const files = Array.isArray(tv2CheckpointComposerFilesBuffer) ? tv2CheckpointComposerFilesBuffer : [];
-      if (!files.length) {
-        tv2CheckpointComposerFilesMeta.textContent = "No files selected";
-        tv2CheckpointComposerFilesMeta.classList.remove("has-files");
-        if (tv2CheckpointComposerFilesField) tv2CheckpointComposerFilesField.classList.remove("has-files");
-        return;
+      const hasFiles = files.length > 0;
+      let label = "No file selected";
+
+      if (hasFiles) {
+        label = files.length === 1
+          ? String(files[0]?.name || "1 file selected")
+          : `${String(files[0]?.name || "1 file")} + ${files.length - 1} more`;
       }
-      if (files.length === 1) tv2CheckpointComposerFilesMeta.textContent = String(files[0]?.name || "1 file selected");
-      else tv2CheckpointComposerFilesMeta.textContent = `${String(files[0]?.name || "1 file")} + ${files.length - 1} more`;
-      tv2CheckpointComposerFilesMeta.classList.add("has-files");
-      if (tv2CheckpointComposerFilesField) tv2CheckpointComposerFilesField.classList.add("has-files");
+
+      tv2CheckpointComposerFilesMeta.textContent = label;
+      tv2CheckpointComposerFilesMeta.title = hasFiles ? label : "";
+      tv2CheckpointComposerFilesMeta.classList.toggle("has-files", hasFiles);
+      if (tv2CheckpointComposerFilesField) tv2CheckpointComposerFilesField.classList.toggle("has-files", hasFiles);
+      if (tv2CheckpointComposerFilesClearBtn) tv2CheckpointComposerFilesClearBtn.hidden = !hasFiles;
     }
 
     function tv2GetCheckpointComposerSelectConfig(kind) {
