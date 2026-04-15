@@ -2911,11 +2911,9 @@ body.tasks-v2 .tv2-checklist-empty__text{
 }
 
 body.tasks-v2 .tv2-checkpoint-card{
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 16px;
+  position: relative;
+  display: block;
+  padding: 18px;
   border-radius: 22px;
   border: 1px solid rgba(17,24,39,0.08);
   background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
@@ -2924,9 +2922,16 @@ body.tasks-v2 .tv2-checkpoint-card{
 
 body.tasks-v2 .tv2-checkpoint-card__body{
   min-width: 0;
+  width: 100%;
   display: grid;
   gap: 12px;
-  flex: 1 1 auto;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__header{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
 }
 
 body.tasks-v2 .tv2-checkpoint-card__title-wrap{
@@ -2934,6 +2939,7 @@ body.tasks-v2 .tv2-checkpoint-card__title-wrap{
   align-items: center;
   gap: 12px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 body.tasks-v2 .tv2-checkpoint-card__bullet{
@@ -2951,6 +2957,95 @@ body.tasks-v2 .tv2-checkpoint-card__title{
   font-weight: 900;
   color: #111827;
   line-height: 1.35;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-wrap{
+  position: relative;
+  flex: 0 0 auto;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-btn{
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: rgba(17,24,39,0.06);
+  color: #111827;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.75);
+  transition: transform .14s ease, box-shadow .14s ease, background .14s ease;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-btn:hover,
+body.tasks-v2 .tv2-checkpoint-card__menu-btn.is-open{
+  background: rgba(17,24,39,0.09);
+  box-shadow: 0 12px 24px rgba(15,23,42,0.10);
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-btn:active{
+  transform: translateY(1px);
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-btn svg{
+  width: 18px;
+  height: 18px;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu{
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 190px;
+  padding: 8px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(17,24,39,0.08);
+  box-shadow: 0 22px 50px rgba(15,23,42,0.18);
+  z-index: 6;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu[hidden]{
+  display: none !important;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-item{
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 14px;
+  min-height: 42px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-item:hover{
+  background: rgba(15,23,42,0.05);
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-item svg{
+  width: 16px;
+  height: 16px;
+  color: rgba(17,24,39,0.62);
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-item.is-danger{
+  color: #b91c1c;
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-item.is-danger:hover{
+  background: rgba(239,68,68,0.10);
+}
+
+body.tasks-v2 .tv2-checkpoint-card__menu-item.is-danger svg{
+  color: #b91c1c;
 }
 
 body.tasks-v2 .tv2-checkpoint-card__meta{
@@ -3029,6 +3124,161 @@ body.tasks-v2 .tv2-checkpoint-card__action svg{
 body.tasks-v2 .tv2-checkpoint-card__action--danger{
   background: rgba(239,68,68,0.10);
   color: #b91c1c;
+}
+
+body.tasks-v2 .tv2-delegated-summary{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 2px;
+}
+
+body.tasks-v2 .tv2-delegated-summary[hidden]{
+  display: none !important;
+}
+
+body.tasks-v2 .tv2-delegated-list{
+  flex: 1 1 auto;
+  padding: 0 18px 18px;
+  overflow: auto;
+  display: grid;
+  gap: 12px;
+}
+
+body.tasks-v2 .tv2-points .tv2-empty{
+  color: rgba(17,24,39,0.62);
+  padding: 14px 4px;
+}
+
+body.tasks-v2 .tv2-points--delegated{
+  width: min(560px, calc(100vw - 28px));
+  max-height: min(82vh, 760px);
+}
+
+body.tasks-v2 .tv2-points--delegated .tv2-points__header,
+body.tasks-v2 .tv2-points--delegated .tv2-points__progress{
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+body.tasks-v2 .tv2-delegated-card{
+  position: relative;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(17,24,39,0.08);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  box-shadow: 0 16px 30px rgba(15,23,42,0.08);
+}
+
+body.tasks-v2 .tv2-delegated-card.is-done{
+  border-color: rgba(22,163,74,0.18);
+  background: linear-gradient(180deg, rgba(240,253,244,0.98) 0%, rgba(255,255,255,0.98) 100%);
+}
+
+body.tasks-v2 .tv2-delegated-card__header{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+body.tasks-v2 .tv2-delegated-card__title-wrap{
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 auto;
+}
+
+body.tasks-v2 .tv2-delegated-card__dot{
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: rgba(255,117,24,0.16);
+  border: 2px solid rgba(255,117,24,0.42);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9);
+}
+
+body.tasks-v2 .tv2-delegated-card.is-done .tv2-delegated-card__dot{
+  background: rgba(22,163,74,0.16);
+  border-color: rgba(22,163,74,0.38);
+}
+
+body.tasks-v2 .tv2-delegated-card__title{
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 900;
+  color: #111827;
+}
+
+body.tasks-v2 .tv2-delegated-card__state{
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(17,24,39,0.62);
+  background: rgba(15,23,42,0.06);
+}
+
+body.tasks-v2 .tv2-delegated-card__state.is-done{
+  background: rgba(22,163,74,0.14);
+  color: #166534;
+}
+
+body.tasks-v2 .tv2-delegated-card__meta{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+body.tasks-v2 .tv2-delegated-card--skeleton{
+  overflow: hidden;
+}
+
+body.tasks-v2 .tv2-delegated-card__skel-row{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+body.tasks-v2 .tv2-delegated-card__skel{
+  position: relative;
+  overflow: hidden;
+  display: block;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.18);
+}
+
+body.tasks-v2 .tv2-delegated-card__skel::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.88) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: tv2ShimmerSweep 1.2s ease-in-out infinite;
+}
+
+body.tasks-v2 .tv2-delegated-card__skel--title{
+  height: 16px;
+  width: 72%;
+  border-radius: 999px;
+}
+
+body.tasks-v2 .tv2-delegated-card__skel--chip{
+  height: 34px;
+  width: 136px;
+}
+
+body.tasks-v2 .tv2-delegated-card__skel--chip-sm{
+  width: 104px;
 }
 
 body.tasks-v2 .tv2-checkpoint-overlay{
@@ -3111,13 +3361,16 @@ body.tasks-v2 .tv2-card::before{
 
 @media (max-width: 640px){
   body.tasks-v2 .tv2-checkpoint-card{
-    flex-direction: column;
+    padding: 16px;
   }
 
-  body.tasks-v2 .tv2-checkpoint-card__actions{
-    width: 100%;
-    flex-direction: row;
-    justify-content: flex-end;
+  body.tasks-v2 .tv2-checkpoint-card__header{
+    gap: 10px;
+  }
+
+  body.tasks-v2 .tv2-checkpoint-card__menu{
+    right: 0;
+    min-width: 176px;
   }
 
   body.tasks-v2 .tv2-mini-modal{
@@ -3130,5 +3383,31 @@ body.tasks-v2 .tv2-card::before{
   body.tasks-v2 .tv2-mini-modal__footer{
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  body.tasks-v2 .tv2-points--delegated{
+    width: min(100%, calc(100vw - 24px));
+  }
+
+  body.tasks-v2 .tv2-points--delegated .tv2-points__header,
+  body.tasks-v2 .tv2-points--delegated .tv2-points__progress,
+  body.tasks-v2 .tv2-delegated-summary,
+  body.tasks-v2 .tv2-delegated-list{
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  body.tasks-v2 .tv2-delegated-card{
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  body.tasks-v2 .tv2-delegated-card__header{
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  body.tasks-v2 .tv2-delegated-card__state{
+    align-self: flex-start;
   }
 }
