@@ -2447,6 +2447,8 @@ const TASK_POINTS_TABLE = Object.freeze({
   assignee: "Assignee To",
   deliveryDate: "Delivery Date",
   priority: "Priority Level",
+  workReport: "Work report",
+  workFiles: "Work files",
 });
 
 const TASK_POINTS_PRIORITY_OPTIONS = Object.freeze([
@@ -2471,6 +2473,8 @@ async function createTaskPointsInlineDatabase({ parentPageId, taskTitle }) {
           options: TASK_POINTS_PRIORITY_OPTIONS.map((o) => ({ name: o.name, color: o.color })),
         },
       },
+      [TASK_POINTS_TABLE.workReport]: { rich_text: {} },
+      [TASK_POINTS_TABLE.workFiles]: { files: {} },
     };
 
     if (useRelationAssignee && teamMembersDatabaseId) {
@@ -2534,6 +2538,58 @@ function _findDatabasePropNameByType(dbProps, type) {
   return "";
 }
 
+function _findTaskPointNamedProp(propsObj, aliases = [], allowedTypes = []) {
+  const hit = pickPropName(propsObj || {}, aliases);
+  if (!hit) return "";
+  if (allowedTypes.length && !allowedTypes.includes(propsObj?.[hit]?.type)) return "";
+  return hit;
+}
+
+function _taskPointsSchemaCacheKey(databaseId) {
+  return `cache:notion:dbprops:taskpoints:${databaseId}:v1`;
+}
+
+async function _getTaskPointsDbPropsCached(databaseId) {
+  const dbId = String(databaseId || "").trim();
+  if (!dbId) return {};
+  const cacheKey = _taskPointsSchemaCacheKey(dbId);
+  return await cacheGetOrSet(cacheKey, 60, async () => {
+    const db = await notion.databases.retrieve({ database_id: dbId });
+    return db?.properties || {};
+  });
+}
+
+async function _ensureTaskPointsWorkProps(databaseId) {
+  const dbId = String(databaseId || "").trim();
+  if (!dbId) return { props: {}, workReportProp: "", workFilesProp: "" };
+
+  const before = await _getTaskPointsDbPropsCached(dbId);
+  const missing = {};
+
+  const existingWorkReport = _findTaskPointNamedProp(before, [TASK_POINTS_TABLE.workReport, "Work Report", "work report"], ["rich_text"]);
+  const existingWorkFiles = _findTaskPointNamedProp(before, [TASK_POINTS_TABLE.workFiles, "Work Files", "work files"], ["files"]);
+
+  if (!existingWorkReport) missing[TASK_POINTS_TABLE.workReport] = { rich_text: {} };
+  if (!existingWorkFiles) missing[TASK_POINTS_TABLE.workFiles] = { files: {} };
+
+  if (Object.keys(missing).length) {
+    await notion.databases.update({
+      database_id: dbId,
+      properties: missing,
+    });
+    try {
+      await cacheDel(_taskPointsSchemaCacheKey(dbId));
+    } catch {}
+  }
+
+  const after = Object.keys(missing).length ? await _getTaskPointsDbPropsCached(dbId) : before;
+  return {
+    props: after,
+    workReportProp: _findTaskPointNamedProp(after, [TASK_POINTS_TABLE.workReport, "Work Report", "work report"], ["rich_text"]),
+    workFilesProp: _findTaskPointNamedProp(after, [TASK_POINTS_TABLE.workFiles, "Work Files", "work files"], ["files"]),
+  };
+}
+
 async function queryTaskPointsFromDatabase(databaseId) {
   const dbId = String(databaseId || "").trim();
   if (!dbId) return null;
@@ -2567,6 +2623,8 @@ async function queryTaskPointsFromDatabase(databaseId) {
       props?.[TASK_POINTS_TABLE.priority]?.type === "select" || props?.[TASK_POINTS_TABLE.priority]?.type === "status" || props?.[TASK_POINTS_TABLE.priority]?.type === "multi_select"
         ? TASK_POINTS_TABLE.priority
         : _findDatabasePropNameByType(props, "select") || _findDatabasePropNameByType(props, "status") || _findDatabasePropNameByType(props, "multi_select");
+    const workReportProp = _findTaskPointNamedProp(props, [TASK_POINTS_TABLE.workReport, "Work Report", "work report"], ["rich_text"]);
+    const workFilesProp = _findTaskPointNamedProp(props, [TASK_POINTS_TABLE.workFiles, "Work Files", "work files"], ["files"]);
 
     if (!titleProp) return null;
 
@@ -2610,6 +2668,8 @@ async function queryTaskPointsFromDatabase(databaseId) {
         const files = filesProp ? _filesFromProp(pp?.[filesProp]) : [];
         const dueDate = dateProp ? _dateStartFromProp(pp?.[dateProp]) : null;
         const priority = priorityProp ? _selectFromProp(pp?.[priorityProp]) : null;
+        const workReport = workReportProp ? _firstTextFromProp(pp?.[workReportProp]) : "";
+        const workFiles = workFilesProp ? _filesFromProp(pp?.[workFilesProp]) : [];
 
         let assigneeIds = [];
         let assigneeNames = [];
@@ -2634,6 +2694,8 @@ async function queryTaskPointsFromDatabase(databaseId) {
           assigneeName: assigneeNames[0] || "",
           dueDate,
           priority,
+          workReport,
+          workFiles,
           createdTime: p.created_time,
           lastEditedTime: p.last_edited_time,
         };
@@ -3806,6 +3868,129 @@ app.post("/api/task-points/:pointId/attachments", requireAuth, requirePage("Task
   } catch (e) {
     console.error("Task point attachment error:", e?.body || e);
     return res.status(500).json({ error: "Failed to upload attachment." });
+  }
+});
+
+
+app.post("/api/task-points/:pointId/work", requireAuth, requirePage("Tasks"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+
+  try {
+    const raw = String(req.params.pointId || "").trim();
+    if (!raw) return res.status(400).json({ error: "Missing pointId" });
+    const rawNoHyphen = raw.replace(/-/g, "");
+    if (!looksLikeNotionId(rawNoHyphen)) return res.status(400).json({ error: "Invalid pointId" });
+    const pointId = toHyphenatedUUID(rawNoHyphen);
+
+    const report = String(req.body?.report || req.body?.workReport || "").replace(/\r\n/g, "\n").trim();
+    const replace = req.body?.replace !== false;
+    const attachments = Array.isArray(req.body?.attachments)
+      ? req.body.attachments
+      : Array.isArray(req.body?.workFiles)
+        ? req.body.workFiles
+        : Array.isArray(req.body?.files)
+          ? req.body.files
+          : [];
+
+    const taskPageId = await _resolveParentTaskIdFromPoint(pointId);
+    if (!taskPageId) return res.status(404).json({ error: "Parent task not found" });
+
+    const pointPage = await notion.pages.retrieve({ page_id: pointId });
+    const authz = await _assertSessionUserIsTaskAssignee(req, taskPageId, pointPage);
+    if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+
+    const pointDbId = pointPage?.parent?.type === "database_id" ? pointPage.parent.database_id : "";
+    const ensured = pointDbId ? await _ensureTaskPointsWorkProps(pointDbId) : { workReportProp: "", workFilesProp: "" };
+    const pointPageFresh = await notion.pages.retrieve({ page_id: pointId });
+    const props = pointPageFresh?.properties || {};
+
+    const workReportPropName =
+      _findTaskPointNamedProp(props, [TASK_POINTS_TABLE.workReport, "Work Report", "work report"], ["rich_text"]) ||
+      ensured.workReportProp ||
+      "";
+    const workFilesPropName =
+      _findTaskPointNamedProp(props, [TASK_POINTS_TABLE.workFiles, "Work Files", "work files"], ["files"]) ||
+      ensured.workFilesProp ||
+      "";
+
+    if (!workReportPropName && !workFilesPropName) {
+      return res.status(400).json({ error: "Work report fields are not available on this task point." });
+    }
+
+    const existingRaw = workFilesPropName && props?.[workFilesPropName]?.type === "files" ? props[workFilesPropName].files || [] : [];
+    const existing = (existingRaw || [])
+      .filter((f) => f && f.type === "external" && f.external?.url)
+      .map((f) => makeExternalFile(f.name || "file", f.external.url));
+
+    const nextFiles = [];
+    for (let i = 0; i < attachments.length; i++) {
+      const a = attachments[i] || {};
+      const directUrl = String(a.url || a.href || a.link || a.externalUrl || "").trim();
+      if (directUrl) {
+        let safeUrl = "";
+        try {
+          const u = new URL(directUrl);
+          if (u.protocol === "http:" || u.protocol === "https:") safeUrl = u.toString();
+        } catch {}
+
+        if (safeUrl) {
+          let linkName = String(a.name || a.filename || "").trim();
+          if (!linkName) {
+            try {
+              const u = new URL(safeUrl);
+              linkName = decodeURIComponent((u.pathname.split("/").pop() || "").trim()) || u.hostname || "link";
+            } catch {
+              linkName = "link";
+            }
+          }
+          nextFiles.push(makeExternalFile(linkName, safeUrl));
+          continue;
+        }
+      }
+
+      const dataUrl = a.dataUrl || a.fileDataUrl || a.screenshotDataUrl || "";
+      if (!dataUrl) continue;
+
+      const originalName = String(a.name || a.filename || "attachment").trim() || "attachment";
+      const safeName = originalName.replace(/[^a-z0-9._-]/gi, "_");
+      const filename = `task-point-work-${Date.now()}-${i}-${Math.random().toString(16).slice(2)}-${safeName}`;
+
+      const url = await uploadToBlobFromBase64(dataUrl, filename);
+      nextFiles.push(makeExternalFile(originalName, url));
+    }
+
+    const combined = replace ? nextFiles.slice(-20) : [...existing, ...nextFiles].slice(-20);
+    const updates = {};
+    if (workReportPropName) updates[workReportPropName] = { rich_text: notionTextFragmentsFromString(report) };
+    if (workFilesPropName) updates[workFilesPropName] = { files: combined };
+
+    await notion.pages.update({
+      page_id: pointId,
+      properties: updates,
+    });
+
+    await invalidateTaskPointsCaches(taskPageId);
+
+    const workFiles = (combined || [])
+      .map((f) => {
+        if (!f) return null;
+        if (f.type === "external" && f.external?.url) {
+          return { name: String(f.name || "file"), url: String(f.external.url) };
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    return res.json({
+      ok: true,
+      pointId,
+      workReport: report,
+      workFilesCount: workFiles.length,
+      workFiles,
+    });
+  } catch (e) {
+    console.error("Task point work update error:", e?.body || e);
+    return res.status(500).json({ error: "Failed to update work report." });
   }
 });
 
