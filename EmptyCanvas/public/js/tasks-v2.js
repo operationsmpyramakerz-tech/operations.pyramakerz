@@ -1313,6 +1313,21 @@ const toolbarHTML = `
     let tv2DelegatedListEl = null;
     let tv2DelegatedCloseBtn = null;
     let tv2DelegatedTask = null;
+    let tv2WorkOverlay = null;
+    let tv2WorkForm = null;
+    let tv2WorkTitleEl = null;
+    let tv2WorkMetaEl = null;
+    let tv2WorkReportInput = null;
+    let tv2WorkFilesList = null;
+    let tv2WorkAddFileBtn = null;
+    let tv2WorkAddLinkBtn = null;
+    let tv2WorkFileInput = null;
+    let tv2WorkSaveBtn = null;
+    let tv2WorkCancelBtn = null;
+    let tv2WorkCloseBtn = null;
+    let tv2WorkCurrentPoint = null;
+    let tv2WorkEditable = false;
+    let tv2WorkFilesBuffer = [];
 
     function tv2EnsureNewTaskModal() {
       if (tv2NewTaskOverlay) return;
@@ -1449,9 +1464,9 @@ const toolbarHTML = `
             <div class="tv2-mini-modal__body">
               <div class="tv2-form-row">
                 <label class="tv2-label" for="tv2CheckpointTitle">Checkpoint</label>
-                <div class="tv2-field tv2-field--text">
+                <div class="tv2-field tv2-field--text tv2-field--textarea">
                   <span class="tv2-field__icon" aria-hidden="true"><i data-feather="check-square"></i></span>
-                  <input class="tv2-input" type="text" id="tv2CheckpointTitle" placeholder="Write checkpoint name" required />
+                  <textarea class="tv2-input tv2-input--textarea" id="tv2CheckpointTitle" placeholder="Write checkpoint name" rows="3" enterkeyhint="enter" required></textarea>
                 </div>
               </div>
 
@@ -1563,6 +1578,13 @@ const toolbarHTML = `
       tv2CheckpointComposerCloseBtn = tv2CheckpointComposerOverlay.querySelector("#tv2CheckpointComposerCloseBtn");
 
       tv2WireCheckpointComposerSelects();
+
+      if (tv2CheckpointComposerTitle) {
+        tv2CheckpointComposerTitle.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter") return;
+          e.stopPropagation();
+        });
+      }
 
       tv2CheckpointComposerOverlay.addEventListener("click", (e) => {
         if (e.target === tv2CheckpointComposerOverlay) tv2CloseCheckpointComposerModal();
@@ -2110,6 +2132,7 @@ const toolbarHTML = `
     function tv2ClosePointsModal() {
       if (!tv2PointsOverlay) return;
       tv2CloseAllPointFilesMenus();
+      tv2CloseWorkModal();
       tv2SetPointsLoadingState(false);
       tv2PointsOverlay.hidden = true;
       tv2PointsOverlay.style.display = "none";
@@ -2176,43 +2199,44 @@ const toolbarHTML = `
     function tv2RenderDelegatedCards(items) {
       return (Array.isArray(items) ? items : [])
         .map(({ item, index }) => {
-          const assigneeLabel = tv2TodoAssigneeLabel(item);
           const dueLabel = tv2FormatCheckpointDate(item?.dueDate || "");
-          const pointPriority = String(item?.priority?.name || item?.priority || "").trim() || "No priority";
-          const pointPriorityKey = tv2NormalizePriorityKey(pointPriority);
+          const pointPriority = String(item?.priority?.name || item?.priority || "").trim();
+          const pointPriorityKey = tv2NormalizePriorityKey(pointPriority) || "medium";
           const filesCount = Array.isArray(item?.files) ? item.files.length : 0;
+          const workFilesCount = Array.isArray(item?.workFiles) ? item.workFiles.length : 0;
+          const hasWorkReport = String(item?.workReport || "").trim().length > 0;
           const done = !!item?.checked;
-          const stateLabel = done ? "Completed" : "In progress";
-          const stateClass = done ? " is-done" : "";
           const statusInner = done
             ? `<i data-feather="check"></i>`
             : `<span class="tv2-delegated-card__check-dot"></span>`;
-          const fileChip = filesCount
-            ? `<span class="tv2-checkpoint-chip"><i data-feather="paperclip"></i><span>${escapeHtml(`${filesCount} file${filesCount > 1 ? "s" : ""}`)}</span></span>`
-            : "";
+
+          const chips = [];
+          if (hasWorkReport) {
+            chips.push(`<span class="tv2-checkpoint-chip"><i data-feather="file-text"></i><span>Work report</span></span>`);
+          }
+          if (workFilesCount) {
+            chips.push(`<span class="tv2-checkpoint-chip"><i data-feather="folder"></i><span>${escapeHtml(`${workFilesCount} work file${workFilesCount > 1 ? "s" : ""}`)}</span></span>`);
+          }
+          if (filesCount) {
+            chips.push(`<span class="tv2-checkpoint-chip"><i data-feather="paperclip"></i><span>${escapeHtml(`${filesCount} file${filesCount > 1 ? "s" : ""}`)}</span></span>`);
+          }
 
           return `
-            <article class="tv2-delegated-card${stateClass}">
+            <article class="tv2-delegated-card tv2-delegated-card--prio-${escapeHtml(pointPriorityKey)}" data-delegated-point-id="${escapeHtml(String(item?.id || ""))}" role="button" tabindex="0" aria-label="${escapeHtml(item?.text || "Checkpoint")}">
               <div class="tv2-delegated-card__status-col">
-                <span class="tv2-delegated-card__check${stateClass}" aria-hidden="true">${statusInner}</span>
+                <span class="tv2-delegated-card__check${done ? " is-done" : ""}" aria-hidden="true">${statusInner}</span>
               </div>
               <div class="tv2-delegated-card__content">
                 <div class="tv2-delegated-card__header">
                   <div class="tv2-delegated-card__title-wrap">
-                    <div class="tv2-delegated-card__eyebrow">Checkpoint ${index + 1}</div>
+                    <div class="tv2-delegated-card__eyebrow-row">
+                      <div class="tv2-delegated-card__eyebrow">Checkpoint ${index + 1}</div>
+                      ${dueLabel ? `<div class="tv2-delegated-card__date"><i data-feather="calendar"></i><span>${escapeHtml(dueLabel)}</span></div>` : ""}
+                    </div>
                     <div class="tv2-delegated-card__title">${escapeHtml(item?.text || "Checkpoint")}</div>
                   </div>
-                  <span class="tv2-delegated-card__state${stateClass}">
-                    <i data-feather="${done ? "check-circle" : "clock"}"></i>
-                    <span>${escapeHtml(stateLabel)}</span>
-                  </span>
                 </div>
-                <div class="tv2-delegated-card__meta">
-                  <span class="tv2-checkpoint-chip"><i data-feather="user"></i><span>${escapeHtml(`Assigned to ${assigneeLabel}`)}</span></span>
-                  <span class="tv2-checkpoint-chip"><i data-feather="calendar"></i><span>${escapeHtml(dueLabel)}</span></span>
-                  ${pointPriority && pointPriority !== "No priority" ? `<span class="tv2-checkpoint-chip tv2-checkpoint-chip--priority tv2-checkpoint-chip--${escapeHtml(pointPriorityKey)}"><i data-feather="flag"></i><span>${escapeHtml(pointPriority)}</span></span>` : ""}
-                  ${fileChip}
-                </div>
+                ${chips.length ? `<div class="tv2-delegated-card__meta">${chips.join("")}</div>` : ""}
               </div>
             </article>
           `;
@@ -2288,6 +2312,7 @@ const toolbarHTML = `
 
     function tv2CloseDelegatedModal() {
       if (!tv2DelegatedOverlay) return;
+      tv2CloseWorkModal();
       tv2DelegatedOverlay.hidden = true;
       tv2DelegatedOverlay.style.display = "none";
       document.body.classList.remove("tv2-modal-open");
@@ -2428,6 +2453,26 @@ const toolbarHTML = `
           `;
         })
         .join("");
+
+      tv2DelegatedListEl.querySelectorAll("[data-delegated-point-id]").forEach((card) => {
+        const pointId = card.getAttribute("data-delegated-point-id") || "";
+        const point = todos.find((item) => String(item?.id || "") === String(pointId)) || null;
+        const openWork = () => {
+          if (!point) return;
+          tv2OpenWorkModal(point, { editable: false, checkpointLabel: `Checkpoint ${Array.isArray(todos) ? todos.findIndex((item) => String(item?.id || "") === String(pointId)) + 1 : ""}` });
+        };
+
+        card.addEventListener("click", (e) => {
+          if (e.target?.closest && e.target.closest("button,a")) return;
+          openWork();
+        });
+
+        card.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          openWork();
+        });
+      });
 
       if (window.feather) window.feather.replace();
     }
@@ -2804,6 +2849,335 @@ const toolbarHTML = `
       }
     }
 
+    function tv2PointPriorityKey(point) {
+      return tv2NormalizePriorityKey(point?.priority?.name || point?.priority || "") || "medium";
+    }
+
+    function tv2PointWorkFilesList(point) {
+      return Array.isArray(point?.workFiles) ? point.workFiles.filter(Boolean) : [];
+    }
+
+    function tv2SyncPointWorkState(pointId, payload = {}) {
+      const pid = String(pointId || "");
+      if (!pid) return;
+
+      const applyToList = (list) => {
+        if (!Array.isArray(list)) return;
+        const hit = list.find((item) => String(item?.id || "") === pid);
+        if (!hit) return;
+        if (Object.prototype.hasOwnProperty.call(payload, "workReport")) hit.workReport = String(payload.workReport || "");
+        if (Object.prototype.hasOwnProperty.call(payload, "workFiles")) hit.workFiles = Array.isArray(payload.workFiles) ? payload.workFiles.slice() : [];
+      };
+
+      applyToList(tv2PointsTask?.todos);
+      applyToList(tv2DelegatedTask?.todos);
+    }
+
+    function tv2WorkFileDisplayName(file, fallbackIndex) {
+      const direct = String(file?.name || file?.filename || "").trim();
+      if (direct) return direct;
+      const href = String(file?.url || file?.href || file?.link || file?.externalUrl || "").trim();
+      if (href) {
+        try {
+          const u = new URL(href);
+          return decodeURIComponent((u.pathname.split("/").pop() || "").trim()) || u.hostname || `file-${fallbackIndex + 1}`;
+        } catch {}
+      }
+      return `file-${fallbackIndex + 1}`;
+    }
+
+    function tv2EnsureWorkModal() {
+      if (tv2WorkOverlay) return;
+
+      tv2WorkOverlay = document.createElement("div");
+      tv2WorkOverlay.className = "tv2-modal-overlay tv2-work-overlay";
+      tv2WorkOverlay.id = "tv2WorkOverlay";
+      tv2WorkOverlay.hidden = true;
+      tv2WorkOverlay.style.display = "none";
+
+      tv2WorkOverlay.innerHTML = `
+        <div class="tv2-mini-modal tv2-work-modal" role="dialog" aria-modal="true" aria-labelledby="tv2WorkModalTitle">
+          <div class="tv2-mini-modal__header tv2-work-modal__header">
+            <div class="tv2-work-modal__headcopy">
+              <h4 class="tv2-mini-modal__title" id="tv2WorkModalTitle">Work details</h4>
+              <div class="tv2-work-modal__meta" id="tv2WorkModalMeta">Checkpoint</div>
+            </div>
+            <button class="tv2-modal-icon-btn tv2-modal-icon-btn--sm" type="button" id="tv2WorkCloseBtn" aria-label="Close work window">
+              <span class="tv2-x" aria-hidden="true">×</span>
+            </button>
+          </div>
+
+          <form class="tv2-mini-modal__form" id="tv2WorkForm">
+            <div class="tv2-mini-modal__body tv2-work-modal__body">
+              <div class="tv2-form-row tv2-form-row--full">
+                <label class="tv2-label" for="tv2WorkReportInput">Work report</label>
+                <div class="tv2-work-field">
+                  <textarea class="tv2-work-textarea" id="tv2WorkReportInput" rows="6" placeholder="Write work report"></textarea>
+                </div>
+              </div>
+
+              <div class="tv2-form-row tv2-form-row--full">
+                <div class="tv2-label-row tv2-label-row--work">
+                  <label class="tv2-label">Work files</label>
+                  <div class="tv2-work-actions" id="tv2WorkActions">
+                    <button class="tv2-work-attach-btn" type="button" id="tv2WorkAddFileBtn">
+                      <i data-feather="paperclip"></i>
+                      <span>Add file</span>
+                    </button>
+                    <button class="tv2-work-attach-btn tv2-work-attach-btn--ghost" type="button" id="tv2WorkAddLinkBtn">
+                      <i data-feather="link-2"></i>
+                      <span>Add link</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="tv2-work-files" id="tv2WorkFilesList"></div>
+                <input class="tv2-file-input tv2-file-input--hidden" type="file" id="tv2WorkFileInput" multiple />
+              </div>
+            </div>
+
+            <div class="tv2-mini-modal__footer tv2-work-modal__footer">
+              <button class="tv2-btn tv2-btn--ghost" type="button" id="tv2WorkCancelBtn">Close</button>
+              <button class="tv2-btn tv2-btn--primary" type="submit" id="tv2WorkSaveBtn">Save work</button>
+            </div>
+          </form>
+        </div>
+      `;
+
+      document.body.appendChild(tv2WorkOverlay);
+
+      tv2WorkForm = tv2WorkOverlay.querySelector("#tv2WorkForm");
+      tv2WorkTitleEl = tv2WorkOverlay.querySelector("#tv2WorkModalTitle");
+      tv2WorkMetaEl = tv2WorkOverlay.querySelector("#tv2WorkModalMeta");
+      tv2WorkReportInput = tv2WorkOverlay.querySelector("#tv2WorkReportInput");
+      tv2WorkFilesList = tv2WorkOverlay.querySelector("#tv2WorkFilesList");
+      tv2WorkAddFileBtn = tv2WorkOverlay.querySelector("#tv2WorkAddFileBtn");
+      tv2WorkAddLinkBtn = tv2WorkOverlay.querySelector("#tv2WorkAddLinkBtn");
+      tv2WorkFileInput = tv2WorkOverlay.querySelector("#tv2WorkFileInput");
+      tv2WorkSaveBtn = tv2WorkOverlay.querySelector("#tv2WorkSaveBtn");
+      tv2WorkCancelBtn = tv2WorkOverlay.querySelector("#tv2WorkCancelBtn");
+      tv2WorkCloseBtn = tv2WorkOverlay.querySelector("#tv2WorkCloseBtn");
+
+      tv2WorkOverlay.addEventListener("click", (e) => {
+        if (e.target === tv2WorkOverlay) tv2CloseWorkModal();
+      });
+
+      if (tv2WorkCloseBtn) {
+        tv2WorkCloseBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          tv2CloseWorkModal();
+        });
+      }
+
+      if (tv2WorkCancelBtn) {
+        tv2WorkCancelBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          tv2CloseWorkModal();
+        });
+      }
+
+      if (tv2WorkAddFileBtn && tv2WorkFileInput) {
+        tv2WorkAddFileBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (!tv2WorkEditable) return;
+          try {
+            tv2WorkFileInput.click();
+          } catch {}
+        });
+
+        tv2WorkFileInput.addEventListener("change", async () => {
+          if (!tv2WorkEditable) return;
+          const nextFiles = Array.from(tv2WorkFileInput.files || []);
+          if (!nextFiles.length) return;
+          tv2WorkFilesBuffer.push(...nextFiles);
+          tv2RenderWorkFilesList();
+          try {
+            tv2WorkFileInput.value = "";
+          } catch {}
+        });
+      }
+
+      if (tv2WorkAddLinkBtn) {
+        tv2WorkAddLinkBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (!tv2WorkEditable) return;
+          const rawUrl = window.prompt("Paste the work file link");
+          const cleanUrl = String(rawUrl || "").trim();
+          if (!cleanUrl) return;
+          if (!/^https?:\/\//i.test(cleanUrl)) {
+            if (window.toast) window.toast.error("Link must start with http or https");
+            return;
+          }
+          const rawName = window.prompt("Link name (optional)");
+          tv2WorkFilesBuffer.push({ name: String(rawName || "").trim() || tv2WorkFileDisplayName({ url: cleanUrl }, tv2WorkFilesBuffer.length), url: cleanUrl });
+          tv2RenderWorkFilesList();
+        });
+      }
+
+      if (tv2WorkForm) {
+        tv2WorkForm.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          if (!tv2WorkEditable) {
+            tv2CloseWorkModal();
+            return;
+          }
+
+          const pointId = String(tv2WorkCurrentPoint?.id || "").trim();
+          if (!pointId) return;
+
+          const prevText = tv2WorkSaveBtn ? tv2WorkSaveBtn.textContent : "";
+          if (tv2WorkSaveBtn) {
+            tv2WorkSaveBtn.disabled = true;
+            tv2WorkSaveBtn.textContent = "Saving...";
+          }
+          if (tv2WorkCancelBtn) tv2WorkCancelBtn.disabled = true;
+          if (tv2WorkCloseBtn) tv2WorkCloseBtn.disabled = true;
+
+          try {
+            const attachments = await tv2ReadFileListArrayAsDataUrls(tv2WorkFilesBuffer);
+            const payload = {
+              report: String(tv2WorkReportInput?.value || "").trim(),
+              attachments,
+              replace: true,
+            };
+
+            const r = await fetch(`/api/task-points/${encodeURIComponent(pointId)}/work`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+
+            if (!r.ok) throw new Error("Failed to update work report");
+            const data = await r.json();
+            const nextFiles = Array.isArray(data?.workFiles) ? data.workFiles : attachments.map((file, index) => ({
+              name: tv2WorkFileDisplayName(file, index),
+              url: String(file?.url || file?.dataUrl || ""),
+            })).filter((file) => String(file.url || "").trim());
+            const nextReport = typeof data?.workReport === "string" ? data.workReport : payload.report;
+
+            if (tv2WorkCurrentPoint) {
+              tv2WorkCurrentPoint.workReport = nextReport;
+              tv2WorkCurrentPoint.workFiles = nextFiles;
+            }
+            tv2WorkFilesBuffer = nextFiles.slice();
+            tv2SyncPointWorkState(pointId, { workReport: nextReport, workFiles: nextFiles });
+            if (window.toast) window.toast.success("Work details saved");
+            tv2CloseWorkModal();
+          } catch (err) {
+            console.error(err);
+            if (window.toast) window.toast.error("Failed to save work details");
+          } finally {
+            if (tv2WorkSaveBtn) {
+              tv2WorkSaveBtn.disabled = false;
+              tv2WorkSaveBtn.textContent = prevText || "Save work";
+            }
+            if (tv2WorkCancelBtn) tv2WorkCancelBtn.disabled = false;
+            if (tv2WorkCloseBtn) tv2WorkCloseBtn.disabled = false;
+          }
+        });
+      }
+
+      if (window.feather) window.feather.replace();
+    }
+
+    function tv2RenderWorkFilesList() {
+      if (!tv2WorkFilesList) return;
+
+      const files = Array.isArray(tv2WorkFilesBuffer) ? tv2WorkFilesBuffer : [];
+      if (!files.length) {
+        tv2WorkFilesList.innerHTML = `<div class="tv2-work-files-empty">No work files yet</div>`;
+        return;
+      }
+
+      tv2WorkFilesList.innerHTML = files
+        .map((file, index) => {
+          const name = tv2WorkFileDisplayName(file, index);
+          const href = String(file?.url || file?.dataUrl || "").trim();
+          return `
+            <div class="tv2-work-file-item" data-work-file-index="${index}">
+              <button class="tv2-work-file-open" type="button" data-work-file-open="${index}">
+                <span class="tv2-work-file-icon" aria-hidden="true"><i data-feather="paperclip"></i></span>
+                <span class="tv2-work-file-name">${escapeHtml(name)}</span>
+              </button>
+              ${tv2WorkEditable ? `<button class="tv2-work-file-remove" type="button" data-work-file-remove="${index}" aria-label="Remove file"><span class="tv2-x" aria-hidden="true">×</span></button>` : ""}
+            </div>
+          `;
+        })
+        .join("");
+
+      tv2WorkFilesList.querySelectorAll("[data-work-file-open]").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          const index = Number(btn.getAttribute("data-work-file-open"));
+          const file = files[index] || null;
+          const href = String(file?.url || file?.dataUrl || "").trim();
+          if (!href) return;
+          await tv2DownloadFile(href, tv2WorkFileDisplayName(file, index));
+        });
+      });
+
+      if (tv2WorkEditable) {
+        tv2WorkFilesList.querySelectorAll("[data-work-file-remove]").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            const index = Number(btn.getAttribute("data-work-file-remove"));
+            if (!Number.isFinite(index) || index < 0) return;
+            tv2WorkFilesBuffer.splice(index, 1);
+            tv2RenderWorkFilesList();
+          });
+        });
+      }
+
+      if (window.feather) window.feather.replace();
+    }
+
+    function tv2OpenWorkModal(point, { editable = false, checkpointLabel = "" } = {}) {
+      if (!point) return;
+      tv2EnsureWorkModal();
+      tv2WorkCurrentPoint = point;
+      tv2WorkEditable = !!editable;
+      tv2WorkFilesBuffer = tv2PointWorkFilesList(point).map((file, index) => ({
+        name: tv2WorkFileDisplayName(file, index),
+        url: String(file?.url || "").trim(),
+      }));
+
+      if (tv2WorkTitleEl) tv2WorkTitleEl.textContent = String(point?.text || "Work details").trim() || "Work details";
+      if (tv2WorkMetaEl) {
+        const metaParts = [];
+        if (checkpointLabel) metaParts.push(String(checkpointLabel));
+        const dueLabel = tv2FormatCheckpointDate(point?.dueDate || "");
+        if (dueLabel) metaParts.push(String(dueLabel));
+        const assigneeLabel = tv2TodoAssigneeLabel(point);
+        if (editable && assigneeLabel && assigneeLabel !== "Unassigned") metaParts.push(assigneeLabel);
+        tv2WorkMetaEl.textContent = metaParts.join(" • ") || "Checkpoint";
+      }
+      if (tv2WorkReportInput) {
+        tv2WorkReportInput.value = String(point?.workReport || "");
+        tv2WorkReportInput.readOnly = !tv2WorkEditable;
+      }
+      if (tv2WorkAddFileBtn) tv2WorkAddFileBtn.hidden = !tv2WorkEditable;
+      if (tv2WorkAddLinkBtn) tv2WorkAddLinkBtn.hidden = !tv2WorkEditable;
+      if (tv2WorkSaveBtn) tv2WorkSaveBtn.hidden = !tv2WorkEditable;
+      if (tv2WorkCancelBtn) tv2WorkCancelBtn.textContent = tv2WorkEditable ? "Cancel" : "Close";
+      if (tv2WorkOverlay) {
+        tv2WorkOverlay.hidden = false;
+        tv2WorkOverlay.style.display = "flex";
+      }
+      tv2RenderWorkFilesList();
+      if (window.feather) window.feather.replace();
+    }
+
+    function tv2CloseWorkModal() {
+      if (!tv2WorkOverlay) return;
+      tv2WorkOverlay.hidden = true;
+      tv2WorkOverlay.style.display = "none";
+      tv2WorkCurrentPoint = null;
+      tv2WorkEditable = false;
+      tv2WorkFilesBuffer = [];
+      try {
+        if (tv2WorkFileInput) tv2WorkFileInput.value = "";
+      } catch {}
+    }
+
     function tv2RenderPointsModal(task, { canEdit } = {}) {
       tv2SetPointsLoadingState(false);
       tv2PointsTask = task || null;
@@ -2829,24 +3203,29 @@ const toolbarHTML = `
         .map((t) => {
           const id = String(t?.id || "");
           const checked = !!t?.checked;
+          const priorityKey = tv2PointPriorityKey(t);
           const files = Array.isArray(t?.files) ? t.files : [];
           const filesCount = files.length;
-          const disabledAttr = editable && id ? "" : "disabled";
+          const workFilesCount = tv2PointWorkFilesList(t).length;
+          const checkDisabledAttr = editable && id ? "" : "disabled";
+          const workDisabledAttr = id ? "" : "disabled";
           const badge = filesCount ? `<span class="tv2-point-badge">${escapeHtml(String(filesCount))}</span>` : "";
+          const workBadge = workFilesCount ? `<span class="tv2-point-badge tv2-point-badge--work">${escapeHtml(String(workFilesCount))}</span>` : "";
           const menuHtml = tv2PointFilesMenuHtml(files);
           const filesBtnDisabled = filesCount ? "" : "disabled";
 
           return `
-            <div class="tv2-point-row${checked ? " is-checked" : ""}${!editable ? " is-readonly" : ""}" data-point-id="${escapeHtml(id)}">
-              <button class="tv2-point-check" type="button" aria-label="Mark complete" ${disabledAttr}></button>
+            <div class="tv2-point-row tv2-point-row--prio-${escapeHtml(priorityKey)}${checked ? " is-checked" : ""}${!editable ? " is-readonly" : ""}" data-point-id="${escapeHtml(id)}" role="button" tabindex="0" aria-label="${escapeHtml(t?.text || "Checkpoint")}">
+              <button class="tv2-point-check" type="button" aria-label="Mark complete" ${checkDisabledAttr}></button>
               <div class="tv2-point-text">${escapeHtml(t.text)}</div>
               <div class="tv2-point-actions">
-                <button class="tv2-point-upload" type="button" aria-label="Upload files and media" title="Upload files and media" ${disabledAttr}>
+                <button class="tv2-point-upload" type="button" aria-label="${editable ? "Open work report" : "View work report"}" title="${editable ? "Open work report" : "View work report"}" ${workDisabledAttr}>
                   <i data-feather="plus"></i>
+                  ${workBadge}
                 </button>
 
                 <div class="tv2-point-files-wrap">
-                  <button class="tv2-point-files-btn" type="button" aria-label="View uploaded files" title="View uploaded files" aria-haspopup="menu" aria-expanded="false" ${filesBtnDisabled}>
+                  <button class="tv2-point-files-btn" type="button" aria-label="View task files" title="View task files" aria-haspopup="menu" aria-expanded="false" ${filesBtnDisabled}>
                     <i data-feather="paperclip"></i>
                     ${badge}
                   </button>
@@ -2854,17 +3233,21 @@ const toolbarHTML = `
                     ${menuHtml}
                   </div>
                 </div>
-
-                <input class="tv2-point-file-input" type="file" multiple hidden />
               </div>
             </div>
           `;
         })
         .join("");
 
-      // Wire interactions
       tv2PointsListEl.querySelectorAll(".tv2-point-row").forEach((row) => {
         const pointId = row.getAttribute("data-point-id") || "";
+        const point = todos.find((item) => String(item?.id || "") === String(pointId)) || null;
+
+        const openWork = () => {
+          if (!point) return;
+          tv2CloseAllPointFilesMenus();
+          tv2OpenWorkModal(point, { editable, checkpointLabel: "Task point" });
+        };
 
         const checkBtn = row.querySelector(".tv2-point-check");
         if (checkBtn) {
@@ -2879,32 +3262,18 @@ const toolbarHTML = `
         }
 
         const uploadBtn = row.querySelector(".tv2-point-upload");
-        const fileInput = row.querySelector(".tv2-point-file-input");
-
-        const filesBtn = row.querySelector(".tv2-point-files-btn");
-        const filesMenu = row.querySelector(".tv2-point-files-menu");
-
-        if (uploadBtn && fileInput) {
+        if (uploadBtn) {
           uploadBtn.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (!editable) return;
             if (!pointId) return;
-            try {
-              fileInput.click();
-            } catch {}
-          });
-
-          fileInput.addEventListener("change", () => {
-            if (!editable) return;
-            if (!pointId) return;
-            tv2UploadPointAttachments(pointId, fileInput, uploadBtn);
+            openWork();
           });
         }
 
-        // Attachments dropdown
+        const filesBtn = row.querySelector(".tv2-point-files-btn");
+        const filesMenu = row.querySelector(".tv2-point-files-menu");
         if (filesBtn && filesMenu) {
-          // Prevent overlay click handler from closing the menu immediately.
           filesBtn.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -2912,14 +3281,12 @@ const toolbarHTML = `
 
             const isOpen = filesMenu.hidden === false;
             tv2CloseAllPointFilesMenus();
-
             if (!isOpen) {
               filesMenu.hidden = false;
               filesBtn.setAttribute("aria-expanded", "true");
             }
           });
 
-          // Keep clicks inside the menu from bubbling to the overlay and download files on tap.
           filesMenu.addEventListener("click", async (e) => {
             const fileBtn = e.target?.closest ? e.target.closest("[data-file-url]") : null;
             if (fileBtn) {
@@ -2933,6 +3300,18 @@ const toolbarHTML = `
             e.stopPropagation();
           });
         }
+
+        row.addEventListener("click", (e) => {
+          if (e.target?.closest && e.target.closest(".tv2-point-check, .tv2-point-upload, .tv2-point-files-wrap")) return;
+          openWork();
+        });
+
+        row.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          if (e.target?.closest && e.target.closest(".tv2-point-check, .tv2-point-upload, .tv2-point-files-wrap")) return;
+          e.preventDefault();
+          openWork();
+        });
       });
 
       if (window.feather) window.feather.replace();
@@ -3453,6 +3832,13 @@ const toolbarHTML = `
         if (!f) continue;
         if (f && typeof f === "object" && typeof f.dataUrl === "string") {
           out.push({ name: String(f.name || "file"), dataUrl: String(f.dataUrl) });
+          continue;
+        }
+        if (f && typeof f === "object" && typeof (f.url || f.href || f.link || f.externalUrl) === "string") {
+          out.push({
+            name: String(f.name || f.filename || "link"),
+            url: String(f.url || f.href || f.link || f.externalUrl || ""),
+          });
           continue;
         }
         const dataUrl = await tv2ReadFileAsDataUrl(f);
