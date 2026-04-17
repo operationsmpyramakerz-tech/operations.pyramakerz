@@ -5,6 +5,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const searchInput = document.getElementById("requestedSearch");
   const listDiv = document.getElementById("requested-list");
   const tabsWrap = document.getElementById("reqTabs");
+  const typeFilterWrap = document.getElementById("reqTypeFilter");
+  const typeFilterBtn = document.getElementById("reqTypeFilterBtn");
+  const typeFilterPanel = document.getElementById("reqTypeFilterPanel");
+  const typeFilterDot = document.getElementById("reqTypeFilterDot");
   const pageMode = String(
     document.body?.dataset?.ordersView ||
     (window.location.pathname === "/orders/maintenance-orders" ? "maintenance" : "requested"),
@@ -1254,6 +1258,33 @@ document.addEventListener("DOMContentLoaded", () => {
     return isMaintenancePage ? "received" : "not-started";
   }
 
+  function normalizeTypeFilterValue(value) {
+    const key = orderTypeKey(value);
+    return key || "all";
+  }
+
+  function readTypeFilterFromUrl() {
+    try {
+      const url = new URL(window.location.href);
+      return normalizeTypeFilterValue(url.searchParams.get("type"));
+    } catch {
+      return "all";
+    }
+  }
+
+  function updateOrdersToolbarUrl() {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", currentTab);
+      if (currentTypeFilter && currentTypeFilter !== "all") {
+        url.searchParams.set("type", currentTypeFilter);
+      } else {
+        url.searchParams.delete("type");
+      }
+      window.history.replaceState({}, "", url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""));
+    } catch {}
+  }
+
   // Stage alone is not enough because we split "Shipped" into:
   // - Remaining: shipped but not fully received (remaining qty > 0)
   // - Received: shipped and fully received
@@ -1265,14 +1296,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateTabUI() {
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", currentTab);
-    window.history.replaceState({}, "", url);
+    updateOrdersToolbarUrl();
 
     const tabs = tabsWrap ? Array.from(tabsWrap.querySelectorAll(".tab-portfolio")) : [];
     tabs.forEach((a) => {
       const t = norm(a.getAttribute("data-tab"));
       const active = t === currentTab;
+      a.classList.toggle("active", active);
       a.classList.toggle("is-active", active);
       a.setAttribute("aria-selected", active ? "true" : "false");
     });
@@ -1537,6 +1567,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let allItems = [];
   let groups = [];
   let currentTab = "not-started";
+  let currentTypeFilter = "all";
   let activeGroup = null;
   let lastFocus = null;
 
@@ -1563,26 +1594,156 @@ document.addEventListener("DOMContentLoaded", () => {
     return norm(hay).includes(q);
   }
 
+  function groupTypeKey(g) {
+    const first = (g.items || [])[0] || {};
+    return normalizeTypeFilterValue(g.orderType || first.orderType);
+  }
+
+  function groupMatchesCurrentTab(g) {
+    const idx = g?.stage?.idx || 1;
+    const first = (g.items || [])[0] || {};
+    const isMaintenanceOrder = isMaintenanceOrderType(g.orderType || first.orderType);
+
+    if (isMaintenancePage) {
+      if (!isMaintenanceOrder) return false;
+      if (currentTab === "received") return idx === 4;
+      if (currentTab === "delivered") return idx >= 5;
+      return false;
+    }
+    if (currentTab === "not-started") return idx < 4;
+    if (currentTab === "remaining") return !isMaintenanceOrder && idx === 4 && !!g?.hasRemaining;
+    if (currentTab === "received") return idx === 4 && (isMaintenanceOrder || !!g?.hasReceived);
+    if (currentTab === "delivered") return idx >= 5;
+    return false;
+  }
+
+  function groupMatchesCurrentType(g) {
+    if (!currentTypeFilter || currentTypeFilter === "all") return true;
+    return groupTypeKey(g) === currentTypeFilter;
+  }
+
+  function getTypeFilterOptions() {
+    const scopedGroups = (groups || []).filter((g) => groupMatchesCurrentTab(g));
+    const counts = new Map();
+    for (const g of scopedGroups) {
+      const key = groupTypeKey(g);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+
+    const defs = isMaintenancePage
+      ? [
+          { value: "requestmaintenance", type: "requestmaintenance" },
+        ]
+      : [
+          { value: "requestproducts", type: "requestproducts" },
+          { value: "withdrawproducts", type: "withdrawproducts" },
+          { value: "requestmaintenance", type: "requestmaintenance" },
+        ];
+
+    const total = scopedGroups.length;
+    const options = [{
+      value: "all",
+      label: "All Types",
+      icon: "layers",
+      bg: "#F3F4F6",
+      fg: "#111827",
+      bd: "#E5E7EB",
+      count: total,
+    }];
+
+    defs.forEach((def) => {
+      const meta = orderTypeMeta(def.type);
+      options.push({
+        value: def.value,
+        label: meta.label,
+        icon: meta.icon,
+        bg: meta.bg,
+        fg: meta.fg,
+        bd: meta.bd,
+        count: counts.get(def.value) || 0,
+      });
+    });
+
+    return options;
+  }
+
+  function updateTypeFilterButtonState(options = getTypeFilterOptions()) {
+    if (!typeFilterWrap || !typeFilterBtn) return;
+    const active = options.find((opt) => opt.value === currentTypeFilter) || options[0];
+    const isFiltered = !!active && active.value !== "all";
+    typeFilterWrap.classList.toggle("is-filtered", isFiltered);
+    typeFilterDot && (typeFilterDot.hidden = !isFiltered);
+    typeFilterBtn.setAttribute(
+      "aria-label",
+      isFiltered
+        ? `Filter orders by type. Selected: ${active.label}`
+        : "Filter orders by type",
+    );
+  }
+
+  function renderTypeFilterMenu() {
+    if (!typeFilterPanel) return;
+
+    const options = getTypeFilterOptions();
+    updateTypeFilterButtonState(options);
+
+    const plural = (n) => `${n} order${n === 1 ? "" : "s"}`;
+    typeFilterPanel.innerHTML = `
+      <div class="orders-type-filter__panel-head">
+        <div class="orders-type-filter__panel-title">Filter by type</div>
+        <div class="orders-type-filter__panel-sub">${escapeHTML(plural(options[0]?.count || 0))}</div>
+      </div>
+      <div class="orders-type-filter__options">
+        ${options.map((opt) => `
+          <button
+            type="button"
+            class="orders-type-filter__option${opt.value === currentTypeFilter ? " is-active" : ""}"
+            data-value="${escapeHTML(opt.value)}"
+            role="menuitemradio"
+            aria-checked="${opt.value === currentTypeFilter ? "true" : "false"}"
+          >
+            <span class="orders-type-filter__option-icon" style="--otf-icon-bg:${opt.bg};--otf-icon-fg:${opt.fg};--otf-icon-border:${opt.bd};">
+              <i data-feather="${escapeHTML(opt.icon)}"></i>
+            </span>
+            <span class="orders-type-filter__option-body">
+              <span class="orders-type-filter__option-title">${escapeHTML(opt.label)}</span>
+              <span class="orders-type-filter__option-sub">${escapeHTML(plural(opt.count || 0))}</span>
+            </span>
+            <span class="orders-type-filter__option-check"><i data-feather="check"></i></span>
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function closeTypeFilterMenu() {
+    if (!typeFilterWrap || !typeFilterBtn || !typeFilterPanel) return;
+    typeFilterWrap.classList.remove("is-open");
+    typeFilterBtn.setAttribute("aria-expanded", "false");
+    typeFilterPanel.hidden = true;
+  }
+
+  function openTypeFilterMenu() {
+    if (!typeFilterWrap || !typeFilterBtn || !typeFilterPanel) return;
+    renderTypeFilterMenu();
+    typeFilterWrap.classList.add("is-open");
+    typeFilterBtn.setAttribute("aria-expanded", "true");
+    typeFilterPanel.hidden = false;
+    if (window.feather) window.feather.replace();
+  }
+
+  function toggleTypeFilterMenu(force) {
+    if (!typeFilterPanel) return;
+    const shouldOpen = typeof force === "boolean" ? force : typeFilterPanel.hidden;
+    if (shouldOpen) openTypeFilterMenu();
+    else closeTypeFilterMenu();
+  }
+
   function getFilteredGroups() {
     const q = norm(searchInput?.value || "");
     return (groups || [])
-      .filter((g) => {
-        const idx = g?.stage?.idx || 1;
-        const first = (g.items || [])[0] || {};
-        const isMaintenanceOrder = isMaintenanceOrderType(g.orderType || first.orderType);
-
-        if (isMaintenancePage) {
-          if (!isMaintenanceOrder) return false;
-          if (currentTab === "received") return idx === 4;
-          if (currentTab === "delivered") return idx >= 5;
-          return false;
-        }
-        if (currentTab === "not-started") return idx < 4;
-        if (currentTab === "remaining") return !isMaintenanceOrder && idx === 4 && !!g?.hasRemaining;
-        if (currentTab === "received") return idx === 4 && (isMaintenanceOrder || !!g?.hasReceived);
-        if (currentTab === "delivered") return idx >= 5;
-        return false;
-      })
+      .filter((g) => groupMatchesCurrentTab(g))
+      .filter((g) => groupMatchesCurrentType(g))
       .filter((g) => groupMatchesQuery(g, q));
   }
 
@@ -1670,6 +1831,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function render() {
     if (!listDiv) return;
+
+    renderTypeFilterMenu();
 
     const filtered = getFilteredGroups();
     listDiv.innerHTML = "";
@@ -3169,8 +3332,42 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     e.preventDefault();
 
     currentTab = t;
+    closeTypeFilterMenu();
     updateTabUI();
     render();
+  });
+
+  typeFilterBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleTypeFilterMenu();
+  });
+
+  typeFilterPanel?.addEventListener("click", (e) => {
+    const btn = e.target?.closest?.(".orders-type-filter__option");
+    if (!btn) return;
+    const nextValue = normalizeTypeFilterValue(btn.getAttribute("data-value"));
+    if (nextValue === currentTypeFilter) {
+      closeTypeFilterMenu();
+      return;
+    }
+    currentTypeFilter = nextValue;
+    updateOrdersToolbarUrl();
+    closeTypeFilterMenu();
+    render();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!typeFilterWrap || !typeFilterPanel || typeFilterPanel.hidden) return;
+    if (typeFilterWrap.contains(e.target)) return;
+    closeTypeFilterMenu();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (typeFilterPanel && !typeFilterPanel.hidden) {
+      closeTypeFilterMenu();
+    }
   });
 
   modalClose?.addEventListener("click", closeOrderModal);
@@ -3539,7 +3736,9 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
 
   // ---------- Init ----------
   currentTab = readTabFromUrl();
+  currentTypeFilter = readTypeFilterFromUrl();
   updateTabUI();
+  updateTypeFilterButtonState();
 
   loadRequested().catch((e) => {
     console.error(e);

@@ -4,6 +4,11 @@
 document.addEventListener('DOMContentLoaded', () => {
   const ordersListDiv = document.getElementById('orders-list');
   const searchInput = document.getElementById('orderSearch');
+  const tabsWrap = document.getElementById('coTabs');
+  const typeFilterWrap = document.getElementById('coTypeFilter');
+  const typeFilterBtn = document.getElementById('coTypeFilterBtn');
+  const typeFilterPanel = document.getElementById('coTypeFilterPanel');
+  const typeFilterDot = document.getElementById('coTypeFilterDot');
 
   // This file is included on multiple pages, so only run when the Current Orders list exists.
   if (!ordersListDiv) return;
@@ -19,6 +24,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let allOrders = [];
   let filtered = [];
+  let currentStatusTab = 'all';
+  let currentTypeFilter = 'all';
 
   // Map of rendered groups by their representative groupId
   let groupsById = new Map();
@@ -193,6 +200,45 @@ document.addEventListener('DOMContentLoaded', () => {
   function orderTypeSubtitle(type, notionColor, fallback = '—') {
     const meta = orderTypeMeta(type, notionColor);
     return meta.label && meta.label !== 'Order' ? meta.label : fallback;
+  }
+
+  function orderTypeKey(type) {
+    return String(type || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function normalizeCurrentStatusTab(value) {
+    const raw = norm(String(value || '').replace(/_/g, '-'));
+    return new Set(['all', 'active', 'shipped', 'arrived']).has(raw) ? raw : 'all';
+  }
+
+  function readStatusTabFromUrl() {
+    try {
+      return normalizeCurrentStatusTab(new URL(window.location.href).searchParams.get('tab'));
+    } catch {
+      return 'all';
+    }
+  }
+
+  function normalizeTypeFilterValue(value) {
+    return orderTypeKey(value) || 'all';
+  }
+
+  function readTypeFilterFromUrl() {
+    try {
+      return normalizeTypeFilterValue(new URL(window.location.href).searchParams.get('type'));
+    } catch {
+      return 'all';
+    }
+  }
+
+  function updateCurrentOrdersToolbarUrl() {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', currentStatusTab);
+      if (currentTypeFilter && currentTypeFilter !== 'all') url.searchParams.set('type', currentTypeFilter);
+      else url.searchParams.delete('type');
+      window.history.replaceState({}, '', url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : ''));
+    } catch {}
   }
 
   const moneyFmt = (() => {
@@ -915,6 +961,181 @@ document.addEventListener('DOMContentLoaded', () => {
     window.location.href = url;
   }
 
+  function statusTabForGroup(group) {
+    const stage = group?.stage || computeStage(group?.products || []);
+    const idx = Number(stage?.idx) || 1;
+    if (idx >= 5) return 'arrived';
+    if (idx >= 4) return 'shipped';
+    return 'active';
+  }
+
+  function groupTypeKey(group) {
+    const first = (group?.products || [])[0] || {};
+    return normalizeTypeFilterValue(group?.orderType || first.orderType);
+  }
+
+  function groupMatchesCurrentStatus(group) {
+    if (currentStatusTab === 'all') return true;
+    return statusTabForGroup(group) === currentStatusTab;
+  }
+
+  function groupMatchesCurrentType(group) {
+    if (!currentTypeFilter || currentTypeFilter === 'all') return true;
+    return groupTypeKey(group) === currentTypeFilter;
+  }
+
+  function groupMatchesSearch(group, query) {
+    if (!query) return true;
+    const hay = [
+      group.orderIdRange || '',
+      group.reason || '',
+      ...(group.products || []).map((x) => x.productName || ''),
+      ...(group.products || []).map((x) => x.reason || ''),
+      ...(group.products || []).map((x) => x.orderId || ''),
+      ...(group.products || []).map((x) => x.createdByName || ''),
+    ].join(' ').toLowerCase();
+    return hay.includes(query);
+  }
+
+  function setActiveStatusTabUI() {
+    if (!tabsWrap) return;
+    Array.from(tabsWrap.querySelectorAll('a.tab-portfolio')).forEach((a) => {
+      const tab = normalizeCurrentStatusTab(a.dataset.tab || 'all');
+      const active = tab === currentStatusTab;
+      a.classList.toggle('active', active);
+      a.classList.toggle('is-active', active);
+      a.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function getTypeFilterOptions(allGroups = []) {
+    const scoped = (allGroups || []).filter((group) => groupMatchesCurrentStatus(group));
+    const counts = new Map();
+    for (const group of scoped) {
+      const key = groupTypeKey(group);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+
+    const defs = [
+      { value: 'requestproducts', type: 'requestproducts' },
+      { value: 'withdrawproducts', type: 'withdrawproducts' },
+      { value: 'requestmaintenance', type: 'requestmaintenance' },
+    ];
+
+    return [{
+      value: 'all',
+      label: 'All Types',
+      icon: 'layers',
+      bg: '#F3F4F6',
+      fg: '#111827',
+      bd: '#E5E7EB',
+      count: scoped.length,
+    }].concat(defs.map((def) => {
+      const meta = orderTypeMeta(def.type);
+      return {
+        value: def.value,
+        label: meta.label,
+        icon: meta.icon,
+        bg: meta.bg,
+        fg: meta.fg,
+        bd: meta.bd,
+        count: counts.get(def.value) || 0,
+      };
+    }));
+  }
+
+  function updateTypeFilterButtonState(options = getTypeFilterOptions()) {
+    if (!typeFilterWrap || !typeFilterBtn) return;
+    const active = options.find((opt) => opt.value === currentTypeFilter) || options[0];
+    const isFiltered = !!active && active.value !== 'all';
+    typeFilterWrap.classList.toggle('is-filtered', isFiltered);
+    if (typeFilterDot) typeFilterDot.hidden = !isFiltered;
+    typeFilterBtn.setAttribute('aria-label', isFiltered ? `Filter current orders by type. Selected: ${active.label}` : 'Filter current orders by type');
+  }
+
+  function renderTypeFilterMenu(allGroups = []) {
+    if (!typeFilterPanel) return;
+    const options = getTypeFilterOptions(allGroups);
+    updateTypeFilterButtonState(options);
+    const plural = (n) => `${n} order${n === 1 ? '' : 's'}`;
+    typeFilterPanel.innerHTML = `
+      <div class="orders-type-filter__panel-head">
+        <div class="orders-type-filter__panel-title">Filter by type</div>
+        <div class="orders-type-filter__panel-sub">${escapeHTML(plural(options[0]?.count || 0))}</div>
+      </div>
+      <div class="orders-type-filter__options">
+        ${options.map((opt) => `
+          <button
+            type="button"
+            class="orders-type-filter__option${opt.value === currentTypeFilter ? ' is-active' : ''}"
+            data-value="${escapeHTML(opt.value)}"
+            role="menuitemradio"
+            aria-checked="${opt.value === currentTypeFilter ? 'true' : 'false'}"
+          >
+            <span class="orders-type-filter__option-icon" style="--otf-icon-bg:${opt.bg};--otf-icon-fg:${opt.fg};--otf-icon-border:${opt.bd};">
+              <i data-feather="${escapeHTML(opt.icon)}"></i>
+            </span>
+            <span class="orders-type-filter__option-body">
+              <span class="orders-type-filter__option-title">${escapeHTML(opt.label)}</span>
+              <span class="orders-type-filter__option-sub">${escapeHTML(plural(opt.count || 0))}</span>
+            </span>
+            <span class="orders-type-filter__option-check"><i data-feather="check"></i></span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function closeTypeFilterMenu() {
+    if (!typeFilterWrap || !typeFilterBtn || !typeFilterPanel) return;
+    typeFilterWrap.classList.remove('is-open');
+    typeFilterBtn.setAttribute('aria-expanded', 'false');
+    typeFilterPanel.hidden = true;
+  }
+
+  function openTypeFilterMenu(allGroups = []) {
+    if (!typeFilterWrap || !typeFilterBtn || !typeFilterPanel) return;
+    renderTypeFilterMenu(allGroups);
+    typeFilterWrap.classList.add('is-open');
+    typeFilterBtn.setAttribute('aria-expanded', 'true');
+    typeFilterPanel.hidden = false;
+    if (window.feather) window.feather.replace();
+  }
+
+  function toggleTypeFilterMenu(allGroups = [], force) {
+    if (!typeFilterPanel) return;
+    const shouldOpen = typeof force === 'boolean' ? force : typeFilterPanel.hidden;
+    if (shouldOpen) openTypeFilterMenu(allGroups);
+    else closeTypeFilterMenu();
+  }
+
+  function renderCurrentOrders() {
+    const allGroups = buildGroups(allOrders);
+    groupsById = new Map((allGroups || []).map((g) => [g.groupId, g]));
+    setActiveStatusTabUI();
+    updateCurrentOrdersToolbarUrl();
+    renderTypeFilterMenu(allGroups);
+
+    const q = norm(searchInput?.value || '');
+    const visibleGroups = (allGroups || [])
+      .filter((group) => groupMatchesCurrentStatus(group))
+      .filter((group) => groupMatchesCurrentType(group))
+      .filter((group) => groupMatchesSearch(group, q));
+
+    ordersListDiv.innerHTML = '';
+    if (!visibleGroups.length) {
+      ordersListDiv.innerHTML = '<p>No orders found.</p>';
+      if (window.feather) window.feather.replace();
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    for (const g of visibleGroups) frag.appendChild(renderCard(g));
+    ordersListDiv.appendChild(frag);
+
+    if (window.feather) window.feather.replace();
+  }
+
   function renderCard(group) {
     const items = group.products || [];
     const first = items[0] || {};
@@ -1050,7 +1271,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (parsed && Array.isArray(parsed.data) && (Date.now() - (parsed.ts || 0) < CACHE_TTL_MS)) {
           allOrders = sortByNewest(parsed.data);
           filtered = allOrders.slice();
-          displayOrders(filtered);
+          renderCurrentOrders();
           return;
         }
         sessionStorage.removeItem(CACHE_KEY);
@@ -1074,7 +1295,7 @@ document.addEventListener('DOMContentLoaded', () => {
       allOrders = sortByNewest(Array.isArray(data) ? data : []);
       filtered = allOrders.slice();
       sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: allOrders }));
-      displayOrders(filtered);
+      renderCurrentOrders();
     } catch (error) {
       console.error('Error fetching orders:', error);
       ordersListDiv.innerHTML = `<p style="color: red;">Error: ${escapeHTML(error.message)}</p>`;
@@ -1085,28 +1306,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!searchInput) return;
 
     function runFilter() {
-      const q = norm(searchInput.value);
-      const base = allOrders;
-      if (!q) {
-        filtered = base.slice();
-        displayOrders(filtered);
-        return;
-      }
-
-      // Keep whole orders together: if ANY item matches, include ALL items in that Reason-group.
-      const matchedKeys = new Set();
-      for (const o of base) {
-        if (
-          norm(o.reason).includes(q) ||
-          norm(o.productName).includes(q) ||
-          norm(o.orderId).includes(q)
-        ) {
-          matchedKeys.add(groupKeyForOrder(o));
-        }
-      }
-
-      filtered = base.filter((o) => matchedKeys.has(groupKeyForOrder(o)));
-      displayOrders(filtered);
+      renderCurrentOrders();
     }
 
     // Some mobile browsers (and Chrome's session restore) can autofill/restore the value of
@@ -1129,6 +1329,51 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function setupToolbar() {
+    setActiveStatusTabUI();
+    updateTypeFilterButtonState();
+
+    tabsWrap?.addEventListener('click', (e) => {
+      const a = e.target?.closest?.('a.tab-portfolio');
+      if (!a) return;
+      const nextTab = normalizeCurrentStatusTab(a.dataset.tab || 'all');
+      if (nextTab === currentStatusTab) return;
+      e.preventDefault();
+      currentStatusTab = nextTab;
+      closeTypeFilterMenu();
+      renderCurrentOrders();
+    });
+
+    typeFilterBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const allGroups = buildGroups(allOrders);
+      toggleTypeFilterMenu(allGroups);
+    });
+
+    typeFilterPanel?.addEventListener('click', (e) => {
+      const btn = e.target?.closest?.('.orders-type-filter__option');
+      if (!btn) return;
+      const nextValue = normalizeTypeFilterValue(btn.getAttribute('data-value'));
+      if (nextValue === currentTypeFilter) {
+        closeTypeFilterMenu();
+        return;
+      }
+      currentTypeFilter = nextValue;
+      closeTypeFilterMenu();
+      renderCurrentOrders();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!typeFilterWrap || !typeFilterPanel || typeFilterPanel.hidden) return;
+      if (typeFilterWrap.contains(e.target)) return;
+      closeTypeFilterMenu();
+    });
+  }
+
+  currentStatusTab = readStatusTabFromUrl();
+  currentTypeFilter = readTypeFilterFromUrl();
+  setupToolbar();
   fetchAndDisplayOrders();
   setupSearch();
 
@@ -1176,6 +1421,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if (typeFilterPanel && !typeFilterPanel.hidden) {
+      e.preventDefault();
+      closeTypeFilterMenu();
+      return;
+    }
     if (isEditPwdOpen()) {
       e.preventDefault();
       closeEditPasswordModal();

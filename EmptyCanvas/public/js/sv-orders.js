@@ -14,6 +14,10 @@
   // ===== Elements =====
   const searchInput = document.getElementById("svSearch");
   const tabsWrap = document.getElementById("svTabs");
+  const typeFilterWrap = document.getElementById("svTypeFilter");
+  const typeFilterBtn = document.getElementById("svTypeFilterBtn");
+  const typeFilterPanel = document.getElementById("svTypeFilterPanel");
+  const typeFilterDot = document.getElementById("svTypeFilterDot");
 
   // Modal
   const modalOverlay = document.getElementById("svOrderModal");
@@ -38,6 +42,7 @@
   // ===== Helpers =====
   const qs = new URLSearchParams(location.search);
   let TAB = (qs.get("tab") || "not-started").toLowerCase();
+  let currentTypeFilter = String(qs.get("type") || "all").toLowerCase().trim();
 
   const norm = (s) => String(s || "").toLowerCase().trim();
 
@@ -157,8 +162,26 @@
     return meta.label && meta.label !== 'Order' ? meta.label : fallback;
   }
 
+  function orderTypeKey(type) {
+    return String(type || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function normalizeTypeFilterValue(value) {
+    return orderTypeKey(value) || 'all';
+  }
+
   function isMaintenanceOrderType(type) {
-    return String(type || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') === 'requestmaintenance';
+    return orderTypeKey(type) === 'requestmaintenance';
+  }
+
+  function updateSvToolbarUrl() {
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set('tab', TAB);
+      if (currentTypeFilter && currentTypeFilter !== 'all') u.searchParams.set('type', currentTypeFilter);
+      else u.searchParams.delete('type');
+      history.replaceState({}, '', u.pathname + (u.searchParams.toString() ? `?${u.searchParams.toString()}` : ''));
+    } catch {}
   }
 
   function summarizeIssueDescriptions(items) {
@@ -850,10 +873,119 @@
     return hay.includes(q);
   }
 
+  function groupMatchesCurrentType(group) {
+    if (!currentTypeFilter || currentTypeFilter === 'all') return true;
+    const first = (group.products || [])[0] || {};
+    return normalizeTypeFilterValue(group.orderType || first.orderType) === currentTypeFilter;
+  }
+
+  function getTypeFilterOptions() {
+    const counts = new Map();
+    for (const group of allGroups || []) {
+      const first = (group.products || [])[0] || {};
+      const key = normalizeTypeFilterValue(group.orderType || first.orderType);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+
+    const defs = [
+      { value: 'requestproducts', type: 'requestproducts' },
+      { value: 'withdrawproducts', type: 'withdrawproducts' },
+      { value: 'requestmaintenance', type: 'requestmaintenance' },
+    ];
+
+    const total = (allGroups || []).length;
+    return [{
+      value: 'all',
+      label: 'All Types',
+      icon: 'layers',
+      bg: '#F3F4F6',
+      fg: '#111827',
+      bd: '#E5E7EB',
+      count: total,
+    }].concat(defs.map((def) => {
+      const meta = orderTypeMeta(def.type);
+      return {
+        value: def.value,
+        label: meta.label,
+        icon: meta.icon,
+        bg: meta.bg,
+        fg: meta.fg,
+        bd: meta.bd,
+        count: counts.get(def.value) || 0,
+      };
+    }));
+  }
+
+  function updateTypeFilterButtonState(options = getTypeFilterOptions()) {
+    if (!typeFilterWrap || !typeFilterBtn) return;
+    const active = options.find((opt) => opt.value === currentTypeFilter) || options[0];
+    const isFiltered = !!active && active.value !== 'all';
+    typeFilterWrap.classList.toggle('is-filtered', isFiltered);
+    if (typeFilterDot) typeFilterDot.hidden = !isFiltered;
+    typeFilterBtn.setAttribute('aria-label', isFiltered ? `Filter review orders by type. Selected: ${active.label}` : 'Filter review orders by type');
+  }
+
+  function renderTypeFilterMenu() {
+    if (!typeFilterPanel) return;
+    const options = getTypeFilterOptions();
+    updateTypeFilterButtonState(options);
+    const plural = (n) => `${n} order${n === 1 ? '' : 's'}`;
+    typeFilterPanel.innerHTML = `
+      <div class="orders-type-filter__panel-head">
+        <div class="orders-type-filter__panel-title">Filter by type</div>
+        <div class="orders-type-filter__panel-sub">${escapeHTML(plural(options[0]?.count || 0))}</div>
+      </div>
+      <div class="orders-type-filter__options">
+        ${options.map((opt) => `
+          <button
+            type="button"
+            class="orders-type-filter__option${opt.value === currentTypeFilter ? ' is-active' : ''}"
+            data-value="${escapeHTML(opt.value)}"
+            role="menuitemradio"
+            aria-checked="${opt.value === currentTypeFilter ? 'true' : 'false'}"
+          >
+            <span class="orders-type-filter__option-icon" style="--otf-icon-bg:${opt.bg};--otf-icon-fg:${opt.fg};--otf-icon-border:${opt.bd};">
+              <i data-feather="${escapeHTML(opt.icon)}"></i>
+            </span>
+            <span class="orders-type-filter__option-body">
+              <span class="orders-type-filter__option-title">${escapeHTML(opt.label)}</span>
+              <span class="orders-type-filter__option-sub">${escapeHTML(plural(opt.count || 0))}</span>
+            </span>
+            <span class="orders-type-filter__option-check"><i data-feather="check"></i></span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function closeTypeFilterMenu() {
+    if (!typeFilterWrap || !typeFilterBtn || !typeFilterPanel) return;
+    typeFilterWrap.classList.remove('is-open');
+    typeFilterBtn.setAttribute('aria-expanded', 'false');
+    typeFilterPanel.hidden = true;
+  }
+
+  function openTypeFilterMenu() {
+    if (!typeFilterWrap || !typeFilterBtn || !typeFilterPanel) return;
+    renderTypeFilterMenu();
+    typeFilterWrap.classList.add('is-open');
+    typeFilterBtn.setAttribute('aria-expanded', 'true');
+    typeFilterPanel.hidden = false;
+    if (window.feather) window.feather.replace();
+  }
+
+  function toggleTypeFilterMenu(force) {
+    if (!typeFilterPanel) return;
+    const shouldOpen = typeof force === 'boolean' ? force : typeFilterPanel.hidden;
+    if (shouldOpen) openTypeFilterMenu();
+    else closeTypeFilterMenu();
+  }
+
   function applyFilter() {
     const q = norm(searchInput?.value);
     filteredGroups = allGroups.filter((g) => {
       if (approvalKey(g.approval) !== TAB) return false;
+      if (!groupMatchesCurrentType(g)) return false;
       return groupMatchesSearch(g, q);
     });
   }
@@ -896,6 +1028,8 @@
     allGroups = buildGroups(itemsForTab);
     groupsById = new Map(allGroups.map((g) => [g.groupId, g]));
 
+    updateSvToolbarUrl();
+    renderTypeFilterMenu();
     applyFilter();
     renderList();
 
@@ -962,6 +1096,7 @@
     const tab = (a.dataset.tab || "").toLowerCase();
     const active = tab === TAB;
     a.classList.toggle("active", active);
+    a.classList.toggle("is-active", active);
     a.setAttribute("aria-selected", active ? "true" : "false");
   });
 }
@@ -1060,18 +1195,42 @@ if (tabsWrap) {
 
     e.preventDefault();
     destroyPopover();
+    closeTypeFilterMenu();
     closeModal();
 
     TAB = targetTab;
     setActiveTab();
-
-    const u = new URL(window.location.href);
-    u.searchParams.set("tab", TAB);
-    history.replaceState({}, "", u.pathname + "?" + u.searchParams.toString());
+    updateSvToolbarUrl();
 
     loadList({ tab: TAB });
   });
 }
+
+    typeFilterBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleTypeFilterMenu();
+    });
+
+    typeFilterPanel?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.orders-type-filter__option');
+      if (!btn) return;
+      const nextValue = normalizeTypeFilterValue(btn.getAttribute('data-value'));
+      if (nextValue === currentTypeFilter) {
+        closeTypeFilterMenu();
+        return;
+      }
+      currentTypeFilter = nextValue;
+      updateSvToolbarUrl();
+      closeTypeFilterMenu();
+      renderAll({ preserveScroll: true, preserveModal: false });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!typeFilterWrap || !typeFilterPanel || typeFilterPanel.hidden) return;
+      if (typeFilterWrap.contains(e.target)) return;
+      closeTypeFilterMenu();
+    });
 
     if (searchInput) {
       // Debounced search to avoid heavy re-rendering on every keystroke
@@ -1129,9 +1288,14 @@ if (tabsWrap) {
       });
     }
 
-    // Escape closes modal
+    // Escape closes open overlays
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && isModalOpen()) {
+      if (e.key !== "Escape") return;
+      if (typeFilterPanel && !typeFilterPanel.hidden) {
+        closeTypeFilterMenu();
+        return;
+      }
+      if (isModalOpen()) {
         e.preventDefault();
         closeModal();
       }
@@ -1141,7 +1305,10 @@ if (tabsWrap) {
   // ===== Boot =====
   document.addEventListener("DOMContentLoaded", () => {
     TAB = normalizeSvTab(TAB);
+    currentTypeFilter = normalizeTypeFilterValue(currentTypeFilter);
     setActiveTab();
+    updateTypeFilterButtonState();
+    updateSvToolbarUrl();
     wireEvents();
     loadList({ tab: TAB });
   });
