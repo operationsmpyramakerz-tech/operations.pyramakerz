@@ -13,6 +13,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.add(`page-${slug}`);
   } catch {}
 
+  const EMBEDDED_SHELL_CONTENT = isOpsShellEmbeddedMode();
+  if (EMBEDDED_SHELL_CONTENT) {
+    try { document.body.classList.add('shell-embedded'); } catch {}
+  }
+
   const logoutBtn     = document.getElementById('logoutBtn');
   let menuToggle    = null;     // injected on mobile
   let sidebarToggle = document.getElementById('sidebar-toggle');  // removed (logo is the toggle now)
@@ -1191,6 +1196,12 @@ if (document.querySelector('.sidebar')) {
     }
   });
 
+  if (EMBEDDED_SHELL_CONTENT) {
+    try { document.body.classList.remove('permissions-loading'); } catch {}
+    try { if (window.feather) feather.replace(); } catch {}
+    return;
+  }
+
   // ====== Logout ======
   logoutBtn && logoutBtn.addEventListener('click', async (e) => {
     e.preventDefault();
@@ -1244,6 +1255,10 @@ ensureLink({ href: '/orders/sv-orders', label: 'Orders Review', icon: 'award' })
   });
 
   if (window.feather) feather.replace();
+
+  window.setTimeout(() => {
+    try { initOpsPersistentShellHost(); } catch (e) { console.warn('[ops-shell] init failed', e); }
+  }, 0);
 });
 
 
@@ -1558,6 +1573,8 @@ function initMobileHeaderAutoHide() {
 // Notifications UI + Push subscription (PWA)
 // --------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
+  if (isOpsShellEmbeddedMode()) return;
+
   try {
     initNotificationsWidget();
   } catch (e) {
@@ -1857,6 +1874,10 @@ function initFloatingSearchWidget() {
     return Array.from(new Set((Array.isArray(list) ? list : []).filter(Boolean)));
   }
 
+  function getSearchDocs() {
+    return uniqueElements([getOpsPersistentShellFrameDocument(), document].filter(Boolean));
+  }
+
   function getLinkedSearchInputs() {
     const selector = [
       ".main-header .searchbar input[type='search']",
@@ -1873,9 +1894,10 @@ function initFloatingSearchWidget() {
       "#notifSearch"
     ].join(",");
 
-    return uniqueElements(Array.from(document.querySelectorAll(selector)).filter((el) => {
-      return el && el !== input && !panel.contains(el);
-    }));
+    return uniqueElements(getSearchDocs().flatMap((doc) => Array.from(doc.querySelectorAll(selector)))).filter((el) => {
+      if (!el || el === input || panel.contains(el)) return false;
+      return !el.closest('[data-ops-shell-legacy="1"]');
+    });
   }
 
   function getGenericSearchItems() {
@@ -1891,7 +1913,7 @@ function initFloatingSearchWidget() {
       ".notif-row"
     ].join(",");
 
-    return uniqueElements(Array.from(document.querySelectorAll(selector)));
+    return uniqueElements(getSearchDocs().flatMap((doc) => Array.from(doc.querySelectorAll(selector)))).filter((el) => !el.closest('[data-ops-shell-legacy="1"]'));
   }
 
   function applyGenericSearchFallback(query) {
@@ -1940,11 +1962,12 @@ function initFloatingSearchWidget() {
       try {
         el.value = nextValue;
       } catch {}
+      const ViewEvent = el.ownerDocument?.defaultView?.Event || Event;
       try {
-        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new ViewEvent("input", { bubbles: true }));
       } catch {}
       try {
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new ViewEvent("change", { bubbles: true }));
       } catch {}
       setTimeout(() => {
         try { delete el.dataset.opsFloatingSearchSync; } catch {}
@@ -2349,12 +2372,20 @@ function initUserMenuWidget() {
       closeMenu();
 
       if (action === "profile") {
-        window.location.href = "/account";
+        if (window.OpsShell && typeof window.OpsShell.navigate === 'function') {
+          window.OpsShell.navigate('/account', { pushHistory: true });
+        } else {
+          window.location.href = "/account";
+        }
         return;
       }
 
       if (action === "how") {
-        window.location.href = "/how-it-works";
+        if (window.OpsShell && typeof window.OpsShell.navigate === 'function') {
+          window.OpsShell.navigate('/how-it-works', { pushHistory: true });
+        } else {
+          window.location.href = "/how-it-works";
+        }
         return;
       }
 
@@ -2827,4 +2858,447 @@ function escapeAttr(str) {
     .replaceAll("`", "&#096;")
     .replaceAll("\n", " ")
     .replaceAll("\r", " ");
+}
+
+
+function isOpsShellEmbeddedMode() {
+  try {
+    const url = new URL(window.location.href);
+    return url.searchParams.get('__shell') === 'content';
+  } catch {
+    return false;
+  }
+}
+
+function getOpsPersistentShellFrame() {
+  return document.getElementById('ops-shell-frame') || null;
+}
+
+function getOpsPersistentShellFrameDocument() {
+  try {
+    const frame = getOpsPersistentShellFrame();
+    return frame?.contentDocument || frame?.contentWindow?.document || null;
+  } catch {
+    return null;
+  }
+}
+
+function stripOpsShellParam(input) {
+  try {
+    const url = new URL(String(input || window.location.href), window.location.origin);
+    url.searchParams.delete('__shell');
+    const pathname = String(url.pathname || '/').replace(/\/+$/, '') || '/';
+    return `${pathname}${url.search}${url.hash}`;
+  } catch {
+    return '/';
+  }
+}
+
+function buildOpsShellContentUrl(input) {
+  const display = stripOpsShellParam(input);
+  const url = new URL(display, window.location.origin);
+  url.searchParams.set('__shell', 'content');
+  return url.toString();
+}
+
+function isOpsShellNavigableHref(href) {
+  try {
+    const url = new URL(String(href || ''), window.location.origin);
+    if (url.origin !== window.location.origin) return false;
+    if (url.pathname.startsWith('/api/')) return false;
+    if (/\.(?:css|js|mjs|map|json|png|jpe?g|gif|webp|svg|ico|pdf|zip|txt|xml|woff2?|ttf|eot|mp4|mp3)$/i.test(url.pathname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeOpsShellPath(input) {
+  try {
+    const display = stripOpsShellParam(input);
+    const url = new URL(display, window.location.origin);
+    const pathname = String(url.pathname || '/').replace(/\/+$/, '') || '/';
+    return `${pathname}${url.search}${url.hash}`;
+  } catch {
+    return '/';
+  }
+}
+
+function deriveOpsShellTitle(path) {
+  const pathname = (() => {
+    try { return new URL(String(path || '/'), window.location.origin).pathname; } catch { return String(path || '/'); }
+  })();
+  const map = [
+    ['/home', 'Home'],
+    ['/tasks', 'Tasks'],
+    ['/orders/new', 'Create New Order'],
+    ['/orders/requested', 'Operations Orders'],
+    ['/orders/maintenance-orders', 'Maintenance Orders'],
+    ['/orders/sv-orders', 'Orders Review'],
+    ['/orders', 'Current Orders'],
+    ['/stocktaking', 'Stocktaking'],
+    ['/expenses/users', 'Expenses Users'],
+    ['/expenses', 'Expenses'],
+    ['/b2b', 'B2B'],
+    ['/account', 'Account'],
+    ['/how-it-works', 'How it works'],
+  ];
+  const found = map.find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  if (found) return found[1];
+  const raw = pathname.split('/').filter(Boolean).pop() || 'Dashboard';
+  return raw.replace(/[-_]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function readOpsShellFrameMeta() {
+  const frameDoc = getOpsPersistentShellFrameDocument();
+  const frameWin = (() => { try { return getOpsPersistentShellFrame()?.contentWindow || null; } catch { return null; } })();
+  const framePath = frameWin ? stripOpsShellParam(frameWin.location.href) : stripOpsShellParam(window.location.href);
+  if (!frameDoc) {
+    const fallbackTitle = deriveOpsShellTitle(framePath);
+    return { displayTitle: fallbackTitle, fullTitle: fallbackTitle, path: framePath, searchPlaceholder: `Search in ${fallbackTitle}` };
+  }
+
+  const titleEl =
+    frameDoc.querySelector('.main-header .page-title') ||
+    frameDoc.querySelector('.main-header .dash-title') ||
+    frameDoc.querySelector('[data-shell-title]') ||
+    frameDoc.querySelector('h1');
+
+  const displayTitle = String(titleEl?.textContent || frameDoc.title || deriveOpsShellTitle(framePath)).trim() || deriveOpsShellTitle(framePath);
+  const searchInput = frameDoc.querySelector([
+    '.main-header .searchbar input[type="search"]',
+    '.main-header .searchbar input:not([type])',
+    '.tasks-v2-toolbar input[type="search"]',
+    '.tasks-v2-topbar input[type="search"]',
+    '#homeSearch',
+    '#orderSearch',
+    '#requestedSearch',
+    '#svSearch',
+    '#b2bSearch',
+    '#stockSearch',
+    '#schoolStockSearch',
+    '#notifSearch'
+  ].join(','));
+
+  const placeholder = String(searchInput?.getAttribute('placeholder') || '').trim() || `Search in ${displayTitle}`;
+  return {
+    displayTitle,
+    fullTitle: String(frameDoc.title || displayTitle).trim() || displayTitle,
+    path: framePath,
+    searchPlaceholder: placeholder,
+  };
+}
+
+function applyOpsShellBodyState(path) {
+  try {
+    document.body.classList.forEach((cls) => {
+      if (/^page-/.test(cls) || cls === 'tasks-v2' || cls === 'order-modal-fit-screen') {
+        document.body.classList.remove(cls);
+      }
+    });
+  } catch {}
+
+  document.body.classList.add('page-shell-host');
+
+  try {
+    const pathname = new URL(stripOpsShellParam(path), window.location.origin).pathname;
+    const slug = (pathname === '/') ? 'root' : pathname.split('/').filter(Boolean).join('-');
+    if (slug) document.body.classList.add(`page-shell-${slug}`);
+  } catch {}
+}
+
+function setOpsShellActiveNav(path) {
+  const currentPath = (() => {
+    try { return new URL(stripOpsShellParam(path), window.location.origin).pathname; } catch { return '/'; }
+  })();
+
+  const links = Array.from(document.querySelectorAll('.sidebar .nav-link'));
+  if (!links.length) return;
+
+  links.forEach((link) => link.classList.remove('active'));
+
+  let best = null;
+  let bestLen = -1;
+
+  links.forEach((link) => {
+    try {
+      const linkPath = new URL(link.getAttribute('href') || '', window.location.origin).pathname.replace(/\/+$/, '') || '/';
+      const safeCurrent = currentPath.replace(/\/+$/, '') || '/';
+      const matches = safeCurrent === linkPath || safeCurrent.startsWith(`${linkPath}/`);
+      if (matches && linkPath.length > bestLen) {
+        best = link;
+        bestLen = linkPath.length;
+      }
+    } catch {}
+  });
+
+  if (!best) {
+    best = links.find((link) => (link.getAttribute('href') || '').replace(/\/+$/, '') === '/home') || links[0];
+  }
+
+  if (best) best.classList.add('active');
+}
+
+function applyOpsShellChrome(meta) {
+  const safeMeta = meta && typeof meta === 'object' ? meta : {};
+  const title = String(safeMeta.displayTitle || deriveOpsShellTitle(safeMeta.path || window.location.pathname)).trim() || 'Dashboard';
+  const fullTitle = String(safeMeta.fullTitle || title).trim() || title;
+  const placeholder = String(safeMeta.searchPlaceholder || `Search in ${title}`).trim();
+
+  document.title = fullTitle;
+  applyOpsShellBodyState(safeMeta.path || window.location.pathname);
+  setOpsShellActiveNav(safeMeta.path || window.location.pathname);
+
+  document.querySelectorAll('.main-header .dash-title, .main-header .page-title').forEach((el) => {
+    try { el.textContent = title; } catch {}
+  });
+
+  const searchInput = document.querySelector('.main-header .searchbar input');
+  if (searchInput) {
+    searchInput.setAttribute('placeholder', placeholder);
+    searchInput.setAttribute('aria-label', placeholder);
+  }
+
+  const floating = document.getElementById('floatingSearchInput');
+  if (floating && !floating.value) {
+    floating.setAttribute('placeholder', placeholder);
+    floating.setAttribute('aria-label', placeholder);
+  }
+}
+
+function applyOpsShellSearchToFrame(query) {
+  const frameDoc = getOpsPersistentShellFrameDocument();
+  if (!frameDoc) return;
+
+  const q = String(query || '');
+  const selector = [
+    '.main-header .searchbar input[type="search"]',
+    '.main-header .searchbar input:not([type])',
+    '.tasks-v2-toolbar input[type="search"]',
+    '.tasks-v2-topbar input[type="search"]',
+    '#homeSearch',
+    '#orderSearch',
+    '#requestedSearch',
+    '#svSearch',
+    '#b2bSearch',
+    '#stockSearch',
+    '#schoolStockSearch',
+    '#notifSearch'
+  ].join(',');
+
+  const linked = Array.from(frameDoc.querySelectorAll(selector));
+  if (linked.length) {
+    linked.forEach((input) => {
+      try { input.dataset.opsFloatingSearchSync = '1'; } catch {}
+      try { input.value = q; } catch {}
+      const ViewEvent = input.ownerDocument?.defaultView?.Event || Event;
+      try { input.dispatchEvent(new ViewEvent('input', { bubbles: true })); } catch {}
+      try { input.dispatchEvent(new ViewEvent('change', { bubbles: true })); } catch {}
+      window.setTimeout(() => { try { delete input.dataset.opsFloatingSearchSync; } catch {} }, 0);
+    });
+    return;
+  }
+
+  const items = Array.from(frameDoc.querySelectorAll([
+    '.co-card',
+    '.order-card',
+    '.tv2-card',
+    '.task-card',
+    '.stock-card',
+    '.stock-item',
+    '.school-folder-card',
+    '.folder-card',
+    '.notif-row'
+  ].join(',')));
+
+  const needle = q.trim().toLowerCase();
+  items.forEach((el) => {
+    const hay = String(el.getAttribute('data-search') || el.textContent || '').trim().toLowerCase();
+    const visible = !needle || hay.includes(needle);
+    el.style.display = visible ? '' : 'none';
+  });
+}
+
+function bindOpsShellFrameNavigation(frameDoc) {
+  if (!frameDoc || frameDoc.documentElement?.dataset?.opsShellNavBound === '1') return;
+  try { frameDoc.documentElement.dataset.opsShellNavBound = '1'; } catch {}
+
+  frameDoc.addEventListener('click', (event) => {
+    const anchor = event.target.closest('a[href]');
+    if (!anchor) return;
+    if (event.defaultPrevented) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (anchor.hasAttribute('download')) return;
+    const target = String(anchor.getAttribute('target') || '').toLowerCase();
+    if (target && target !== '_self') return;
+    const href = anchor.getAttribute('href') || '';
+    if (!href || href.startsWith('#')) return;
+    const absolute = anchor.href || href;
+    if (!isOpsShellNavigableHref(absolute)) return;
+
+    try {
+      event.preventDefault();
+      if (window.OpsShell && typeof window.OpsShell.navigate === 'function') {
+        window.OpsShell.navigate(absolute, { pushHistory: true });
+      }
+    } catch {}
+  }, true);
+}
+
+function initOpsPersistentShellHost() {
+  if (window.__opsShellHostInitialized) return;
+  if (isOpsShellEmbeddedMode()) return;
+  if (!document.querySelector('.sidebar') || !document.querySelector('.main-content')) return;
+
+  const mainContent = document.querySelector('.main-content');
+  const header = mainContent?.querySelector('.main-header');
+  const legacyMain = Array.from(mainContent?.children || []).find((node) => node.tagName === 'MAIN');
+  if (!mainContent || !header || !legacyMain) return;
+
+  window.__opsShellHostInitialized = true;
+  legacyMain.setAttribute('data-ops-shell-legacy', '1');
+
+  const hostMain = document.createElement('main');
+  hostMain.className = 'ops-shell-host-main';
+  hostMain.hidden = true;
+  hostMain.innerHTML = `
+    <div class="ops-shell-frame-wrap is-loading">
+      <div class="ops-shell-loading" aria-live="polite">
+        <span class="ops-shell-loading__spinner" aria-hidden="true"></span>
+        <span class="ops-shell-loading__text">Loading page…</span>
+      </div>
+      <iframe id="ops-shell-frame" class="ops-shell-frame" title="Dashboard page content" loading="eager"></iframe>
+    </div>
+  `;
+  mainContent.appendChild(hostMain);
+
+  const frame = hostMain.querySelector('#ops-shell-frame');
+  const frameWrap = hostMain.querySelector('.ops-shell-frame-wrap');
+  const hostSearch = document.querySelector('.main-header .searchbar input');
+  const state = {
+    currentPath: stripOpsShellParam(window.location.href),
+    requestedPath: null,
+    frame,
+    frameWrap,
+    legacyMain,
+    hostMain,
+    hostSearch,
+  };
+  window.__opsShellHostState = state;
+
+  const showLoading = (hideLegacy) => {
+    frameWrap.classList.add('is-loading');
+    frame.classList.remove('is-ready');
+    frame.style.visibility = 'hidden';
+    if (hideLegacy) {
+      legacyMain.hidden = true;
+      hostMain.hidden = false;
+    }
+  };
+
+  const finishLoad = () => {
+    const meta = readOpsShellFrameMeta();
+    const loadedPath = normalizeOpsShellPath(meta.path || state.requestedPath || state.currentPath);
+    const requestedPath = normalizeOpsShellPath(state.requestedPath || state.currentPath);
+    const currentPath = normalizeOpsShellPath(state.currentPath || '/');
+
+    if (!state.requestedPath && loadedPath !== currentPath) {
+      try { history.pushState({ opsShellPath: loadedPath }, '', loadedPath); } catch {}
+    } else if (state.requestedPath && loadedPath !== requestedPath && loadedPath !== currentPath) {
+      try { history.pushState({ opsShellPath: loadedPath }, '', loadedPath); } catch {}
+    }
+
+    state.currentPath = loadedPath;
+    state.requestedPath = null;
+
+    applyOpsShellChrome(meta);
+    legacyMain.hidden = true;
+    hostMain.hidden = false;
+    frameWrap.classList.remove('is-loading');
+    frame.style.visibility = 'visible';
+    frame.classList.add('is-ready');
+    bindOpsShellFrameNavigation(getOpsPersistentShellFrameDocument());
+
+    if (hostSearch && hostSearch.value) {
+      applyOpsShellSearchToFrame(hostSearch.value);
+    }
+  };
+
+  frame.addEventListener('load', () => {
+    try { finishLoad(); } catch (e) { console.warn('[ops-shell] frame load sync failed', e); }
+  });
+
+  const loadFrame = (href, opts = {}) => {
+    const nextPath = stripOpsShellParam(href);
+    const nextNormalized = normalizeOpsShellPath(nextPath);
+    const currentNormalized = normalizeOpsShellPath(state.currentPath);
+    const shouldPush = !!opts.pushHistory && nextNormalized !== currentNormalized;
+    const shouldReplace = !!opts.replaceHistory;
+
+    state.requestedPath = nextPath;
+
+    if (shouldPush) {
+      try { history.pushState({ opsShellPath: nextPath }, '', nextPath); } catch {}
+    } else if (shouldReplace) {
+      try { history.replaceState({ opsShellPath: nextPath }, '', nextPath); } catch {}
+    }
+
+    showLoading(!!opts.hideLegacy);
+    frame.src = buildOpsShellContentUrl(nextPath);
+  };
+
+  document.addEventListener('click', (event) => {
+    const anchor = event.target.closest('a[href]');
+    if (!anchor) return;
+    const insideLegacy = anchor.closest('[data-ops-shell-legacy="1"]');
+    if (insideLegacy && legacyMain.hidden) return;
+    if (event.defaultPrevented) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (anchor.hasAttribute('download')) return;
+    const target = String(anchor.getAttribute('target') || '').toLowerCase();
+    if (target && target !== '_self') return;
+    const href = anchor.getAttribute('href') || '';
+    if (!href || href.startsWith('#')) return;
+    const absolute = anchor.href || href;
+    if (!isOpsShellNavigableHref(absolute)) return;
+
+    event.preventDefault();
+    loadFrame(absolute, { pushHistory: true, hideLegacy: true });
+  }, true);
+
+  window.addEventListener('popstate', () => {
+    const desired = stripOpsShellParam(window.location.href);
+    if (normalizeOpsShellPath(desired) === normalizeOpsShellPath(state.currentPath)) return;
+    loadFrame(desired, { replaceHistory: true, hideLegacy: true });
+  });
+
+  if (hostSearch && hostSearch.dataset.opsShellBound !== '1') {
+    hostSearch.dataset.opsShellBound = '1';
+    hostSearch.addEventListener('input', () => {
+      applyOpsShellSearchToFrame(hostSearch.value || '');
+    });
+    hostSearch.addEventListener('search', () => {
+      applyOpsShellSearchToFrame(hostSearch.value || '');
+    });
+  }
+
+  window.OpsShell = {
+    navigate(href, opts = {}) {
+      const next = stripOpsShellParam(href);
+      loadFrame(next, { pushHistory: opts.pushHistory !== false, replaceHistory: !!opts.replaceHistory, hideLegacy: true });
+    },
+    getFrame() { return frame; },
+    getFrameDocument() { return getOpsPersistentShellFrameDocument(); },
+    getCurrentPath() { return state.currentPath; },
+  };
+
+  applyOpsShellChrome({
+    displayTitle: deriveOpsShellTitle(state.currentPath),
+    fullTitle: document.title || deriveOpsShellTitle(state.currentPath),
+    path: state.currentPath,
+    searchPlaceholder: `Search in ${deriveOpsShellTitle(state.currentPath)}`
+  });
+  setOpsShellActiveNav(state.currentPath);
+  try { history.replaceState({ opsShellPath: state.currentPath }, '', state.currentPath); } catch {}
+  loadFrame(state.currentPath, { replaceHistory: true, hideLegacy: false });
 }

@@ -28,6 +28,14 @@ document.addEventListener('DOMContentLoaded', () => {
     tasksList: $('#homeTasksList'),
     ordersList: $('#homeOrdersList'),
 
+    // Charts
+    tasksChart: $('#homeTasksChart'),
+    ordersChart: $('#homeOrdersChart'),
+    expensesChart: $('#homeExpensesChart'),
+    tasksChartSubtitle: $('#tasksChartSubtitle'),
+    ordersChartSubtitle: $('#ordersChartSubtitle'),
+    expensesChartSubtitle: $('#expensesChartSubtitle'),
+
     // Actions + scope
     actions: $('#homeActions'),
     scopeDept: $('#scopeDept'),
@@ -64,6 +72,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const n = Number(value);
     const safe = Number.isFinite(n) ? n : 0;
     return moneyFmt ? moneyFmt.format(safe) : `£${safe.toFixed(2)}`;
+  }
+
+  function optionText(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => optionText(item)).filter(Boolean).join(', ');
+    }
+    if (value && typeof value === 'object') {
+      return String(value.name || value.label || value.title || value.value || '').trim();
+    }
+    return String(value || '').trim();
+  }
+
+  function safeNum(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
   }
 
   function safeText(s) {
@@ -301,7 +324,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const q = norm(els.search?.value);
     const filtered = (list || []).filter((t) => {
       if (!q) return true;
-      return norm(t.title).includes(q) || norm(t.status).includes(q) || norm(t.priority).includes(q);
+      return norm(t.title).includes(q) || norm(optionText(t.status)).includes(q) || norm(optionText(t.priority)).includes(q);
     });
 
     if (!filtered.length) return renderEmpty(els.tasksList, 'No tasks found');
@@ -309,8 +332,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const frag = document.createDocumentFragment();
     for (const t of filtered.slice(0, 6)) {
       const due = t.dueDate ? formatISODate(t.dueDate) : '';
-      const status = t.status ? String(t.status) : '';
-      const prio = t.priority ? String(t.priority) : '';
+      const status = optionText(t.status);
+      const prio = optionText(t.priority);
       const pct = Number.isFinite(Number(t.completion)) ? Math.round(Number(t.completion)) : null;
       const meta = [prio, status, due].filter(Boolean).join(' • ');
 
@@ -378,6 +401,183 @@ document.addEventListener('DOMContentLoaded', () => {
     els.ordersList.innerHTML = '';
     els.ordersList.appendChild(frag);
     if (window.feather) window.feather.replace();
+  }
+
+  function buildDonutSegments(segments, radius) {
+    const total = (segments || []).reduce((sum, segment) => sum + safeNum(segment?.value), 0);
+    if (!total) return '';
+
+    const circumference = 2 * Math.PI * radius;
+    let offset = 0;
+    return segments
+      .filter((segment) => safeNum(segment?.value) > 0)
+      .map((segment) => {
+        const length = (safeNum(segment.value) / total) * circumference;
+        const dasharray = `${length} ${Math.max(0, circumference - length)}`;
+        const circle = `<circle class="home-donut-segment" cx="60" cy="60" r="${radius}" stroke="${safeText(segment.color)}" stroke-dasharray="${dasharray}" stroke-dashoffset="${-offset}"></circle>`;
+        offset += length;
+        return circle;
+      })
+      .join('');
+  }
+
+  function renderTasksChart(list) {
+    if (!els.tasksChart) return;
+
+    const tasks = Array.isArray(list) ? list : [];
+    if (!tasks.length) {
+      renderEmpty(els.tasksChart, 'No tasks analytics yet');
+      if (els.tasksChartSubtitle) els.tasksChartSubtitle.textContent = 'No task data available';
+      return;
+    }
+
+    const today = toYMD(new Date());
+    const done = tasks.filter((t) => isDoneStatus(optionText(t.status))).length;
+    const overdue = tasks.filter((t) => !isDoneStatus(optionText(t.status)) && t.dueDate && toYMD(t.dueDate) < today).length;
+    const inProgress = tasks.filter((t) => !isDoneStatus(optionText(t.status)) && /(progress|working|doing|review)/.test(norm(optionText(t.status))) && !(t.dueDate && toYMD(t.dueDate) < today)).length;
+    const queued = Math.max(0, tasks.length - done - overdue - inProgress);
+    const completion = Math.round((done / Math.max(1, tasks.length)) * 100);
+
+    const segments = [
+      { label: 'Completed', value: done, color: '#34D399' },
+      { label: 'In progress', value: inProgress, color: '#60A5FA' },
+      { label: 'Queued', value: queued, color: '#FBBF24' },
+      { label: 'Overdue', value: overdue, color: '#FB7185' },
+    ];
+
+    els.tasksChart.innerHTML = `
+      <div class="home-donut-wrap">
+        <svg class="home-donut-svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+          <circle class="home-donut-track" cx="60" cy="60" r="44"></circle>
+          ${buildDonutSegments(segments, 44)}
+        </svg>
+        <div class="home-donut-center">
+          <div class="home-donut-center__value">${completion}%</div>
+          <div class="home-donut-center__label">Completed</div>
+        </div>
+      </div>
+      <div class="home-chart-legend">
+        ${segments.map((segment) => `
+          <div class="home-legend-item">
+            <div class="home-legend-label">
+              <span class="home-legend-dot" style="background:${safeText(segment.color)}"></span>
+              <span>${safeText(segment.label)}</span>
+            </div>
+            <div class="home-legend-value">${safeNum(segment.value)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    if (els.tasksChartSubtitle) {
+      els.tasksChartSubtitle.textContent = `${done} completed • ${overdue} overdue • ${tasks.length} total`;
+    }
+  }
+
+  function renderOrdersChart(groups) {
+    if (!els.ordersChart) return;
+
+    const rows = [
+      { label: 'Order placed', count: 0 },
+      { label: 'Under supervision', count: 0 },
+      { label: 'In progress', count: 0 },
+      { label: 'Shipped', count: 0 },
+      { label: 'Arrived', count: 0 },
+    ];
+
+    const allGroups = Array.isArray(groups) ? groups : [];
+    if (!allGroups.length) {
+      renderEmpty(els.ordersChart, 'No order pipeline yet');
+      if (els.ordersChartSubtitle) els.ordersChartSubtitle.textContent = 'No orders data available';
+      return;
+    }
+
+    allGroups.forEach((group) => {
+      const stage = orderComputeStage(group.products || []);
+      const idx = Math.max(1, Math.min(5, safeNum(stage?.idx))) - 1;
+      rows[idx].count += 1;
+    });
+
+    const max = Math.max(1, ...rows.map((row) => row.count));
+    els.ordersChart.innerHTML = `
+      <div class="home-bars">
+        ${rows.map((row, index) => `
+          <div class="home-bar-row">
+            <div class="home-bar-top">
+              <span>${safeText(row.label)}</span>
+              <strong>${row.count}</strong>
+            </div>
+            <div class="home-bar-track">
+              <div class="home-bar-fill" style="width:${row.count ? Math.max(8, (row.count / max) * 100) : 0}%"></div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    const active = rows.slice(0, 4).reduce((sum, row) => sum + row.count, 0);
+    if (els.ordersChartSubtitle) {
+      els.ordersChartSubtitle.textContent = `${active} active groups • ${rows[4].count} arrived`;
+    }
+  }
+
+  function renderExpensesChart(items) {
+    if (!els.expensesChart) return;
+
+    const list = Array.isArray(items) ? items : [];
+    if (!list.length) {
+      renderEmpty(els.expensesChart, 'No cashflow data yet');
+      if (els.expensesChartSubtitle) els.expensesChartSubtitle.textContent = 'No expenses data available';
+      return;
+    }
+
+    const buckets = new Map();
+    const now = new Date();
+    for (let i = 5; i >= 0; i -= 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      buckets.set(key, {
+        key,
+        label: d.toLocaleDateString('en-GB', { month: 'short' }),
+        cashIn: 0,
+        cashOut: 0,
+      });
+    }
+
+    list.forEach((item) => {
+      const key = String(item?.date || '').slice(0, 7);
+      if (!buckets.has(key)) return;
+      const bucket = buckets.get(key);
+      bucket.cashIn += safeNum(item?.cashIn);
+      bucket.cashOut += safeNum(item?.cashOut);
+    });
+
+    const rows = Array.from(buckets.values());
+    const max = Math.max(1, ...rows.map((row) => Math.max(row.cashIn, row.cashOut)));
+    const monthBalance = rows[rows.length - 1].cashIn - rows[rows.length - 1].cashOut;
+
+    els.expensesChart.innerHTML = `
+      <div class="home-timeline">
+        ${rows.map((row) => {
+          const inHeight = row.cashIn ? Math.max(8, (row.cashIn / max) * 148) : 0;
+          const outHeight = row.cashOut ? Math.max(8, (row.cashOut / max) * 148) : 0;
+          return `
+            <div class="home-time-col">
+              <div class="home-time-bars">
+                <div class="home-time-bar" style="height:${inHeight}px" title="Cash in ${safeText(fmtMoney(row.cashIn))}"></div>
+                <div class="home-time-bar home-time-bar--out" style="height:${outHeight}px" title="Cash out ${safeText(fmtMoney(row.cashOut))}"></div>
+              </div>
+              <div class="home-time-label">${safeText(row.label)}</div>
+              <div class="home-time-value">${safeText(fmtMoney(row.cashIn - row.cashOut))}</div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+
+    if (els.expensesChartSubtitle) {
+      els.expensesChartSubtitle.textContent = `This month: ${fmtMoney(monthBalance)}`;
+    }
   }
 
   function setKpi(elMain, elSub, mainText, subText) {
@@ -555,6 +755,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
     renderTasksList(next);
+    renderTasksChart(tasks);
   }
 
   async function loadOrders() {
@@ -589,6 +790,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     renderOrdersList(groups);
+    renderOrdersChart(groups);
   }
 
   async function loadRequested() {
@@ -669,6 +871,7 @@ document.addEventListener('DOMContentLoaded', () => {
       `${fmtMoney(balM)} this month`,
       `In: ${fmtMoney(inM)} • Out: ${fmtMoney(outM)} • All-time: ${fmtMoney(balanceAll)}`,
     );
+    renderExpensesChart(items);
   }
 
   // ===== Search =====
