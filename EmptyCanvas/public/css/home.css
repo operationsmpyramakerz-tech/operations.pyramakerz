@@ -491,21 +491,23 @@
 
 .home-chart--donut{
   display: grid;
-  grid-template-columns: 164px 1fr;
+  grid-template-columns: minmax(0, 164px) minmax(0, 1fr);
   gap: 16px;
   align-items: center;
 }
 
 .home-donut-wrap{
+  --home-donut-size: 164px;
+  --home-donut-center-size: 84px;
   position: relative;
-  width: 164px;
-  height: 164px;
+  width: var(--home-donut-size);
+  height: var(--home-donut-size);
   margin: 0 auto;
 }
 
 .home-donut-svg{
-  width: 164px;
-  height: 164px;
+  width: var(--home-donut-size);
+  height: var(--home-donut-size);
   transform: rotate(-90deg);
 }
 
@@ -522,21 +524,38 @@
 
 .home-donut-center{
   position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+  top: 50%;
+  left: 50%;
+  width: var(--home-donut-center-size);
+  height: var(--home-donut-center-size);
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
+  pointer-events: none;
+}
+
+.home-donut-center__inner{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
 }
 
 .home-donut-center__value{
   font-size: 34px;
-  line-height: 1;
+  line-height: 0.95;
   font-weight: 900;
+  letter-spacing: -0.03em;
 }
 
 .home-donut-center__label{
-  margin-top: 4px;
+  margin: 0;
   font-size: 12px;
+  line-height: 1.1;
   font-weight: 700;
   opacity: 0.72;
 }
@@ -625,15 +644,18 @@
 
 .home-timeline{
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+  grid-template-columns: repeat(var(--home-time-cols, 6), minmax(0, 1fr));
   gap: 10px;
   align-items: end;
   min-height: 212px;
 }
 
 .home-time-col{
+  min-width: 0;
   display: grid;
+  grid-template-rows: minmax(148px, auto) auto auto;
   justify-items: center;
+  align-items: end;
   gap: 8px;
 }
 
@@ -647,26 +669,35 @@
 }
 
 .home-time-bar{
-  width: min(14px, 40%);
+  width: min(16px, calc(50% - 3px));
   min-height: 8px;
   border-radius: 999px 999px 5px 5px;
-  background: linear-gradient(180deg, #ff8d2c 0%, #ffc46b 100%);
+  background: linear-gradient(180deg, #22C55E 0%, #86EFAC 100%);
+}
+
+.home-time-bar--in{
+  background: linear-gradient(180deg, #22C55E 0%, #86EFAC 100%);
 }
 
 .home-time-bar--out{
-  background: linear-gradient(180deg, #0f172a 0%, #475569 100%);
+  background: linear-gradient(180deg, #EF4444 0%, #FCA5A5 100%);
 }
 
 .home-time-label{
   font-size: 11px;
   color: #6b7280;
   font-weight: 800;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .home-time-value{
   font-size: 11px;
   font-weight: 800;
   color: #111827;
+  white-space: nowrap;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .home-item{
@@ -761,10 +792,14 @@
     justify-items: center;
   }
 
-  .home-donut-wrap,
+  .home-donut-wrap{
+    --home-donut-size: 152px;
+    --home-donut-center-size: 78px;
+  }
+
   .home-donut-svg{
-    width: 152px;
-    height: 152px;
+    width: var(--home-donut-size);
+    height: var(--home-donut-size);
   }
 
   .home-chart{
@@ -950,8 +985,26 @@
 }
 
 .home-list-card--orders .home-item{
-  background: rgba(255, 255, 255, 0.74);
-  border-color: rgba(255, 255, 255, 0.88);
+  background: var(--home-order-card-bg, rgba(255, 255, 255, 0.74));
+  border-color: var(--home-order-card-border, rgba(255, 255, 255, 0.88));
+}
+
+.home-list-card--orders .home-item__eyebrow,
+.home-list-card--orders .home-item__title,
+.home-list-card--orders .home-badge,
+.home-list-card--orders .home-arrow{
+  color: var(--home-order-card-fg, #111827);
+}
+
+.home-list-card--orders .home-item__meta{
+  color: var(--home-order-card-fg, #475569);
+  opacity: 0.82;
+}
+
+.home-list-card--orders .home-badge,
+.home-list-card--orders .home-arrow{
+  background: rgba(255,255,255,0.78);
+  border-color: rgba(255,255,255,0.9);
 }
 
 .home-list-card--orders .btn.btn-primary{
@@ -1047,5 +1100,25 @@ body.shell-embedded.page-home .main-content > main.container-full-width{
   .home-mini-chip{
     font-size: 10.5px;
     padding: 6px 9px;
+  }
+
+  .home-timeline{
+    gap: 10px 6px;
+  }
+
+  .home-time-bars{
+    gap: 4px;
+  }
+
+  .home-time-bar{
+    width: min(13px, calc(50% - 2px));
+  }
+
+  .home-time-label{
+    font-size: 10.5px;
+  }
+
+  .home-time-value{
+    font-size: 10px;
   }
 }
