@@ -106,7 +106,7 @@
       <main class="container-full-width">
 
         <!-- KPIs -->
-        <section class="card home-card" aria-label="Overview">
+        <section class="card home-card home-card--hero" aria-label="Overview">
           <div class="home-section-head">
             <h2 class="home-section-title"><i data-feather="activity"></i> Overview</h2>
             <div class="home-section-sub" id="homeScopeLine">—</div>
@@ -145,11 +145,46 @@
           </div>
         </section>
 
+        <section class="home-analytics" aria-label="Analytics">
+          <section class="card home-analytics-card home-analytics-card--dark" data-block="tasks" aria-label="Tasks analytics">
+            <div class="card-header home-card-header home-card-header--light">
+              <div>
+                <h2>Tasks analytics</h2>
+                <div class="card-subtitle" id="tasksChartSubtitle">Completion, overdue and workload</div>
+              </div>
+              <span class="home-card-chip home-card-chip--light">Focus</span>
+            </div>
+            <div class="home-chart home-chart--donut" id="homeTasksChart"></div>
+          </section>
+
+          <section class="card home-analytics-card home-analytics-card--orange" data-block="orders" aria-label="Orders flow">
+            <div class="card-header home-card-header">
+              <div>
+                <h2>Orders flow</h2>
+                <div class="card-subtitle" id="ordersChartSubtitle">Pipeline snapshot by stage</div>
+              </div>
+              <span class="home-card-chip">Live</span>
+            </div>
+            <div class="home-chart home-chart--bars" id="homeOrdersChart"></div>
+          </section>
+
+          <section class="card home-analytics-card home-analytics-card--white" data-block="expenses" aria-label="Cashflow trend">
+            <div class="card-header home-card-header">
+              <div>
+                <h2>Cashflow trend</h2>
+                <div class="card-subtitle" id="expensesChartSubtitle">Last 6 months in vs out</div>
+              </div>
+              <span class="home-card-chip">Finance</span>
+            </div>
+            <div class="home-chart home-chart--timeline" id="homeExpensesChart"></div>
+          </section>
+        </section>
+
         <!-- Grid -->
         <section class="home-grid" aria-label="Details">
 
           <!-- Tasks list -->
-          <section class="card home-list-card" data-block="tasks" aria-label="Next tasks">
+          <section class="card home-list-card home-list-card--dark" data-block="tasks" aria-label="Next tasks">
             <div class="card-header">
               <div>
                 <h2>Next tasks</h2>
@@ -161,7 +196,7 @@
           </section>
 
           <!-- Orders list -->
-          <section class="card home-list-card" data-block="orders" aria-label="Recent orders">
+          <section class="card home-list-card home-list-card--orange" data-block="orders" aria-label="Recent orders">
             <div class="card-header">
               <div>
                 <h2>Recent orders</h2>
@@ -173,7 +208,7 @@
           </section>
 
           <!-- Quick actions -->
-          <section class="card home-actions" aria-label="Quick actions">
+          <section class="card home-actions home-panel home-panel--white" aria-label="Quick actions">
             <div class="card-header">
               <div>
                 <h2>Quick actions</h2>
@@ -185,7 +220,7 @@
           </section>
 
           <!-- Scope -->
-          <section class="card home-scope" aria-label="Your scope">
+          <section class="card home-scope home-panel home-panel--navy" aria-label="Your scope">
             <div class="card-header">
               <div>
                 <h2>Your scope</h2>
