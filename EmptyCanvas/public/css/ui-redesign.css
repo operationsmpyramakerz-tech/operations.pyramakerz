@@ -1731,3 +1731,143 @@ body.has-floating-search .main-header .searchbar{
     }
   }
 }
+
+/* =========================================================
+   Persistent shell host + embedded content mode
+   ========================================================= */
+body.page-shell-host .main-content{
+  overflow: hidden !important;
+}
+
+.ops-shell-host-main{
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+.ops-shell-frame-wrap{
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  background: #FFFFFF;
+}
+
+.ops-shell-frame{
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: transparent;
+}
+
+.ops-shell-loading{
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  justify-items: center;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.94) 100%);
+  z-index: 2;
+  transition: opacity .18s ease;
+}
+
+.ops-shell-frame-wrap:not(.is-loading) .ops-shell-loading{
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ops-shell-loading__spinner{
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 3px solid rgba(15, 23, 42, 0.10);
+  border-top-color: #ff8d2c;
+  animation: ops-shell-spin .8s linear infinite;
+}
+
+.ops-shell-loading__text{
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
+}
+
+@keyframes ops-shell-spin{
+  to { transform: rotate(360deg); }
+}
+
+html body.shell-embedded,
+body.shell-embedded{
+  background: #FFFFFF !important;
+  overflow: hidden !important;
+}
+
+body.shell-embedded .app-container{
+  position: static !important;
+  inset: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  max-width: none !important;
+  min-height: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+body.shell-embedded .sidebar,
+body.shell-embedded .sidebar-backdrop,
+body.shell-embedded .main-header,
+body.shell-embedded #floatingSearchPanel,
+body.shell-embedded #notifPanel,
+body.shell-embedded #userMenuPanel,
+body.shell-embedded .notif-wrap,
+body.shell-embedded .header-user,
+body.shell-embedded .account-mini{
+  display: none !important;
+}
+
+body.shell-embedded .main-content{
+  margin-left: 0 !important;
+  min-height: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+body.shell-embedded .main-content > main{
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding: 0 0 24px !important;
+}
+
+body.shell-embedded .main-content > main.tasks-v2-main,
+body.shell-embedded .main-content > main.container-full-width{
+  padding: 0 !important;
+}
+
+@media (max-width: 768px){
+  .ops-shell-host-main{
+    padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .ops-shell-frame-wrap{
+    border-radius: 0 !important;
+  }
+
+  body.shell-embedded .main-content > main{
+    padding-bottom: 0 !important;
+  }
+}
