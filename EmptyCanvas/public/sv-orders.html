@@ -96,14 +96,37 @@
       </header>
 
       <main class="page-body">
-        <!-- Tabs -->
-        <div id="svTabs" class="portfolio-tabs" role="tablist" aria-label="S.V Approval">
-          <a class="tab-portfolio" data-tab="not-started" role="tab" aria-selected="true"
-             href="/orders/sv-orders?tab=not-started">Not Started</a>
-          <a class="tab-portfolio" data-tab="approved" role="tab" aria-selected="false"
-             href="/orders/sv-orders?tab=approved">Approved</a>
-          <a class="tab-portfolio" data-tab="rejected" role="tab" aria-selected="false"
-             href="/orders/sv-orders?tab=rejected">Rejected</a>
+        <div class="orders-toolbar" aria-label="Orders review tools">
+          <div class="orders-toolbar__scroll">
+            <div id="svTabs" class="portfolio-tabs portfolio-tabs--iconic" role="tablist" aria-label="Orders Review status">
+              <a class="tab-portfolio order-status-tab" data-tab="not-started" role="tab" aria-selected="true"
+                 href="/orders/sv-orders?tab=not-started">
+                <span class="order-status-tab__icon"><i data-feather="hourglass"></i></span>
+                <span class="order-status-tab__label">Not Started</span>
+              </a>
+              <a class="tab-portfolio order-status-tab" data-tab="approved" role="tab" aria-selected="false"
+                 href="/orders/sv-orders?tab=approved">
+                <span class="order-status-tab__icon"><i data-feather="check-circle"></i></span>
+                <span class="order-status-tab__label">Approved</span>
+              </a>
+              <a class="tab-portfolio order-status-tab" data-tab="rejected" role="tab" aria-selected="false"
+                 href="/orders/sv-orders?tab=rejected">
+                <span class="order-status-tab__icon"><i data-feather="x-circle"></i></span>
+                <span class="order-status-tab__label">Rejected</span>
+              </a>
+            </div>
+          </div>
+
+          <div class="orders-toolbar__divider" aria-hidden="true"></div>
+
+          <div class="orders-type-filter" id="svTypeFilter">
+            <button type="button" class="orders-type-filter__button" id="svTypeFilterBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="svTypeFilterPanel" aria-label="Filter review orders by type">
+              <span class="orders-type-filter__button-icon"><i data-feather="filter"></i></span>
+              <span class="orders-type-filter__button-label">Filter</span>
+              <span class="orders-type-filter__button-dot" id="svTypeFilterDot" hidden></span>
+            </button>
+            <div class="orders-type-filter__panel" id="svTypeFilterPanel" role="menu" aria-label="Filter review orders by type" hidden></div>
+          </div>
         </div>
 
         <!-- Orders list (Current Orders card style) -->
