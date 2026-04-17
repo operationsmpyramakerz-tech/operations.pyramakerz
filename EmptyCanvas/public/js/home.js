@@ -99,6 +99,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }[c]));
   }
 
+
+  function notionColorVars(notionColor) {
+    const key = norm(String(notionColor || 'default').replace(/_background$/i, ''));
+    const map = {
+      default: { bg: '#E5E7EB', fg: '#374151', bd: '#D1D5DB' },
+      gray: { bg: '#E5E7EB', fg: '#374151', bd: '#D1D5DB' },
+      brown: { bg: '#F3E8E2', fg: '#6B4F3A', bd: '#E7D3C8' },
+      orange: { bg: '#FFEDD5', fg: '#9A3412', bd: '#FED7AA' },
+      yellow: { bg: '#FEF3C7', fg: '#92400E', bd: '#FDE68A' },
+      green: { bg: '#DCFCE7', fg: '#166534', bd: '#86EFAC' },
+      blue: { bg: '#DBEAFE', fg: '#1D4ED8', bd: '#BFDBFE' },
+      purple: { bg: '#EDE9FE', fg: '#6D28D9', bd: '#DDD6FE' },
+      pink: { bg: '#FCE7F3', fg: '#BE185D', bd: '#FBCFE8' },
+      red: { bg: '#FEE2E2', fg: '#B91C1C', bd: '#FECACA' },
+    };
+    return map[key] || map.default;
+  }
+
+  function orderTypeMeta(type, notionColor) {
+    const key = String(type || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (key === 'requestproducts' || key === 'delivery') {
+      return { label: 'Request Products', bg: '#DCFCE7', fg: '#166534', bd: '#86EFAC' };
+    }
+    if (key === 'withdrawproducts' || key === 'withdrawal') {
+      return { label: 'Withdraw Products', bg: '#FEE2E2', fg: '#B91C1C', bd: '#FECACA' };
+    }
+    if (key === 'requestmaintenance' || key === 'maintenance') {
+      return { label: 'Request Maintenance', bg: '#FEF3C7', fg: '#92400E', bd: '#FDE68A' };
+    }
+    const fallback = notionColorVars(notionColor);
+    return {
+      label: String(type || '').trim() || 'Order',
+      bg: fallback.bg,
+      fg: fallback.fg,
+      bd: fallback.bd,
+    };
+  }
+
   function toast(type, title, message) {
     if (window.UI?.toast) return window.UI.toast({ type, title, message });
     console[type === 'error' ? 'error' : 'log'](title, message);
@@ -228,6 +266,8 @@ document.addEventListener('DOMContentLoaded', () => {
           groupId: o.id,
           latestCreated: o.createdTime,
           products: [],
+          orderType: o?.orderType || '',
+          orderTypeColor: o?.orderTypeColor || null,
         };
         map.set(key, g);
       }
@@ -237,6 +277,8 @@ document.addEventListener('DOMContentLoaded', () => {
         g.latestCreated = o.createdTime;
         g.groupId = o.id;
       }
+      if (!g.orderType && o?.orderType) g.orderType = o.orderType;
+      if (!g.orderTypeColor && o?.orderTypeColor) g.orderTypeColor = o.orderTypeColor;
     }
 
     const groups = Array.from(map.values()).sort((a, b) => new Date(b.latestCreated) - new Date(a.latestCreated));
@@ -416,9 +458,14 @@ document.addEventListener('DOMContentLoaded', () => {
       ].filter(Boolean).join('');
       const href = g.groupId ? `/orders/tracking?groupId=${encodeURIComponent(g.groupId)}` : '/orders';
 
+      const typeMeta = orderTypeMeta(g.orderType || first.orderType, g.orderTypeColor || first.orderTypeColor);
+
       const row = document.createElement('a');
       row.className = 'home-item home-item--order';
       row.href = href;
+      row.style.setProperty('--home-order-card-bg', typeMeta.bg);
+      row.style.setProperty('--home-order-card-border', typeMeta.bd);
+      row.style.setProperty('--home-order-card-fg', typeMeta.fg);
       row.innerHTML = `
         <div class="home-item__main">
           <div class="home-item__eyebrow">Order group</div>
@@ -487,8 +534,10 @@ document.addEventListener('DOMContentLoaded', () => {
           ${buildDonutSegments(segments, 44)}
         </svg>
         <div class="home-donut-center">
-          <div class="home-donut-center__value">${completion}%</div>
-          <div class="home-donut-center__label">Completed</div>
+          <div class="home-donut-center__inner">
+            <div class="home-donut-center__value">${completion}%</div>
+            <div class="home-donut-center__label">Completed</div>
+          </div>
         </div>
       </div>
       <div class="home-chart-legend">
@@ -592,18 +641,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const monthBalance = rows[rows.length - 1].cashIn - rows[rows.length - 1].cashOut;
 
     els.expensesChart.innerHTML = `
-      <div class="home-timeline">
+      <div class="home-timeline" style="--home-time-cols:${rows.length}">
         ${rows.map((row) => {
           const inHeight = row.cashIn ? Math.max(8, (row.cashIn / max) * 148) : 0;
           const outHeight = row.cashOut ? Math.max(8, (row.cashOut / max) * 148) : 0;
+          const balance = fmtMoney(row.cashIn - row.cashOut);
           return `
-            <div class="home-time-col">
+            <div class="home-time-col" title="${safeText(row.label)} • In ${safeText(fmtMoney(row.cashIn))} • Out ${safeText(fmtMoney(row.cashOut))} • Net ${safeText(balance)}">
               <div class="home-time-bars">
-                <div class="home-time-bar" style="height:${inHeight}px" title="Cash in ${safeText(fmtMoney(row.cashIn))}"></div>
+                <div class="home-time-bar home-time-bar--in" style="height:${inHeight}px" title="Cash in ${safeText(fmtMoney(row.cashIn))}"></div>
                 <div class="home-time-bar home-time-bar--out" style="height:${outHeight}px" title="Cash out ${safeText(fmtMoney(row.cashOut))}"></div>
               </div>
               <div class="home-time-label">${safeText(row.label)}</div>
-              <div class="home-time-value">${safeText(fmtMoney(row.cashIn - row.cashOut))}</div>
+              <div class="home-time-value">${safeText(balance)}</div>
             </div>
           `;
         }).join('')}

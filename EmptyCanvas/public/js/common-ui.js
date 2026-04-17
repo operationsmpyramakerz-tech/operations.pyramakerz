@@ -623,7 +623,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     link.classList.remove('account-mini');
     link.classList.add('header-user');
-    link.href = '/account';
+    link.removeAttribute('href');
+    link.setAttribute('role', 'button');
+    link.setAttribute('tabindex', '0');
+    link.dataset.userMenuTrigger = '1';
     link.title = safeName;
 
     const initials = initialsFromName(safeName) || '';
@@ -2122,6 +2125,15 @@ function initUserMenuWidget() {
     return;
   }
   trigger.dataset.userMenuBound = "1";
+
+  try {
+    const existingHref = trigger.getAttribute('href');
+    if (existingHref) trigger.dataset.userMenuHref = existingHref;
+    trigger.removeAttribute('href');
+    trigger.setAttribute('role', 'button');
+    trigger.setAttribute('tabindex', '0');
+    trigger.dataset.userMenuTrigger = '1';
+  } catch {}
 
   trigger.setAttribute("aria-haspopup", "menu");
   trigger.setAttribute("aria-expanded", "false");
