@@ -318,32 +318,61 @@ document.addEventListener('DOMContentLoaded', () => {
     container.innerHTML = `<div class="home-empty">${safeText(msg || 'No data')}</div>`;
   }
 
+  function chipToneByPriority(priority) {
+    const p = norm(priority);
+    if (/(high|urgent|critical)/.test(p)) return 'danger';
+    if (/medium/.test(p)) return 'success';
+    if (/low/.test(p)) return 'warn';
+    return 'neutral';
+  }
+
+  function chipToneByStatus(status) {
+    const s = norm(status);
+    if (isDoneStatus(s)) return 'success';
+    if (/(progress|working|doing|review)/.test(s)) return 'info';
+    if (/(overdue|late)/.test(s)) return 'danger';
+    if (/(queue|queued|pending|not started|todo)/.test(s)) return 'warn';
+    return 'neutral';
+  }
+
+  function renderMetaChip(label, tone = 'neutral') {
+    const safeLabel = safeText(label || '—');
+    const safeTone = safeText(tone || 'neutral');
+    return `<span class="home-mini-chip home-mini-chip--${safeTone}">${safeLabel}</span>`;
+  }
+
   function renderTasksList(list) {
     if (!els.tasksList) return;
 
     const q = norm(els.search?.value);
     const filtered = (list || []).filter((t) => {
       if (!q) return true;
-      return norm(t.title).includes(q) || norm(optionText(t.status)).includes(q) || norm(optionText(t.priority)).includes(q);
+      return norm(optionText(t.title)).includes(q) || norm(optionText(t.status)).includes(q) || norm(optionText(t.priority)).includes(q);
     });
 
     if (!filtered.length) return renderEmpty(els.tasksList, 'No tasks found');
 
     const frag = document.createDocumentFragment();
-    for (const t of filtered.slice(0, 6)) {
+    for (const t of filtered.slice(0, 5)) {
+      const title = optionText(t.title) || 'Untitled';
       const due = t.dueDate ? formatISODate(t.dueDate) : '';
       const status = optionText(t.status);
       const prio = optionText(t.priority);
       const pct = Number.isFinite(Number(t.completion)) ? Math.round(Number(t.completion)) : null;
-      const meta = [prio, status, due].filter(Boolean).join(' • ');
+      const chips = [
+        prio ? renderMetaChip(prio, chipToneByPriority(prio)) : '',
+        status ? renderMetaChip(status, chipToneByStatus(status)) : '',
+        due ? renderMetaChip(due, 'neutral') : '',
+      ].filter(Boolean).join('');
 
       const row = document.createElement('a');
-      row.className = 'home-item';
+      row.className = 'home-item home-item--task';
       row.href = '/tasks';
       row.innerHTML = `
         <div class="home-item__main">
-          <div class="home-item__title">${safeText(t.title || 'Untitled')}</div>
-          <div class="home-item__meta">${safeText(meta || '—')}</div>
+          <div class="home-item__eyebrow">Task</div>
+          <div class="home-item__title">${safeText(title)}</div>
+          <div class="home-item__meta">${chips || renderMetaChip('No details yet')}</div>
         </div>
         <div class="home-item__right">
           ${pct !== null ? `<span class="home-badge">${pct}%</span>` : ''}
@@ -365,30 +394,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const filtered = (groups || []).filter((g) => {
       if (!q) return true;
       const first = g.products?.[0] || {};
-      const reason = first.reason || '';
-      const createdBy = first.createdByName || '';
+      const reason = optionText(first.reason);
+      const createdBy = optionText(first.createdByName || first.createdBy || '');
       return norm(reason).includes(q) || norm(createdBy).includes(q);
     });
 
     if (!filtered.length) return renderEmpty(els.ordersList, 'No orders found');
 
     const frag = document.createDocumentFragment();
-    for (const g of filtered.slice(0, 6)) {
+    for (const g of filtered.slice(0, 5)) {
       const items = g.products || [];
       const stage = orderComputeStage(items);
       const total = ordersEstimateTotal(items);
       const first = items[0] || {};
-      const title = first.reason || 'Order';
-      const meta = `${items.length} items • ${stage.label}`;
+      const title = optionText(first.reason) || 'Order';
+      const created = first.createdTime ? formatISODate(first.createdTime) : '';
+      const chips = [
+        renderMetaChip(`${items.length} ${items.length === 1 ? 'item' : 'items'}`),
+        renderMetaChip(stage.label, chipToneByStatus(stage.label)),
+        created ? renderMetaChip(created) : '',
+      ].filter(Boolean).join('');
       const href = g.groupId ? `/orders/tracking?groupId=${encodeURIComponent(g.groupId)}` : '/orders';
 
       const row = document.createElement('a');
-      row.className = 'home-item';
+      row.className = 'home-item home-item--order';
       row.href = href;
       row.innerHTML = `
         <div class="home-item__main">
+          <div class="home-item__eyebrow">Order group</div>
           <div class="home-item__title">${safeText(title)}</div>
-          <div class="home-item__meta">${safeText(meta)}</div>
+          <div class="home-item__meta">${chips}</div>
         </div>
         <div class="home-item__right">
           <span class="home-badge">${safeText(fmtMoney(total))}</span>
@@ -720,10 +755,10 @@ document.addEventListener('DOMContentLoaded', () => {
     state.tasks = tasks;
 
     const today = toYMD(new Date());
-    const open = tasks.filter((t) => !isDoneStatus(t.status));
+    const open = tasks.filter((t) => !isDoneStatus(optionText(t.status)));
     const dueToday = open.filter((t) => t.dueDate && toYMD(t.dueDate) === today);
     const overdue = open.filter((t) => t.dueDate && toYMD(t.dueDate) < today);
-    const high = open.filter((t) => /(high|urgent)/.test(norm(t.priority)));
+    const high = open.filter((t) => /(high|urgent)/.test(norm(optionText(t.priority))));
 
     const avgCompletion = (() => {
       const vals = open
@@ -879,7 +914,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!els.search) return;
     els.search.addEventListener('input', () => {
       if (state.tasks?.length) {
-        const open = state.tasks.filter((t) => !isDoneStatus(t.status));
+        const open = state.tasks.filter((t) => !isDoneStatus(optionText(t.status)));
         const next = open
           .slice()
           .sort((a, b) => {
