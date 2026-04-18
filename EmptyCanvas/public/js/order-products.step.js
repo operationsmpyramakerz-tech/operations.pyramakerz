@@ -195,7 +195,7 @@
       if (modalGridEl) modalGridEl.classList.toggle('is-maintenance', maintenance);
       if (qtyFieldEl) qtyFieldEl.style.display = maintenance ? 'none' : '';
       if (issueFieldEl) issueFieldEl.style.display = maintenance ? '' : 'none';
-      if (schoolFieldEl) schoolFieldEl.style.display = maintenance ? '' : 'none';
+      if (schoolFieldEl) schoolFieldEl.style.display = 'none';
       if (expectedSpareFieldEl) expectedSpareFieldEl.style.display = 'none';
       if (componentLabelEl) {
         componentLabelEl.innerHTML = maintenance
@@ -221,7 +221,6 @@
     if (updateCartBtn) updateCartBtn.textContent = withdraw ? 'Update Withdraw Cart' : 'Update Cart';
     if (checkoutBtn) checkoutBtn.textContent = withdraw ? 'Withdraw Now' : 'Checkout Now';
 
-    if (maintenance && !schoolsPromise) schoolsPromise = loadSchools();
     syncUpdateCartButtonVisibility();
 
     // Summary title
@@ -789,7 +788,6 @@
 
   function startPreload() {
     if (!componentsPromise) componentsPromise = loadComponents();
-    if (isMaintenanceType() && !schoolsPromise) schoolsPromise = loadSchools();
     draftPromise = loadDraft(selectedOrderType);
     return { componentsPromise, schoolsPromise, draftPromise };
   }
@@ -1240,7 +1238,8 @@
     const maintenance = isMaintenanceType();
     const cleanQty = maintenance ? 1 : normalizeQty(Number(quantity), NaN);
     const issue = String(issueDescription || '').trim();
-    const cleanSchoolId = maintenance ? String(schoolId || '').trim() : '';
+    const idx = cart.findIndex((p) => String(p.id) === cleanId);
+    const cleanSchoolId = maintenance ? String(schoolId || cart[idx]?.schoolId || '').trim() : '';
 
     const r = maintenance ? deriveMaintenanceReason(issue) : String(globalReason || '').trim();
 
@@ -1255,11 +1254,6 @@
         return false;
       }
     } else {
-      if (!cleanSchoolId) {
-        toast('error', 'Missing field', 'Please choose a school.');
-        try { schoolSelectEl?.focus?.(); } catch {}
-        return false;
-      }
       if (!issue) {
         toast('error', 'Missing field', 'Please describe the issue.');
         try { issueDescInputEl?.focus?.(); } catch {}
@@ -1267,7 +1261,6 @@
       }
     }
 
-    const idx = cart.findIndex((p) => String(p.id) === cleanId);
     if (maintenance && idx === -1 && Array.isArray(cart) && cart.length >= 1) {
       toast('error', 'One machine only', 'Request Maintenance allows one machine only. Edit or remove the current machine first.');
       return false;
@@ -1328,9 +1321,6 @@
         setNativeSelectLoading(componentSelectEl, text);
       }
       if (isMaintenanceType() && isOn) {
-        if (schoolSelectEl && !getChoicesInstance(schoolSelectEl)) {
-          setNativeSelectLoading(schoolSelectEl, 'Loading schools...');
-        }
         if (expectedSpareSelectEl && !getChoicesInstance(expectedSpareSelectEl)) {
           setNativeSelectLoading(expectedSpareSelectEl, 'Loading spare parts...');
         }
@@ -1357,7 +1347,7 @@
     setModalOpen(true);
 
     const componentReady = componentsLoaded && Array.isArray(components) && components.length;
-    const schoolReady = !maintenance || schoolsLoaded;
+    const schoolReady = true;
 
     // If everything is already ready, just clear the selection and focus.
     if (componentReady && schoolReady) {
@@ -1440,7 +1430,7 @@
     };
 
     const componentReady = componentsLoaded && Array.isArray(components) && components.length;
-    const schoolReady = !maintenance || schoolsLoaded;
+    const schoolReady = true;
 
     if (componentReady && schoolReady) {
       refreshModalChoices();
@@ -1576,17 +1566,13 @@
   function refreshModalChoices() {
     initComponentChoices();
     if (isMaintenanceType()) {
-      initSchoolChoices();
       initExpectedSpareChoices();
     }
   }
 
   async function ensureMaintenanceModalReady() {
-    const [componentsOk, schoolsOk] = await Promise.all([
-      ensureComponentsReady(),
-      ensureSchoolsReady(),
-    ]);
-    if (!componentsOk || !schoolsOk) return false;
+    const componentsOk = await ensureComponentsReady();
+    if (!componentsOk) return false;
     initExpectedSpareChoices();
     return true;
   }
@@ -1731,12 +1717,6 @@
         return;
       }
     } else {
-      const missingSchool = cart.find((p) => !String(p.schoolId || '').trim());
-      if (missingSchool) {
-        toast('error', 'School required', 'Please choose a school for every machine in the cart.');
-        try { openModalForEdit(missingSchool.id); } catch {}
-        return;
-      }
       // Maintenance requires Issue Description per item
       const missing = cart.find((p) => !String(p.issueDescription || '').trim());
       if (missing) {
