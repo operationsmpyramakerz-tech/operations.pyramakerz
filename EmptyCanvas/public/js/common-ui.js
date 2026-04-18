@@ -2906,8 +2906,25 @@ function stripOpsShellParam(input) {
   }
 }
 
+function resolveOpsShellCanonicalPath(input) {
+  try {
+    const display = stripOpsShellParam(input);
+    const url = new URL(display, window.location.origin);
+    const pathname = String(url.pathname || '/').replace(/\/+$/, '') || '/';
+
+    if (pathname === '/orders/new' || pathname === '/orders/new/review') {
+      url.pathname = '/orders/new/products';
+    }
+
+    const safePathname = String(url.pathname || '/').replace(/\/+$/, '') || '/';
+    return `${safePathname}${url.search}${url.hash}`;
+  } catch {
+    return '/';
+  }
+}
+
 function buildOpsShellContentUrl(input) {
-  const display = stripOpsShellParam(input);
+  const display = resolveOpsShellCanonicalPath(input);
   const url = new URL(display, window.location.origin);
   url.searchParams.set('__shell', 'content');
   return url.toString();
@@ -2927,7 +2944,7 @@ function isOpsShellNavigableHref(href) {
 
 function normalizeOpsShellPath(input) {
   try {
-    const display = stripOpsShellParam(input);
+    const display = resolveOpsShellCanonicalPath(input);
     const url = new URL(display, window.location.origin);
     const pathname = String(url.pathname || '/').replace(/\/+$/, '') || '/';
     return `${pathname}${url.search}${url.hash}`;
@@ -2964,7 +2981,7 @@ function deriveOpsShellTitle(path) {
 function readOpsShellFrameMeta() {
   const frameDoc = getOpsPersistentShellFrameDocument();
   const frameWin = (() => { try { return getOpsPersistentShellFrame()?.contentWindow || null; } catch { return null; } })();
-  const framePath = frameWin ? stripOpsShellParam(frameWin.location.href) : stripOpsShellParam(window.location.href);
+  const framePath = frameWin ? resolveOpsShellCanonicalPath(frameWin.location.href) : resolveOpsShellCanonicalPath(window.location.href);
   if (!frameDoc) {
     const fallbackTitle = deriveOpsShellTitle(framePath);
     return { displayTitle: fallbackTitle, fullTitle: fallbackTitle, path: framePath, searchPlaceholder: `Search in ${fallbackTitle}` };
@@ -3193,7 +3210,7 @@ function initOpsPersistentShellHost() {
   const frameWrap = hostMain.querySelector('.ops-shell-frame-wrap');
   const hostSearch = document.querySelector('.main-header .searchbar input');
   const state = {
-    currentPath: stripOpsShellParam(window.location.href),
+    currentPath: resolveOpsShellCanonicalPath(window.location.href),
     requestedPath: null,
     frame,
     frameWrap,
@@ -3246,11 +3263,21 @@ function initOpsPersistentShellHost() {
   });
 
   const loadFrame = (href, opts = {}) => {
-    const nextPath = stripOpsShellParam(href);
+    const nextPath = resolveOpsShellCanonicalPath(href);
     const nextNormalized = normalizeOpsShellPath(nextPath);
     const currentNormalized = normalizeOpsShellPath(state.currentPath);
     const shouldPush = !!opts.pushHistory && nextNormalized !== currentNormalized;
     const shouldReplace = !!opts.replaceHistory;
+    const hasLoadedFrame = !!(frame && frame.getAttribute('src'));
+
+    if (!opts.forceReload && hasLoadedFrame && nextNormalized === currentNormalized) {
+      state.requestedPath = null;
+      if (shouldReplace) {
+        try { history.replaceState({ opsShellPath: nextPath }, '', nextPath); } catch {}
+      }
+      try { bindOpsShellFrameNavigation(getOpsPersistentShellFrameDocument()); } catch {}
+      return;
+    }
 
     state.requestedPath = nextPath;
 
@@ -3289,7 +3316,7 @@ function initOpsPersistentShellHost() {
   }, true);
 
   window.addEventListener('popstate', () => {
-    const desired = stripOpsShellParam(window.location.href);
+    const desired = resolveOpsShellCanonicalPath(window.location.href);
     if (normalizeOpsShellPath(desired) === normalizeOpsShellPath(state.currentPath)) return;
     loadFrame(desired, { replaceHistory: true, hideLegacy: true });
   });
@@ -3306,8 +3333,8 @@ function initOpsPersistentShellHost() {
 
   window.OpsShell = {
     navigate(href, opts = {}) {
-      const next = stripOpsShellParam(href);
-      loadFrame(next, { pushHistory: opts.pushHistory !== false, replaceHistory: !!opts.replaceHistory, hideLegacy: true });
+      const next = resolveOpsShellCanonicalPath(href);
+      loadFrame(next, { pushHistory: opts.pushHistory !== false, replaceHistory: !!opts.replaceHistory, hideLegacy: true, forceReload: !!opts.forceReload });
     },
     getFrame() { return frame; },
     getFrameDocument() { return getOpsPersistentShellFrameDocument(); },
