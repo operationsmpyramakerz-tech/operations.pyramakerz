@@ -969,6 +969,72 @@ if (document.querySelector('.sidebar')) {
     }
 
 
+  function syncMobileDockStructure(){
+    const sidebar = document.querySelector('.sidebar');
+    const nav = sidebar?.querySelector('.sidebar-nav');
+    if (!sidebar || !nav) return;
+
+    const isStructured = nav.classList.contains('mobile-dock-structured');
+    const list = nav.querySelector(':scope > .mobile-dock-pages-clip > .nav-list')
+      || nav.querySelector(':scope > .nav-list');
+
+    if (!list) {
+      sidebar.classList.remove('mobile-dock-structured-host');
+      nav.classList.remove('mobile-dock-structured');
+      return;
+    }
+
+    if (isMobile()) {
+      if (isStructured) {
+        sidebar.classList.add('mobile-dock-structured-host');
+        return;
+      }
+
+      const homeLi = list.querySelector(':scope > li:first-child');
+      if (!homeLi) return;
+
+      const homeRail = document.createElement('div');
+      homeRail.className = 'mobile-dock-home-rail';
+
+      const pagesClip = document.createElement('div');
+      pagesClip.className = 'mobile-dock-pages-clip';
+
+      nav.insertBefore(homeRail, list);
+      nav.insertBefore(pagesClip, list);
+      homeRail.appendChild(homeLi);
+      pagesClip.appendChild(list);
+
+      list.classList.add('mobile-dock-pages-list');
+      nav.classList.add('mobile-dock-structured');
+      sidebar.classList.add('mobile-dock-structured-host');
+      return;
+    }
+
+    if (!isStructured) {
+      sidebar.classList.remove('mobile-dock-structured-host');
+      return;
+    }
+
+    const homeRail = nav.querySelector(':scope > .mobile-dock-home-rail');
+    const pagesClip = nav.querySelector(':scope > .mobile-dock-pages-clip');
+    const pagesList = pagesClip?.querySelector(':scope > .nav-list') || list;
+    const homeLi = homeRail?.querySelector(':scope > li');
+
+    if (pagesClip && pagesList && pagesClip.parentNode === nav) {
+      nav.insertBefore(pagesList, homeRail || pagesClip);
+    }
+    if (homeLi && pagesList) {
+      pagesList.insertBefore(homeLi, pagesList.firstChild);
+    }
+
+    try { homeRail?.remove(); } catch {}
+    try { pagesClip?.remove(); } catch {}
+
+    pagesList.classList.remove('mobile-dock-pages-list');
+    nav.classList.remove('mobile-dock-structured');
+    sidebar.classList.remove('mobile-dock-structured-host');
+  }
+
   // Rename sidebar labels (display-only) without changing routes
   function renameSidebarLabels(){
     // Operations Orders (was: Operations Requested Orders)
@@ -1241,6 +1307,8 @@ ensureLink({ href: '/orders/sv-orders', label: 'Orders Review', icon: 'award' })
   ensureLink({ href: '/b2b', label: 'B2B', icon: 'folder' });
   ensureLink({ href: '/tasks', label: 'Tasks', icon: 'check-square' });
 
+  syncMobileDockStructure();
+
   // UI Redesign: sidebar tooltips (labels are hidden in the new style)
   ensureNavTooltips();
 
@@ -1254,7 +1322,10 @@ ensureLink({ href: '/orders/sv-orders', label: 'Orders Review', icon: 'award' })
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(applyInitial, 150);
+    resizeTimer = setTimeout(() => {
+      applyInitial();
+      syncMobileDockStructure();
+    }, 150);
   });
 
   if (window.feather) feather.replace();
