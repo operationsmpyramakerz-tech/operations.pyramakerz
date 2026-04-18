@@ -1752,7 +1752,9 @@ app.get(
   requireAuth,
   requirePage("Create New Order"),
   (req, res) => {
-    return res.redirect("/orders/new/products");
+    const queryIndex = String(req.originalUrl || '').indexOf('?');
+    const query = queryIndex >= 0 ? String(req.originalUrl || '').slice(queryIndex) : '';
+    return res.redirect(`/orders/new/products${query}`);
   }
 );
 
@@ -1770,7 +1772,9 @@ app.get(
   requirePage("Create New Order"),
   (req, res) => {
     // Review step removed — Checkout now submits directly from Products page
-    return res.redirect("/orders/new/products");
+    const queryIndex = String(req.originalUrl || '').indexOf('?');
+    const query = queryIndex >= 0 ? String(req.originalUrl || '').slice(queryIndex) : '';
+    return res.redirect(`/orders/new/products${query}`);
   },
 );
 
