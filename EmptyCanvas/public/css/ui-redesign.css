@@ -1508,6 +1508,9 @@ body.has-floating-search .main-header .searchbar{
     padding: 0 !important;
     overflow-x: auto !important;
     overflow-y: visible !important;
+    overscroll-behavior-x: contain !important;
+    scroll-padding-left: calc(var(--mobile-home-block-w) + var(--mobile-home-gap) + 10px);
+    scroll-padding-right: calc(14px + var(--mobile-pages-right-gap));
     white-space: nowrap;
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -1539,8 +1542,29 @@ body.has-floating-search .main-header .searchbar{
     pointer-events: none;
   }
 
+  .sidebar-nav::before,
+  .sidebar-nav::after{
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 2;
+    background: #FFFFFF;
+  }
+
+  /*
+    Keep page icons clipped inside the long black dock block on mobile.
+    The Home item stays visible because its own card sits above these masks.
+  */
   .sidebar-nav::before{
-    content: none !important;
+    left: var(--mobile-home-block-w);
+    width: var(--mobile-home-gap);
+  }
+
+  .sidebar-nav::after{
+    right: 0;
+    width: var(--mobile-pages-right-gap);
   }
 
   .sidebar-nav .nav-list{
@@ -1556,7 +1580,7 @@ body.has-floating-search .main-header .searchbar{
     justify-content: flex-start !important;
     gap: 10px !important;
     margin: 0 !important;
-    padding: 4px 14px 4px 0 !important;
+    padding: 4px calc(14px + var(--mobile-pages-right-gap)) 4px 0 !important;
   }
 
   .sidebar-nav .nav-list > li{
