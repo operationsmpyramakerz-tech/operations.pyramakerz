@@ -1465,7 +1465,7 @@ body.has-floating-search .main-header .searchbar{
     overflow-x: hidden !important;
     overscroll-behavior-y: contain !important;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(98px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   #menu-toggle,
@@ -1479,7 +1479,7 @@ body.has-floating-search .main-header .searchbar{
     top: auto !important;
     left: 12px !important;
     right: 12px !important;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
+    bottom: env(safe-area-inset-bottom, 0px) !important;
     width: auto !important;
     min-height: 80px !important;
     height: 80px !important;
