@@ -27,6 +27,75 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentStatusTab = 'all';
   let currentTypeFilter = 'all';
 
+
+  function syncShellDisplayUrl(urlLike) {
+    try {
+      if (!window.parent || window.parent === window) return;
+      if (window.parent.location.origin !== window.location.origin) return;
+
+      const displayUrl = new URL(
+        urlLike instanceof URL ? urlLike.toString() : String(urlLike || window.location.href),
+        window.location.origin,
+      );
+      displayUrl.searchParams.delete('__shell');
+
+      const next = `${displayUrl.pathname}${displayUrl.search}${displayUrl.hash}` || displayUrl.pathname || '/';
+      window.parent.history.replaceState({ opsShellPath: next }, '', next);
+
+      if (window.parent.__opsShellHostState) {
+        window.parent.__opsShellHostState.currentPath = next;
+      }
+    } catch {}
+  }
+
+  function createToolbarTabIndicator(tablist) {
+    if (!tablist) return () => {};
+
+    let rafId = 0;
+
+    const sync = () => {
+      const activeTab = tablist.querySelector('.tab-portfolio.active, .tab-portfolio.is-active');
+      if (!activeTab) {
+        tablist.style.setProperty('--orders-active-tab-opacity', '0');
+        try { delete tablist.dataset.tabIndicatorReady; } catch {}
+        return;
+      }
+
+      const wrapRect = tablist.getBoundingClientRect();
+      const tabRect = activeTab.getBoundingClientRect();
+      const x = tabRect.left - wrapRect.left + tablist.scrollLeft;
+      const y = tabRect.top - wrapRect.top + tablist.scrollTop;
+
+      tablist.style.setProperty('--orders-active-tab-x', `${Math.round(x)}px`);
+      tablist.style.setProperty('--orders-active-tab-y', `${Math.round(y)}px`);
+      tablist.style.setProperty('--orders-active-tab-width', `${Math.round(tabRect.width)}px`);
+      tablist.style.setProperty('--orders-active-tab-height', `${Math.round(tabRect.height)}px`);
+      tablist.style.setProperty('--orders-active-tab-opacity', '1');
+      tablist.dataset.tabIndicatorReady = '1';
+    };
+
+    const queue = () => {
+      window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(sync);
+    };
+
+    tablist.addEventListener('scroll', queue, { passive: true });
+    window.addEventListener('resize', queue);
+    window.addEventListener('orientationchange', queue);
+
+    if ('ResizeObserver' in window) {
+      const ro = new ResizeObserver(queue);
+      ro.observe(tablist);
+      tablist.querySelectorAll('.tab-portfolio').forEach((tab) => ro.observe(tab));
+      tablist.__ordersTabIndicatorObserver = ro;
+    }
+
+    queue();
+    return queue;
+  }
+
+  const syncTabsIndicator = createToolbarTabIndicator(tabsWrap);
+
   // Map of rendered groups by their representative groupId
   let groupsById = new Map();
 
@@ -237,7 +306,9 @@ document.addEventListener('DOMContentLoaded', () => {
       url.searchParams.set('tab', currentStatusTab);
       if (currentTypeFilter && currentTypeFilter !== 'all') url.searchParams.set('type', currentTypeFilter);
       else url.searchParams.delete('type');
-      window.history.replaceState({}, '', url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : ''));
+      const next = url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : '');
+      window.history.replaceState({}, '', next);
+      syncShellDisplayUrl(url);
     } catch {}
   }
 
@@ -1006,6 +1077,7 @@ document.addEventListener('DOMContentLoaded', () => {
       a.classList.toggle('is-active', active);
       a.setAttribute('aria-selected', active ? 'true' : 'false');
     });
+    syncTabsIndicator();
   }
 
   function getTypeFilterOptions(allGroups = []) {

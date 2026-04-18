@@ -3138,6 +3138,8 @@ function bindOpsShellFrameNavigation(frameDoc) {
   frameDoc.addEventListener('click', (event) => {
     const anchor = event.target.closest('a[href]');
     if (!anchor) return;
+    const role = String(anchor.getAttribute('role') || '').toLowerCase();
+    if (role === 'tab') return;
     if (event.defaultPrevented) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     if (anchor.hasAttribute('download')) return;
@@ -3262,6 +3264,8 @@ function initOpsPersistentShellHost() {
   document.addEventListener('click', (event) => {
     const anchor = event.target.closest('a[href]');
     if (!anchor) return;
+    const role = String(anchor.getAttribute('role') || '').toLowerCase();
+    if (role === 'tab') return;
     const insideLegacy = anchor.closest('[data-ops-shell-legacy="1"]');
     if (insideLegacy && legacyMain.hidden) return;
     if (event.defaultPrevented) return;
