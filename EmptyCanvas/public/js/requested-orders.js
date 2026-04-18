@@ -3397,11 +3397,15 @@ async function markReceivedByOperations(g, receiptNumber, extra = {}) {
     const a = e.target?.closest?.("a.tab-portfolio");
     if (!a) return;
 
-    const t = norm(a.getAttribute("data-tab"));
-    if (!t || t === currentTab) return;
-
-    // Tabs are anchors in the HTML; prevent navigation so the page doesn't refresh.
+    // Tabs are anchors in the HTML; always prevent navigation so tapping
+    // the already-active tab does not load the full page inside the shell.
     e.preventDefault();
+
+    const t = norm(a.getAttribute("data-tab"));
+    if (!t || t === currentTab) {
+      syncTabsIndicator();
+      return;
+    }
 
     currentTab = t;
     closeTypeFilterMenu();

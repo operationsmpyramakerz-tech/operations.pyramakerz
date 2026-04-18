@@ -1269,10 +1269,14 @@ if (tabsWrap) {
     const a = e.target.closest("a.tab-portfolio");
     if (!a) return;
 
-    const targetTab = normalizeSvTab(a.dataset.tab || "not-started");
-    if (!targetTab || targetTab === TAB) return;
-
     e.preventDefault();
+
+    const targetTab = normalizeSvTab(a.dataset.tab || "not-started");
+    if (!targetTab || targetTab === TAB) {
+      syncTabsIndicator();
+      return;
+    }
+
     destroyPopover();
     closeTypeFilterMenu();
     closeModal();

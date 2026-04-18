@@ -1408,9 +1408,15 @@ document.addEventListener('DOMContentLoaded', () => {
     tabsWrap?.addEventListener('click', (e) => {
       const a = e.target?.closest?.('a.tab-portfolio');
       if (!a) return;
-      const nextTab = normalizeCurrentStatusTab(a.dataset.tab || 'all');
-      if (nextTab === currentStatusTab) return;
+
       e.preventDefault();
+
+      const nextTab = normalizeCurrentStatusTab(a.dataset.tab || 'all');
+      if (nextTab === currentStatusTab) {
+        syncTabsIndicator();
+        return;
+      }
+
       currentStatusTab = nextTab;
       closeTypeFilterMenu();
       renderCurrentOrders();
