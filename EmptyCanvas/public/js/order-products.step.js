@@ -1042,14 +1042,65 @@
     if (footerEl) footerEl.style.display = hideForMaintenance ? 'none' : '';
   }
 
+  function createCardOpenAction(url) {
+    const safeUrl = safeHttpUrl(url);
+    let openBtn;
+
+    if (safeUrl) {
+      openBtn = document.createElement('a');
+      openBtn.href = safeUrl;
+      openBtn.target = '_blank';
+      openBtn.rel = 'noopener noreferrer';
+      openBtn.title = safeUrl;
+    } else {
+      openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.disabled = true;
+      openBtn.setAttribute('aria-disabled', 'true');
+      openBtn.title = 'No valid product URL';
+    }
+
+    openBtn.className = 'cart-action-btn cart-action-btn--open';
+    openBtn.innerHTML = `${featherIconMarkup('external-link')}<span>Open</span>`;
+    return openBtn;
+  }
+
+  function createCardDeleteAction() {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'cart-action-btn cart-action-btn--delete';
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.setAttribute('aria-label', 'Delete item');
+    return deleteBtn;
+  }
+
+  function makeCardEditorTrigger(el, onOpen, label) {
+    if (!el || typeof onOpen !== 'function') return;
+    el.style.cursor = 'pointer';
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    if (label) el.setAttribute('aria-label', label);
+    el.addEventListener('click', onOpen);
+    el.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      onOpen();
+    });
+  }
+
   function renderCart() {
     if (!cartItemsEl) return;
 
-    const useRequestCards = isRequestProductsType();
+    const useProductCards = isRequestProductsType() || isWithdrawType();
+    const useMaintenanceCards = isMaintenanceType();
 
     cartItemsEl.innerHTML = '';
-    cartItemsEl.classList.toggle('cart-body--request-cards', useRequestCards);
-    if (cartHeadEl) cartHeadEl.classList.toggle('cart-head--request-cards', useRequestCards);
+    cartItemsEl.classList.toggle('cart-body--request-cards', useProductCards);
+    cartItemsEl.classList.toggle('cart-body--maintenance-cards', useMaintenanceCards);
+    if (cartHeadEl) {
+      cartHeadEl.classList.toggle('cart-head--request-cards', useProductCards);
+      cartHeadEl.classList.toggle('cart-head--maintenance-cards', useMaintenanceCards);
+    }
     syncUpdateCartButtonVisibility();
 
     if (!Array.isArray(cart) || cart.length === 0) {
@@ -1068,6 +1119,7 @@
       const schoolName = schoolsById.get(String(p.schoolId || ''))?.name || '';
       const qty = normalizeQty(Number(p.quantity), MIN_QTY);
       const total = itemTotal({ id: p.id, quantity: qty });
+      const displayQty = isWithdrawType() ? `-${formatQty(qty)}` : formatQty(qty);
       const displayId = String(c?.displayId || '').trim();
       const metadataTags = Array.isArray(c?.tags)
         ? c.tags
@@ -1081,10 +1133,10 @@
         : [];
       const secondaryMeta = isMaintenanceType()
         ? (schoolName ? `School: ${schoolName}` : '')
-        : (useRequestCards && metadataTags.length ? metadataTags.slice(0, 2).join(' • ') : '');
+        : (useProductCards && metadataTags.length ? metadataTags.slice(0, 2).join(' • ') : '');
 
       const row = document.createElement('div');
-      row.className = `cart-row ${isMaintenanceType() ? 'cart-row--maintenance' : 'cart-row--standard'}`;
+      row.className = 'cart-row';
       row.dataset.id = String(p.id);
 
       // Product cell
@@ -1113,7 +1165,7 @@
       if (secondaryMeta) {
         metaHtml += `<div class="prod-submeta" title="${escapeHtml(secondaryMeta)}">${escapeHtml(secondaryMeta)}</div>`;
       }
-      if (useRequestCards && displayId) {
+      if ((useProductCards || useMaintenanceCards) && displayId) {
         metaHtml += `<div class="prod-submeta prod-submeta--part">Part No: ${escapeHtml(displayId)}</div>`;
       }
       meta.innerHTML = metaHtml;
@@ -1121,43 +1173,44 @@
       productCell.appendChild(thumb);
       productCell.appendChild(meta);
 
-      // Request Maintenance: show Issue Description instead of URL/Qty/Total
-      if (isMaintenanceType()) {
-        const issueCell = document.createElement('div');
-        issueCell.className = 'issue-cell cart-issue-cell';
+      if (useMaintenanceCards) {
+        row.classList.add('cart-row--maintenance-card');
+        productCell.classList.add('cart-card-main');
+
         const issue = String(p.issueDescription || '').trim();
-        issueCell.textContent = issue || '—';
+        const issueCard = document.createElement('div');
+        issueCard.className = 'cart-card-note cart-card-note--editable';
+        issueCard.innerHTML = `
+          <div class="cart-card-note-label">Issue Description</div>
+          <div class="cart-card-note-value${issue ? '' : ' is-empty'}">${escapeHtml(issue || '—')}</div>
+        `;
 
-        // Action cell
-        const actionCell = document.createElement('div');
-        actionCell.className = 'cart-action-cell';
-        const trashBtn = document.createElement('button');
-        trashBtn.className = 'trash-btn';
-        trashBtn.type = 'button';
-        trashBtn.setAttribute('aria-label', 'Remove item');
-        trashBtn.innerHTML = '<i data-feather="trash-2"></i>';
-        actionCell.appendChild(trashBtn);
+        const actions = document.createElement('div');
+        actions.className = 'cart-card-actions';
 
-        // bind events
-        trashBtn.addEventListener('click', () => removeItem(p.id));
+        const openBtn = createCardOpenAction(c?.url);
+        const deleteBtn = createCardDeleteAction();
 
-        // click product to edit
-        productCell.style.cursor = 'pointer';
-        productCell.addEventListener('click', () => openModalForEdit(p.id));
+        actions.appendChild(openBtn);
+        actions.appendChild(deleteBtn);
+
+        const openEditor = () => openModalForEdit(p.id);
+
+        deleteBtn.addEventListener('click', () => removeItem(p.id));
+        makeCardEditorTrigger(productCell, openEditor, `Edit ${name}`);
+        makeCardEditorTrigger(issueCard, openEditor, `Edit issue description for ${name}`);
 
         row.appendChild(productCell);
-        row.appendChild(issueCell);
-        row.appendChild(actionCell);
+        row.appendChild(issueCard);
+        row.appendChild(actions);
 
         cartItemsEl.appendChild(row);
         return;
       }
 
-      if (useRequestCards) {
+      if (useProductCards) {
         row.classList.add('cart-row--request-card');
         productCell.classList.add('cart-card-main');
-
-        const safeUrl = safeHttpUrl(c?.url);
 
         // Quantity metric
         const qtyCtl = document.createElement('div');
@@ -1171,7 +1224,7 @@
 
         const qtyVal = document.createElement('div');
         qtyVal.className = 'qty-value';
-        qtyVal.textContent = formatQty(qty);
+        qtyVal.textContent = displayQty;
 
         const incBtn = document.createElement('button');
         incBtn.className = 'qty-btn';
@@ -1212,28 +1265,8 @@
         const actions = document.createElement('div');
         actions.className = 'cart-card-actions';
 
-        let openBtn;
-        if (safeUrl) {
-          openBtn = document.createElement('a');
-          openBtn.href = safeUrl;
-          openBtn.target = '_blank';
-          openBtn.rel = 'noopener noreferrer';
-          openBtn.title = safeUrl;
-        } else {
-          openBtn = document.createElement('button');
-          openBtn.type = 'button';
-          openBtn.disabled = true;
-          openBtn.setAttribute('aria-disabled', 'true');
-          openBtn.title = 'No valid product URL';
-        }
-        openBtn.className = 'cart-action-btn cart-action-btn--open';
-        openBtn.innerHTML = `${featherIconMarkup('external-link')}<span>Open</span>`;
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'cart-action-btn cart-action-btn--delete';
-        deleteBtn.type = 'button';
-        deleteBtn.textContent = 'Delete';
-        deleteBtn.setAttribute('aria-label', 'Delete item');
+        const openBtn = createCardOpenAction(c?.url);
+        const deleteBtn = createCardDeleteAction();
 
         actions.appendChild(openBtn);
         actions.appendChild(deleteBtn);
@@ -1243,17 +1276,7 @@
         incBtn.addEventListener('click', () => changeQty(p.id, +1));
         decBtn.addEventListener('click', () => changeQty(p.id, -1));
         deleteBtn.addEventListener('click', () => removeItem(p.id));
-
-        productCell.style.cursor = 'pointer';
-        productCell.setAttribute('role', 'button');
-        productCell.setAttribute('tabindex', '0');
-        productCell.setAttribute('aria-label', `Edit ${name}`);
-        productCell.addEventListener('click', openEditor);
-        productCell.addEventListener('keydown', (event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          openEditor();
-        });
+        makeCardEditorTrigger(productCell, openEditor, `Edit ${name}`);
 
         row.appendChild(productCell);
         row.appendChild(metrics);
@@ -1298,7 +1321,7 @@
       const qtyVal = document.createElement('div');
       qtyVal.className = 'qty-value';
       // Withdraw mode: show the qty as a negative number in the UI
-      qtyVal.textContent = isWithdrawType() ? `-${formatQty(qty)}` : formatQty(qty);
+      qtyVal.textContent = displayQty;
 
       const incBtn = document.createElement('button');
       incBtn.className = 'qty-btn';
