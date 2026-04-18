@@ -252,6 +252,9 @@ let VIEW_ALL_SHOW_PAST = false;
 let VIEW_ALL_RECENT_ITEMS = [];
 let VIEW_ALL_PAST_ITEMS = [];
 let VIEW_ALL_LAST_SETTLED_AT = null;
+let EXPENSES_ALL_ITEMS = [];
+let EXPENSES_WEEKLY_ITEMS = [];
+let ACTIVE_EXPENSES_FILTER = "recent";
 
 function normalizeFundsType(s) {
   return String(s || "").trim().toLowerCase();
@@ -1552,6 +1555,119 @@ function formatExpenseNumber(value) {
   return num.toLocaleString("en-GB", { maximumFractionDigits: 2 });
 }
 
+function formatHeroMoney(value, { sign = "", absolute = false } = {}) {
+  const raw = Number(value || 0);
+  const safe = absolute ? Math.abs(raw) : raw;
+  return `${sign}£${formatExpenseNumber(safe)}`;
+}
+
+function formatLastSettledChipText(lastSettledAt) {
+  const formatted = formatLastSettledAt(lastSettledAt);
+  if (formatted === "—") return "No settlements yet";
+  return formatted.replace(", ", " • ");
+}
+
+function syncExpenseFilterButtons() {
+  const buttons = Array.from(document.querySelectorAll("[data-expense-filter]"));
+  buttons.forEach((btn) => {
+    const key = String(btn.getAttribute("data-expense-filter") || "").trim();
+    const active = key === ACTIVE_EXPENSES_FILTER;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function getActiveExpenseItems() {
+  const weeklyItems = Array.isArray(EXPENSES_WEEKLY_ITEMS) ? EXPENSES_WEEKLY_ITEMS : [];
+  if (ACTIVE_EXPENSES_FILTER === "cash-in") {
+    return weeklyItems.filter((item) => Number(item?.cashIn || 0) > 0);
+  }
+  if (ACTIVE_EXPENSES_FILTER === "cash-out") {
+    return weeklyItems.filter((item) => {
+      const hasCashOut = Number(item?.cashOut || 0) > 0;
+      const hasOwnCarDistance = isOwnCarFundsType(item?.fundsType) && Number(item?.kilometer || 0) > 0;
+      return hasCashOut || hasOwnCarDistance;
+    });
+  }
+  return weeklyItems;
+}
+
+function getActiveExpenseEmptyMessage() {
+  if (ACTIVE_EXPENSES_FILTER === "cash-in") return "No cash in for this week.";
+  if (ACTIVE_EXPENSES_FILTER === "cash-out") return "No cash out for this week.";
+  return "No expenses for this week.";
+}
+
+function renderExpensesListForActiveFilter() {
+  const container = document.getElementById("expensesContent");
+  if (!container) return;
+
+  const items = getActiveExpenseItems();
+  container.innerHTML = buildExpensesTicketsHtml(items, {
+    emptyMessage: getActiveExpenseEmptyMessage(),
+  });
+}
+
+function updateExpensesHeroSummary(items, lastSettledAt) {
+  const totalBox = document.getElementById("totalAmount");
+  const cashInBox = document.getElementById("cashInTotal");
+  const cashOutBox = document.getElementById("cashOutTotal");
+  const lastSettledEl = document.getElementById("lastSettledTime");
+
+  const source = Array.isArray(items) ? items : [];
+  let total = 0;
+  let cashInTotal = 0;
+  let cashOutTotal = 0;
+
+  source.forEach((item) => {
+    const cashIn = Number(item?.cashIn || 0);
+    const cashOut = Number(item?.cashOut || 0);
+    cashInTotal += cashIn;
+    cashOutTotal += cashOut;
+    total += cashIn - cashOut;
+  });
+
+  if (totalBox) {
+    totalBox.textContent = total < 0
+      ? `-£${formatExpenseNumber(Math.abs(total))}`
+      : `£${formatExpenseNumber(total)}`;
+  }
+  if (cashInBox) {
+    cashInBox.textContent = formatHeroMoney(cashInTotal, { sign: "+", absolute: true });
+  }
+  if (cashOutBox) {
+    cashOutBox.textContent = formatHeroMoney(cashOutTotal, { sign: "-", absolute: true });
+  }
+  if (lastSettledEl) {
+    lastSettledEl.textContent = formatLastSettledChipText(lastSettledAt);
+  }
+}
+
+function setActiveExpenseFilter(nextFilter) {
+  const safeFilter = ["recent", "cash-in", "cash-out"].includes(String(nextFilter || ""))
+    ? String(nextFilter)
+    : "recent";
+
+  ACTIVE_EXPENSES_FILTER = safeFilter;
+  syncExpenseFilterButtons();
+  renderExpensesListForActiveFilter();
+}
+
+function bindExpenseFilterControls() {
+  const buttons = Array.from(document.querySelectorAll("[data-expense-filter]"));
+  if (!buttons.length) return;
+
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      const nextFilter = String(btn.getAttribute("data-expense-filter") || "recent").trim();
+      setActiveExpenseFilter(nextFilter || "recent");
+    });
+  });
+
+  syncExpenseFilterButtons();
+}
+
 function shouldHideExpenseGroupReason(group) {
   const reason = normalizeExpenseGroupText(group?.reason);
   const orders = Array.isArray(group?.orders) ? group.orders : [];
@@ -2573,7 +2689,6 @@ async function submitSettleAccount() {
 
 async function loadExpenses() {
     const container = document.getElementById("expensesContent");
-    const totalBox = document.getElementById("totalAmount");
 
     if (container) {
       container.innerHTML = `<div class="loader" role="status" aria-label="Loading"></div>`;
@@ -2584,48 +2699,29 @@ async function loadExpenses() {
         const data = await res.json();
 
         if (!data.success) {
-            container.innerHTML = "<p>Error loading data</p>";
+            if (container) container.innerHTML = "<p>Error loading data</p>";
             return;
         }
 
-        // Last settled time (under the "Settled my account" button)
-        const lastSettledEl = document.getElementById("lastSettledTime");
-        if (lastSettledEl) {
-            const ts = formatLastSettledAt(data.lastSettledAt);
-            lastSettledEl.textContent = `Last settled time: ${ts}`;
-        }
-
         const items = Array.isArray(data.items) ? data.items : [];
+        EXPENSES_ALL_ITEMS = items;
+        updateExpensesHeroSummary(items, data.lastSettledAt);
 
-        // ============================
-        // TOTAL
-        // ============================
-        let total = 0;
-        items.forEach((it) => {
-            if (it.cashIn) total += Number(it.cashIn) || 0;
-            if (it.cashOut) total -= Number(it.cashOut) || 0;
-        });
-        totalBox.innerHTML = `£${total.toLocaleString()}`;
-
-        // ============================
-        // FILTER — LAST 7 DAYS ONLY
-        // ============================
         const now = new Date();
-        const oneWeekAgo = new Date();
+        const oneWeekAgo = new Date(now);
         oneWeekAgo.setDate(now.getDate() - 7);
+        const cutoff = oneWeekAgo.getTime();
 
-        const weeklyItems = items.filter((it) => {
-            const date = new Date(it.date);
-            return date >= oneWeekAgo;
+        EXPENSES_WEEKLY_ITEMS = items.filter((item) => {
+            const value = getExpenseTimeValue(item);
+            return Number.isFinite(value) && value >= cutoff;
         });
 
-        container.innerHTML = buildExpensesTicketsHtml(weeklyItems, {
-          emptyMessage: "No expenses for this week.",
-        });
+        renderExpensesListForActiveFilter();
 
     } catch (err) {
         console.error("Load expenses error:", err);
-        container.innerHTML = "<p>Error loading data</p>";
+        if (container) container.innerHTML = "<p>Error loading data</p>";
     }
 }
 /* =============================
@@ -2640,6 +2736,7 @@ document.addEventListener("DOMContentLoaded", () => {
     syncCashOutFormTypeState({ showOwnCarInfo: false });
     renderPendingCashOutDrafts();
     setupExpenseShotsViewer();
+    bindExpenseFilterControls();
 
     const cashInBtn  = document.getElementById("cashInBtn");
     const cashOutBtn = document.getElementById("cashOutBtn");
