@@ -84,37 +84,43 @@
     }
 
     /* ===== Expenses Header Above Cards ===== */
+.expenses-overview {
+  margin-bottom: 1rem;
+}
+
 .expenses-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 1rem 0 0.5rem;
-  padding: 0 0.2rem;
+  gap: 0.75rem;
+  margin: 0.1rem 0 0.95rem;
+  padding: 0 0.12rem;
 }
 
 .expenses-title {
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+  font-weight: 800;
   color: #0f172a;
+  letter-spacing: -0.02em;
 }
 
 /* View All Chip Style */
 .view-all-chip {
-  background: #f2f2f2;
-  border: none;
-  padding: 0.35rem 0.9rem;
-  border-radius: 14px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #555;
+  background: #ffffff;
+  border: 1px solid #e7ebf3;
+  padding: 0.72rem 1.28rem;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #111827;
   cursor: pointer;
-
   transition: 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
 }
 
 .view-all-chip:hover {
-  background: #e4e4e4;
+  background: #f8fafc;
+  border-color: #dbe3f0;
 }
     /* ============================================
    OPTION C — MATERIAL YOU (GOOGLE PIXEL STYLE)
@@ -301,66 +307,122 @@
 }
     /* Total Card */
     .total-card {
-      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      background:
+        radial-gradient(circle at top left, rgba(40, 86, 175, 0.18), transparent 34%),
+        radial-gradient(circle at right 20%, rgba(17, 117, 190, 0.18), transparent 30%),
+        linear-gradient(135deg, #0b1d4f 0%, #07152f 100%);
       color: white;
-      border-radius: 22px;
-      padding: 1.55rem 1.35rem;
-      text-align: center;
-      box-shadow: 0 18px 36px rgba(0,0,0,0.18);
-      margin-bottom: 1.45rem;
+      border-radius: 32px;
+      padding: 1.6rem 1.55rem 1.5rem;
+      box-shadow: 0 22px 44px rgba(4, 15, 40, 0.22);
+      margin-bottom: 1.55rem;
       position: relative;
       overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.06);
     }
     .total-card::before {
       content: '';
       position: absolute;
-      top: -50%; left: -50%;
-      width: 200%; height: 200%;
-      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-      animation: shine 8s infinite;
+      inset: auto auto -35% -12%;
+      width: 55%;
+      height: 80%;
+      background: radial-gradient(circle, rgba(255,255,255,0.14) 0%, transparent 72%);
       pointer-events: none;
+      opacity: 0.5;
     }
-    @keyframes shine {
-      0% { transform: translateX(-100%) translateY(-100%) rotate(30deg); }
-      100% { transform: translateX(100%) translateY(100%) rotate(30deg); }
+    .total-card__grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(200px, 0.82fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    .total-card__main {
+      min-width: 0;
     }
     .total-amount {
-      font-size: 2.9rem;
+      font-size: clamp(3.5rem, 11vw, 5.25rem);
       font-weight: 800;
-      margin: 0.42rem 0;
-      letter-spacing: -1px;
-      line-height: 1.05;
+      margin: 0.2rem 0 0;
+      letter-spacing: -0.05em;
+      line-height: 0.95;
     }
     .total-label {
-      font-size: 1.02rem;
-      opacity: 0.9;
-      margin-bottom: 0.42rem;
+      font-size: 0.96rem;
+      font-weight: 600;
+      opacity: 0.78;
+      margin-bottom: 0.45rem;
+      text-transform: none;
+      letter-spacing: 0;
     }
-    .view-all-btn {
-      background: rgba(255,255,255,0.15);
-      color: white;
-      border: none;
-      padding: 0.5rem 1rem;
-      border-radius: 12px;
-      font-size: 0.9rem;
-      cursor: pointer;
+    .total-currency {
+      font-size: 1rem;
+      font-weight: 500;
+      opacity: 0.88;
+      margin-top: 0.32rem;
+      letter-spacing: 0.04em;
+    }
+    .total-card__side {
+      display: flex;
+      flex-direction: column;
+      gap: 0.88rem;
+      min-width: 0;
+    }
+    .summary-pill {
+      display: flex;
+      flex-direction: column;
+      gap: 0.32rem;
+      min-height: 88px;
+      padding: 1rem 1.05rem;
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
       backdrop-filter: blur(10px);
     }
-
-    /* Settled my account button (inside Total Card) */
+    .summary-pill--in {
+      background: linear-gradient(135deg, rgba(13, 96, 87, 0.62), rgba(15, 66, 91, 0.82));
+      border-color: rgba(29, 205, 146, 0.28);
+    }
+    .summary-pill--out {
+      background: linear-gradient(135deg, rgba(78, 50, 109, 0.66), rgba(55, 40, 97, 0.82));
+      border-color: rgba(255, 112, 112, 0.2);
+    }
+    .summary-pill__label {
+      font-size: 0.98rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.82);
+    }
+    .summary-pill__value {
+      font-size: 1.14rem;
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+    .total-card__actions {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+      gap: 0.85rem;
+      margin-top: 1rem;
+      align-items: stretch;
+    }
     .settle-btn{
-      margin-top: 0.88rem;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 0.55rem;
-      padding: 0.75rem 1.1rem;
-      border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.25);
-      background: rgba(255,255,255,0.12);
+      min-height: 72px;
+      padding: 0.88rem 1.2rem;
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.14);
       color: #fff;
+      font-size: 0.98rem;
       font-weight: 800;
       cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
       backdrop-filter: blur(10px);
       transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
       position: relative;
@@ -369,7 +431,7 @@
     .settle-btn:hover{
       transform: translateY(-1px);
       background: rgba(255,255,255,0.18);
-      border-color: rgba(255,255,255,0.35);
+      border-color: rgba(255,255,255,0.24);
     }
     .settle-btn:active{
       transform: translateY(0px) scale(0.98);
@@ -377,11 +439,20 @@
 
     /* Last settled time text (under Settled my account) */
     .last-settled{
-      margin-top: 0.5rem;
-      font-size: 0.84rem;
-      font-weight: 650;
-      color: rgba(255,255,255,0.85);
-      opacity: 0.95;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 72px;
+      padding: 0.88rem 1rem;
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.09);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+      font-size: 0.98rem;
+      font-weight: 750;
+      color: rgba(255,255,255,0.92);
+      text-align: center;
+      line-height: 1.35;
     }
 
     /* Multiple receipt thumbnails */
@@ -502,27 +573,155 @@
     }
 
     .expense-buttons {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 2rem;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
     }
 
     .cash-btn {
-      flex: 1;
-      padding: 1rem;
-      font-size: 1.1rem;
-      font-weight: 700;
-      border-radius: 16px;
+      width: 100%;
+      min-height: 78px;
+      padding: 1rem 1.2rem;
+      font-size: 1.16rem;
+      font-weight: 800;
+      border-radius: 24px;
       border: none;
       cursor: pointer;
       color: white;
-      transition: 0.2s;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+      box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
+      letter-spacing: 0.01em;
     }
 
-    .cash-in { background: linear-gradient(135deg, #22c55e, #16a34a); margin-right: 0.7rem; }
-    .cash-out { background: linear-gradient(135deg, #ef4444, #dc2626); margin-left: 0.7rem; }
+    .cash-in {
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+    }
 
-    .cash-btn:hover { transform: scale(1.05); }
+    .cash-out {
+      background: linear-gradient(135deg, #f54b4b, #ef4444);
+    }
+
+    .cash-btn:hover {
+      transform: translateY(-1px);
+      filter: brightness(0.98);
+    }
+
+    .expenses-filters {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.35rem;
+      padding: 0.35rem;
+      background: #ffffff;
+      border: 1px solid #e5ebf5;
+      border-radius: 999px;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+      margin-bottom: 1.3rem;
+    }
+
+    .expenses-filter {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0.7rem 0.75rem;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      color: #64748b;
+      font-size: 1rem;
+      font-weight: 750;
+      text-decoration: none;
+      cursor: pointer;
+      transition: 0.18s ease;
+      white-space: nowrap;
+    }
+
+    .expenses-filter:hover {
+      color: #334155;
+      background: #f8fafc;
+    }
+
+    .expenses-filter.is-active {
+      background: #edf2ff;
+      color: #162447;
+      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.14);
+    }
+
+    .expenses-filter--link {
+      color: #64748b;
+    }
+
+    @media (max-width: 540px) {
+      .expenses-layout {
+        padding: 1.25rem 1rem 1.5rem;
+      }
+      .total-card {
+        padding: 1.35rem 1.15rem 1.2rem;
+        border-radius: 28px;
+      }
+      .total-card__grid {
+        grid-template-columns: minmax(0, 1fr) 152px;
+        gap: 0.85rem;
+      }
+      .summary-pill {
+        min-height: 76px;
+        padding: 0.88rem 0.9rem;
+        border-radius: 20px;
+      }
+      .summary-pill__label {
+        font-size: 0.86rem;
+      }
+      .summary-pill__value {
+        font-size: 1rem;
+      }
+      .total-card__actions {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+        gap: 0.7rem;
+      }
+      .settle-btn,
+      .last-settled {
+        min-height: 64px;
+        border-radius: 20px;
+        font-size: 0.92rem;
+      }
+      .expense-buttons {
+        gap: 0.8rem;
+      }
+      .cash-btn {
+        min-height: 70px;
+        border-radius: 22px;
+        font-size: 1rem;
+      }
+      .expenses-filters {
+        gap: 0.25rem;
+        padding: 0.3rem;
+      }
+      .expenses-filter {
+        min-height: 44px;
+        font-size: 0.92rem;
+        padding: 0.6rem 0.55rem;
+      }
+    }
+
+    @media (max-width: 360px) {
+      .expenses-header {
+        flex-wrap: wrap;
+      }
+      .view-all-chip {
+        margin-left: auto;
+      }
+      .total-card__grid {
+        grid-template-columns: 1fr;
+      }
+      .total-card__actions {
+        grid-template-columns: 1fr;
+      }
+      .expenses-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        border-radius: 28px;
+      }
+    }
 
     /************** MODALS ******************/
     .ex-modal {
@@ -2165,30 +2364,49 @@ body.expense-shots-modal-open{
 
     <main class="expenses-layout">
 
-      <!-- Total Card -->
-<div class="total-card">
-  <div class="total-label">All Expenses</div>
-  <div class="total-amount" id="totalAmount">£0</div>
-  <div>EGP</div>
+      <section class="total-card" aria-label="Expenses summary">
+        <div class="total-card__grid">
+          <div class="total-card__main">
+            <div class="total-label">All expenses</div>
+            <div class="total-amount" id="totalAmount">£0</div>
+            <div class="total-currency">EGP</div>
+          </div>
+          <div class="total-card__side" aria-label="Cash flow summary">
+            <div class="summary-pill summary-pill--in">
+              <span class="summary-pill__label">Cash in</span>
+              <span class="summary-pill__value" id="cashInTotal">+£0</span>
+            </div>
+            <div class="summary-pill summary-pill--out">
+              <span class="summary-pill__label">Cash out</span>
+              <span class="summary-pill__value" id="cashOutTotal">-£0</span>
+            </div>
+          </div>
+        </div>
 
-  <!-- Settled my account CTA -->
-  <button id="settleAccountBtn" class="settle-btn" type="button">Settled my account</button>
+        <div class="total-card__actions">
+          <button id="settleAccountBtn" class="settle-btn" type="button">Settled my account</button>
+          <div id="lastSettledTime" class="last-settled">—</div>
+        </div>
+      </section>
 
-  <!-- Last settled time (filled by JS) -->
-  <div id="lastSettledTime" class="last-settled">Last settled time: —</div>
-</div>
+      <section class="expenses-overview" aria-label="Expenses overview controls">
+        <div class="expenses-header">
+          <span class="expenses-title">Expenses overview</span>
+          <button id="viewAllBtn" class="view-all-chip">View all</button>
+        </div>
 
-<!-- Title + View All button -->
-<div class="expenses-header">
-    <span class="expenses-title">All Expenses</span>
-    <button id="viewAllBtn" class="view-all-chip">View All</button>
-</div>
+        <div class="expense-buttons">
+          <button id="cashInBtn" class="cash-btn cash-in">+ CASH IN</button>
+          <button id="cashOutBtn" class="cash-btn cash-out">- CASH OUT</button>
+        </div>
 
-      <!-- Buttons -->
-      <div class="expense-buttons">
-        <button id="cashInBtn" class="cash-btn cash-in">+ CASH IN</button>
-        <button id="cashOutBtn" class="cash-btn cash-out">− CASH OUT</button>
-      </div>
+        <div class="expenses-filters" role="tablist" aria-label="Expense filters">
+          <button type="button" class="expenses-filter is-active" data-expense-filter="recent" aria-selected="true">Recent</button>
+          <button type="button" class="expenses-filter" data-expense-filter="cash-in" aria-selected="false">Cash in</button>
+          <button type="button" class="expenses-filter" data-expense-filter="cash-out" aria-selected="false">Cash out</button>
+          <a class="expenses-filter expenses-filter--link" href="/expenses/users">By user</a>
+        </div>
+      </section>
 
       <!-- Render expenses here -->
       <div id="expensesContent"></div>
