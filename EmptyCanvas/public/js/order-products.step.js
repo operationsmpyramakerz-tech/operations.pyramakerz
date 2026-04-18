@@ -1062,12 +1062,12 @@
       const total = itemTotal({ id: p.id, quantity: qty });
 
       const row = document.createElement('div');
-      row.className = 'cart-row';
+      row.className = `cart-row ${isMaintenanceType() ? 'cart-row--maintenance' : 'cart-row--standard'}`;
       row.dataset.id = String(p.id);
 
       // Product cell
       const productCell = document.createElement('div');
-      productCell.className = 'cart-product';
+      productCell.className = 'cart-product cart-product-cell';
 
       const thumb = document.createElement('div');
       thumb.className = 'cart-thumb';
@@ -1099,12 +1099,13 @@
       // Request Maintenance: show Issue Description instead of URL/Qty/Total
       if (isMaintenanceType()) {
         const issueCell = document.createElement('div');
-        issueCell.className = 'issue-cell';
+        issueCell.className = 'issue-cell cart-issue-cell';
         const issue = String(p.issueDescription || '').trim();
         issueCell.textContent = issue || '—';
 
         // Action cell
         const actionCell = document.createElement('div');
+        actionCell.className = 'cart-action-cell';
         const trashBtn = document.createElement('button');
         trashBtn.className = 'trash-btn';
         trashBtn.type = 'button';
@@ -1129,6 +1130,7 @@
 
       // URL cell
       const urlCell = document.createElement('div');
+      urlCell.className = 'cart-url-cell';
       const safeUrl = safeHttpUrl(c?.url);
       if (safeUrl) {
         const linkBtn = document.createElement('a');
@@ -1148,6 +1150,7 @@
 
       // Quantity cell
       const qtyCell = document.createElement('div');
+      qtyCell.className = 'cart-qty-cell';
       const qtyCtl = document.createElement('div');
       qtyCtl.className = 'qty-control';
 
@@ -1175,11 +1178,12 @@
 
       // Total cell
       const totalCell = document.createElement('div');
-      totalCell.className = 'money';
+      totalCell.className = 'money cart-total-cell';
       totalCell.textContent = formatMoney(total);
 
       // Action cell
       const actionCell = document.createElement('div');
+      actionCell.className = 'cart-action-cell';
       const trashBtn = document.createElement('button');
       trashBtn.className = 'trash-btn';
       trashBtn.type = 'button';
