@@ -4131,6 +4131,77 @@ async function _getB2BSchoolById(schoolId) {
   }
 }
 
+
+async function _getTeamMemberPageByUsername(username) {
+  const cleanUsername = String(username || "").trim();
+  if (!cleanUsername || !teamMembersDatabaseId) return null;
+
+  try {
+    const q = await notion.databases.query({
+      database_id: teamMembersDatabaseId,
+      page_size: 1,
+      filter: { property: "Name", title: { equals: cleanUsername } },
+    });
+    return q?.results?.[0] || null;
+  } catch (e) {
+    console.error("Error fetching team member page:", e?.body || e);
+    return null;
+  }
+}
+
+async function _resolveCurrentUserMaintenanceSchool(req) {
+  const username = String(req?.session?.username || "").trim();
+  if (!username) return { schoolId: "", schoolName: "" };
+
+  const userPage = await _getTeamMemberPageByUsername(username);
+  const props = userPage?.properties || {};
+  if (!userPage) return { schoolId: "", schoolName: "" };
+
+  const schoolPropName =
+    pickPropName(props, ["B2B Schools", "B2B School", "School", "Schools"]) ||
+    pickPropName(props, ["Assigned Schools", "Assigned School"]);
+
+  const schoolProp = schoolPropName ? props?.[schoolPropName] : null;
+  let schoolId = String(extractFirstRelationId(schoolProp) || "").trim();
+  let schoolName = String(_extractPropText(schoolProp) || "").trim();
+
+  if (schoolId) {
+    if (!schoolName) {
+      try { schoolName = String(await pageTitleById(schoolId) || "").trim(); } catch {}
+    }
+    return { schoolId, schoolName };
+  }
+
+  if (!schoolName) return { schoolId: "", schoolName: "" };
+
+  try {
+    const key = normKey(schoolName);
+    const list = await _getB2BSchoolsList();
+    const exact = Array.isArray(list)
+      ? list.find((item) => normKey(item?.name) === key)
+      : null;
+    const loose = !exact && Array.isArray(list)
+      ? list.find((item) => {
+          const itemKey = normKey(item?.name);
+          return itemKey && (itemKey.includes(key) || key.includes(itemKey));
+        })
+      : null;
+    const hit = exact || loose || null;
+
+    if (hit?.id) {
+      return {
+        schoolId: String(hit.id).trim(),
+        schoolName: String(hit.name || schoolName).trim(),
+      };
+    }
+  } catch (e) {
+    console.error("Error resolving maintenance school:", e?.body || e);
+  }
+
+  return { schoolId: "", schoolName };
+}
+
+
 async function _getStocktakingDBProps() {
   if (!stocktakingDatabaseId) return {};
   const cacheKey = `cache:notion:dbprops:stocktaking:${stocktakingDatabaseId}:v1`;
@@ -6181,7 +6252,7 @@ app.post(
   "/api/order-draft/products",
   requireAuth,
   requirePage("Create New Order"),
-  (req, res) => {
+  async (req, res) => {
     const { products } = req.body;
     const requestedOrderType = String(req.body?.orderType || "").trim();
     const orderType = _canonicalOrderTypeLabel(requestedOrderType) || requestedOrderType;
@@ -6214,7 +6285,16 @@ app.post(
         return res.status(400).json({ error: "Request Maintenance allows one machine only." });
       }
       if (clean.some((p) => !p.schoolId)) {
-        return res.status(400).json({ error: "Each machine must include a school." });
+        const resolvedSchool = await _resolveCurrentUserMaintenanceSchool(req);
+        const fallbackSchoolId = String(resolvedSchool?.schoolId || "").trim();
+        if (fallbackSchoolId) {
+          clean.forEach((p) => {
+            if (!p.schoolId) p.schoolId = fallbackSchoolId;
+          });
+        }
+      }
+      if (clean.some((p) => !p.schoolId)) {
+        return res.status(400).json({ error: "Could not determine your school from your account." });
       }
       if (clean.some((p) => !p.issueDescription)) {
         return res.status(400).json({ error: "Each machine must include an Issue Description." });
@@ -12121,7 +12201,16 @@ if (_isRequestMaintenance) {
     return res.status(400).json({ success: false, message: "Request Maintenance allows one machine only." });
   }
   if (cleanedProducts.some(p => !p.schoolId)) {
-    return res.status(400).json({ success: false, message: "Each product must include a school." });
+    const resolvedSchool = await _resolveCurrentUserMaintenanceSchool(req);
+    const fallbackSchoolId = String(resolvedSchool?.schoolId || "").trim();
+    if (fallbackSchoolId) {
+      cleanedProducts.forEach((p) => {
+        if (!p.schoolId) p.schoolId = fallbackSchoolId;
+      });
+    }
+  }
+  if (cleanedProducts.some(p => !p.schoolId)) {
+    return res.status(400).json({ success: false, message: "Could not determine your school from your account." });
   }
   if (cleanedProducts.some(p => !p.issueDescription)) {
     return res.status(400).json({ success: false, message: "Each product must include an Issue Description." });
