@@ -1448,6 +1448,298 @@
     }
   }
 
+
+  /* ===== Request Products cart cards (Apr 2026) ===== */
+  .cart-head--request-cards{
+    display: none !important;
+  }
+
+  .cart-body--request-cards{
+    gap: 1rem;
+    padding: 1.15rem;
+    background: transparent;
+  }
+
+  .cart-body--request-cards + .cart-footer{
+    padding-top: 0.15rem;
+  }
+
+  .cart-row--request-card{
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1.2rem;
+    border: 1px solid rgba(226, 232, 240, 0.98);
+    border-radius: 24px;
+    background: #fff;
+    box-shadow: 0 22px 48px -34px rgba(15, 23, 42, 0.22);
+    align-items: stretch;
+  }
+
+  .cart-row--request-card .cart-card-main{
+    align-items: flex-start;
+    gap: 1rem;
+    cursor: pointer;
+  }
+
+  .cart-row--request-card .cart-card-main:focus-visible{
+    outline: none;
+    border-radius: 20px;
+    box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.22);
+  }
+
+  .cart-row--request-card .cart-thumb{
+    width: 88px;
+    height: 88px;
+    border-radius: 22px;
+    background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+    border: 1px solid #e2e8f0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    font-size: 1.4rem;
+  }
+
+  .cart-row--request-card .prod-meta{
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.32rem;
+  }
+
+  .cart-row--request-card .prod-name{
+    font-size: 1.35rem;
+    line-height: 1.18;
+    font-weight: 900;
+    color: #0f172a;
+    margin: 0;
+  }
+
+  .cart-row--request-card .prod-submeta{
+    margin-top: 0;
+    font-size: 0.92rem;
+    line-height: 1.38;
+    color: #64748b;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+  }
+
+  .cart-row--request-card .prod-submeta--part{
+    font-weight: 800;
+    color: #475569;
+  }
+
+  .cart-card-metrics{
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.85fr) minmax(0, 0.85fr);
+    border: 1px solid #edf2f7;
+    border-radius: 20px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    overflow: hidden;
+  }
+
+  .cart-card-metric{
+    min-width: 0;
+    padding: 0.95rem 1rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+
+  .cart-card-metric + .cart-card-metric{
+    border-left: 1px solid #edf2f7;
+  }
+
+  .cart-card-metric-label{
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+
+  .cart-card-metric-value{
+    font-size: 1.25rem;
+    line-height: 1.05;
+    font-weight: 900;
+    color: #0f172a;
+    white-space: nowrap;
+  }
+
+  .cart-card-metric--qty .qty-control{
+    height: 44px;
+    padding: 0 0.12rem;
+    border-color: #e2e8f0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  }
+
+  .cart-card-metric--qty .qty-btn{
+    width: 42px;
+    height: 42px;
+    font-size: 1.2rem;
+  }
+
+  .cart-card-metric--qty .qty-value{
+    width: 54px;
+    font-size: 1rem;
+  }
+
+  .cart-card-actions{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.8rem;
+  }
+
+  .cart-action-btn{
+    min-width: 0;
+    height: 52px;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    font-weight: 900;
+    font-size: 1rem;
+    text-decoration: none;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  }
+
+  .cart-action-btn i{
+    width: 18px;
+    height: 18px;
+  }
+
+  .cart-action-btn:focus-visible{
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.24);
+  }
+
+  .cart-action-btn:hover{
+    transform: translateY(-1px);
+  }
+
+  .cart-action-btn--open{
+    background: #ffffff;
+    color: #0f172a;
+    border-color: #dbe4ee;
+    box-shadow: 0 10px 20px -18px rgba(15, 23, 42, 0.46);
+  }
+
+  .cart-action-btn--open:hover{
+    background: #f8fafc;
+  }
+
+  .cart-action-btn--open[disabled]{
+    opacity: 0.48;
+    cursor: not-allowed;
+    pointer-events: none;
+    box-shadow: none;
+    transform: none;
+  }
+
+  .cart-action-btn--delete{
+    background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+    border-color: #ef4444;
+    color: #ffffff;
+    box-shadow: 0 16px 28px -22px rgba(220, 38, 38, 0.58);
+    cursor: pointer;
+  }
+
+  .cart-action-btn--delete:hover{
+    background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
+    border-color: #dc2626;
+  }
+
+  .cart-action-btn--delete:focus-visible{
+    box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.28);
+  }
+
+  @media (max-width: 640px){
+    .cart-body--request-cards{
+      gap: 0.9rem;
+      padding: 0.95rem;
+    }
+
+    .cart-row--request-card{
+      padding: 1rem;
+      border-radius: 24px;
+      gap: 0.95rem;
+    }
+
+    .cart-row--request-card .cart-card-main{
+      gap: 0.85rem;
+    }
+
+    .cart-row--request-card .cart-thumb{
+      width: 70px;
+      height: 70px;
+      border-radius: 18px;
+      font-size: 1.15rem;
+    }
+
+    .cart-row--request-card .prod-name{
+      font-size: 1.12rem;
+    }
+
+    .cart-row--request-card .prod-submeta{
+      font-size: 0.88rem;
+    }
+
+    .cart-card-metrics{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .cart-card-metric{
+      padding: 0.85rem 0.9rem;
+    }
+
+    .cart-card-metric--qty{
+      grid-column: 1 / -1;
+      border-bottom: 1px solid #edf2f7;
+    }
+
+    .cart-card-metric--unit{
+      border-left: none;
+    }
+
+    .cart-card-metric--total{
+      border-left: 1px solid #edf2f7;
+    }
+
+    .cart-card-metric-value{
+      font-size: 1.08rem;
+    }
+
+    .cart-card-actions{
+      gap: 0.7rem;
+    }
+
+    .cart-action-btn{
+      height: 48px;
+      font-size: 0.96rem;
+      gap: 0.55rem;
+    }
+  }
+
+  @media (max-width: 420px){
+    .cart-row--request-card .cart-thumb{
+      width: 64px;
+      height: 64px;
+    }
+
+    .cart-card-metric--qty .qty-control{
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .cart-card-metric--qty .qty-value{
+      width: auto;
+      min-width: 40px;
+    }
+  }
+
 </style>
 </head>
 
