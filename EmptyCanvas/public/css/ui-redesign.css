@@ -1401,6 +1401,9 @@ body.has-floating-search .main-header .searchbar{
     --mobile-home-bridge-w: 10px;
     --mobile-pages-right-gap: 8px;
     --mobile-pages-block-radius: 30px;
+    --mobile-dock-height: 80px;
+    --mobile-dock-bottom-offset: 8px;
+    --mobile-dock-clearance: calc(var(--mobile-dock-height) + var(--mobile-dock-bottom-offset) + 34px);
   }
 
   html,
@@ -1465,8 +1468,8 @@ body.has-floating-search .main-header .searchbar{
     overflow-x: hidden !important;
     overscroll-behavior-y: contain !important;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
-    scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(var(--mobile-dock-clearance) + env(safe-area-inset-bottom, 0px)) !important;
+    scroll-padding-bottom: calc(var(--mobile-dock-clearance) + 18px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   #menu-toggle,
@@ -1480,7 +1483,7 @@ body.has-floating-search .main-header .searchbar{
     top: auto !important;
     left: 12px !important;
     right: 12px !important;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px) !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + var(--mobile-dock-bottom-offset)) !important;
     width: auto !important;
     min-height: 80px !important;
     height: 80px !important;
@@ -1530,13 +1533,25 @@ body.has-floating-search .main-header .searchbar{
     position: absolute;
     top: 0;
     right: var(--mobile-pages-right-gap);
-    bottom: 0;
+    bottom: calc(-1 * (var(--mobile-dock-bottom-offset) + env(safe-area-inset-bottom, 0px)));
     left: calc(var(--mobile-home-block-w) + var(--mobile-home-gap));
     background: var(--mobile-dock-bg);
     border-radius: var(--mobile-pages-block-radius);
     box-shadow: var(--mobile-dock-shadow);
     z-index: 0;
     pointer-events: none;
+  }
+
+  .app-container::after{
+    content: "";
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(env(safe-area-inset-bottom, 0px) + var(--mobile-dock-bottom-offset));
+    background: var(--mobile-dock-bg);
+    pointer-events: none;
+    z-index: 230;
   }
 
   .sidebar-nav::before{
@@ -1579,7 +1594,10 @@ body.has-floating-search .main-header .searchbar{
   .sidebar-nav .nav-list > li:first-child::before{
     content: "";
     position: absolute;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: calc(-1 * (var(--mobile-dock-bottom-offset) + env(safe-area-inset-bottom, 0px)));
+    left: 0;
     background: var(--mobile-dock-bg);
     border-radius: var(--mobile-pages-block-radius);
     box-shadow: var(--mobile-dock-shadow);
@@ -1879,7 +1897,7 @@ body.shell-embedded .main-content > main.container-full-width{
   body.shell-embedded .main-content > main.container-full-width{
     /* Let the mobile dock float over the content instead of reserving a large
        white strip beneath it. */
-    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
-    scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(var(--mobile-dock-clearance) + env(safe-area-inset-bottom, 0px)) !important;
+    scroll-padding-bottom: calc(var(--mobile-dock-clearance) + 18px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
