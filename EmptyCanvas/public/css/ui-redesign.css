@@ -1509,23 +1509,20 @@ body.has-floating-search .main-header .searchbar{
     overflow-x: auto !important;
     overflow-y: visible !important;
     white-space: nowrap;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.18) transparent;
-    -ms-overflow-style: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 
   .sidebar-nav::-webkit-scrollbar{
-    display: block;
-    height: 4px;
-  }
-
-  .sidebar-nav::-webkit-scrollbar-track{
+    display: none;
+    width: 0;
+    height: 0;
     background: transparent;
   }
 
+  .sidebar-nav::-webkit-scrollbar-track,
   .sidebar-nav::-webkit-scrollbar-thumb{
-    background: rgba(255,255,255,0.18);
-    border-radius: 999px;
+    background: transparent;
   }
 
   .sidebar::before{
