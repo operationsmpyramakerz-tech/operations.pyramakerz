@@ -1479,7 +1479,7 @@ body.has-floating-search .main-header .searchbar{
     top: auto !important;
     left: 12px !important;
     right: 12px !important;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px) !important;
     width: auto !important;
     min-height: 80px !important;
     height: 80px !important;
@@ -1871,6 +1871,9 @@ body.shell-embedded .main-content > main.container-full-width{
   body.shell-embedded .main-content > main,
   body.shell-embedded .main-content > main.tasks-v2-main,
   body.shell-embedded .main-content > main.container-full-width{
-    padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)) !important;
+    /* Keep a small scroll buffer only, so page content stays visible behind
+       the floating dock instead of showing a solid white strip under it. */
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
+    scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
