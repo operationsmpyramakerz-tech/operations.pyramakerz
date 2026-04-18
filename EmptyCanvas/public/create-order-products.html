@@ -1449,22 +1449,26 @@
   }
 
 
-  /* ===== Request Products cart cards (Apr 2026) ===== */
-  .cart-head--request-cards{
+  /* ===== Modern cart cards (Apr 2026) ===== */
+  .cart-head--request-cards,
+  .cart-head--maintenance-cards{
     display: none !important;
   }
 
-  .cart-body--request-cards{
+  .cart-body--request-cards,
+  .cart-body--maintenance-cards{
     gap: 0.8rem;
     padding: 0.95rem;
     background: transparent;
   }
 
-  .cart-body--request-cards + .cart-footer{
+  .cart-body--request-cards + .cart-footer,
+  .cart-body--maintenance-cards + .cart-footer{
     padding-top: 0.15rem;
   }
 
-  .cart-row--request-card{
+  .cart-row--request-card,
+  .cart-row--maintenance-card{
     display: flex;
     flex-direction: column;
     gap: 0.8rem;
@@ -1476,19 +1480,23 @@
     align-items: stretch;
   }
 
-  .cart-row--request-card .cart-card-main{
+  .cart-row--request-card .cart-card-main,
+  .cart-row--maintenance-card .cart-card-main{
     align-items: flex-start;
     gap: 0.85rem;
     cursor: pointer;
   }
 
-  .cart-row--request-card .cart-card-main:focus-visible{
+  .cart-row--request-card .cart-card-main:focus-visible,
+  .cart-row--maintenance-card .cart-card-main:focus-visible,
+  .cart-card-note--editable:focus-visible{
     outline: none;
     border-radius: 18px;
     box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.2);
   }
 
-  .cart-row--request-card .cart-thumb{
+  .cart-row--request-card .cart-thumb,
+  .cart-row--maintenance-card .cart-thumb{
     width: 76px;
     height: 76px;
     border-radius: 18px;
@@ -1498,7 +1506,8 @@
     font-size: 1.18rem;
   }
 
-  .cart-row--request-card .prod-meta{
+  .cart-row--request-card .prod-meta,
+  .cart-row--maintenance-card .prod-meta{
     display: flex;
     flex: 1 1 auto;
     min-width: 0;
@@ -1506,7 +1515,8 @@
     gap: 0.24rem;
   }
 
-  .cart-row--request-card .prod-name{
+  .cart-row--request-card .prod-name,
+  .cart-row--maintenance-card .prod-name{
     font-size: 1.16rem;
     line-height: 1.16;
     font-weight: 900;
@@ -1514,7 +1524,8 @@
     margin: 0;
   }
 
-  .cart-row--request-card .prod-submeta{
+  .cart-row--request-card .prod-submeta,
+  .cart-row--maintenance-card .prod-submeta{
     margin-top: 0;
     font-size: 0.84rem;
     line-height: 1.32;
@@ -1524,7 +1535,8 @@
     text-overflow: unset;
   }
 
-  .cart-row--request-card .prod-submeta--part{
+  .cart-row--request-card .prod-submeta--part,
+  .cart-row--maintenance-card .prod-submeta--part{
     font-size: 0.82rem;
     font-weight: 800;
     color: #475569;
@@ -1552,7 +1564,8 @@
     border-left: 1px solid #edf2f7;
   }
 
-  .cart-card-metric-label{
+  .cart-card-metric-label,
+  .cart-card-note-label{
     font-size: 0.72rem;
     font-weight: 800;
     letter-spacing: 0.04em;
@@ -1584,6 +1597,35 @@
   .cart-card-metric--qty .qty-value{
     width: 44px;
     font-size: 0.92rem;
+  }
+
+  .cart-card-note{
+    border: 1px solid #edf2f7;
+    border-radius: 18px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    padding: 0.82rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+  }
+
+  .cart-card-note--editable{
+    cursor: pointer;
+  }
+
+  .cart-card-note-value{
+    font-size: 0.95rem;
+    line-height: 1.45;
+    font-weight: 800;
+    color: #0f172a;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .cart-card-note-value.is-empty{
+    color: #94a3b8;
+    font-weight: 700;
   }
 
   .cart-card-actions{
@@ -1658,33 +1700,39 @@
   }
 
   @media (max-width: 640px){
-    .cart-body--request-cards{
+    .cart-body--request-cards,
+    .cart-body--maintenance-cards{
       gap: 0.72rem;
       padding: 0.78rem;
     }
 
-    .cart-row--request-card{
+    .cart-row--request-card,
+    .cart-row--maintenance-card{
       padding: 0.82rem;
       border-radius: 20px;
       gap: 0.78rem;
     }
 
-    .cart-row--request-card .cart-card-main{
+    .cart-row--request-card .cart-card-main,
+    .cart-row--maintenance-card .cart-card-main{
       gap: 0.72rem;
     }
 
-    .cart-row--request-card .cart-thumb{
+    .cart-row--request-card .cart-thumb,
+    .cart-row--maintenance-card .cart-thumb{
       width: 60px;
       height: 60px;
       border-radius: 16px;
       font-size: 1rem;
     }
 
-    .cart-row--request-card .prod-name{
+    .cart-row--request-card .prod-name,
+    .cart-row--maintenance-card .prod-name{
       font-size: 0.98rem;
     }
 
-    .cart-row--request-card .prod-submeta{
+    .cart-row--request-card .prod-submeta,
+    .cart-row--maintenance-card .prod-submeta{
       font-size: 0.8rem;
     }
 
@@ -1714,6 +1762,16 @@
       font-size: 0.95rem;
     }
 
+    .cart-card-note{
+      padding: 0.72rem 0.78rem;
+      gap: 0.34rem;
+    }
+
+    .cart-card-note-value{
+      font-size: 0.88rem;
+      line-height: 1.4;
+    }
+
     .cart-card-actions{
       gap: 0.58rem;
     }
@@ -1726,7 +1784,8 @@
   }
 
   @media (max-width: 420px){
-    .cart-row--request-card .cart-thumb{
+    .cart-row--request-card .cart-thumb,
+    .cart-row--maintenance-card .cart-thumb{
       width: 56px;
       height: 56px;
     }
@@ -1741,7 +1800,6 @@
       min-width: 34px;
     }
   }
-
 </style>
 </head>
 
