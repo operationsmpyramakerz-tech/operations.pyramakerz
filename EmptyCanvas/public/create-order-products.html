@@ -147,8 +147,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
     height: 34px;
-    padding: 0 0.95rem;
+    padding: 0 0.95rem 0 0.85rem;
     border-radius: 999px;
     border: 1px solid #e5e7eb;
     background: #fff;
@@ -162,10 +163,22 @@
     background: #f1f5f9;
     transform: translateY(-1px);
   }
+  .order-type-back{
+    gap: 8px;
+    padding: 0 1.1rem 0 0.95rem;
+  }
+  .back-btn-icon{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+  }
+  .back-btn-icon i{
+    width: 16px;
+    height: 16px;
+  }
   .cart-type-pill .label{
-    color: #64748b;
-    font-weight: 900;
-    font-size: 0.95rem;
+    display: none;
   }
   .cart-type-pill .value{
     display: inline-flex;
@@ -797,10 +810,10 @@
 
   /* Toggle fields (Qty vs Issue Description) */
   #cartIssueDescField{ display: none; }
-  #cartSchoolField{ display: none; }
+  #cartSchoolField{ display: none !important; }
   body.is-maintenance #cartIssueDescField{ display: block; }
   body.is-maintenance #cartQtyField{ display: none; }
-  body.is-maintenance #cartSchoolField{ display: block; }
+  body.is-maintenance #cartSchoolField{ display: none !important; }
   /* ===== Shopping Cart modern refresh (Mar 2026) ===== */
   .create-order-cart-wrap{
     padding-top: 1.25rem;
@@ -1108,11 +1121,7 @@
     box-shadow: 0 22px 42px -34px rgba(15, 23, 42, 0.32);
   }
   .cart-type-pill .label{
-    color: #64748b;
-    font-weight: 900;
-    font-size: 0.8rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    display: none !important;
   }
   .cart-type-pill .value{
     display: inline-flex;
@@ -1434,15 +1443,14 @@
         <div class="cart-card order-type-placeholder">
           <h3 id="orderTypePlaceholderTitle">Order Type</h3>
           <p>This order type will be configured next. Please choose <b>Request Products</b> for now.</p>
-          <button class="order-type-back" id="orderTypeBackBtn" type="button">Back</button>
+          <button class="order-type-back" id="orderTypeBackBtn" type="button"><span class="back-btn-icon" aria-hidden="true"><i data-feather="arrow-left"></i></span><span>Back</span></button>
         </div>
       </section>
 
       <!-- Step 2: Cart (only for Request Products for now) -->
       <section id="cartStep" style="display:none;" aria-label="Shopping cart step">
         <div class="cart-type-pill" id="cartTypePill" style="display:none;">
-          <button class="cart-back-btn" id="cartBackBtn" type="button">Back</button>
-          <span class="label">Order Type</span>
+          <button class="cart-back-btn" id="cartBackBtn" type="button"><span class="back-btn-icon" aria-hidden="true"><i data-feather="arrow-left"></i></span><span>Back</span></button>
           <span class="value" id="cartTypeValue">
             <span class="cart-type-value-icon" id="cartTypeValueIcon" aria-hidden="true"><i data-feather="shopping-cart"></i></span>
             <span class="cart-type-value-text" id="cartTypeValueText">—</span>
@@ -1529,11 +1537,6 @@
           <div class="mfield">
             <label id="cartComponentLabel" for="cartComponentSelect">Component <span class="req-star">*</span></label>
             <select id="cartComponentSelect"></select>
-          </div>
-
-          <div class="mfield" id="cartSchoolField">
-            <label id="cartSchoolLabel" for="cartSchoolSelect">School <span class="req-star">*</span></label>
-            <select id="cartSchoolSelect"></select>
           </div>
 
           <div class="mfield" id="cartQtyField">
