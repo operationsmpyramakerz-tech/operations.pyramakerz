@@ -160,6 +160,10 @@
     } catch {}
   }
 
+  function isRequestProductsType(type = selectedOrderType) {
+    return normKey(type) === REQUEST_PRODUCTS_KEY;
+  }
+
   function isWithdrawType(type = selectedOrderType) {
     return normKey(type) === WITHDRAW_PRODUCTS_KEY;
   }
@@ -1041,7 +1045,11 @@
   function renderCart() {
     if (!cartItemsEl) return;
 
+    const useRequestCards = isRequestProductsType();
+
     cartItemsEl.innerHTML = '';
+    cartItemsEl.classList.toggle('cart-body--request-cards', useRequestCards);
+    if (cartHeadEl) cartHeadEl.classList.toggle('cart-head--request-cards', useRequestCards);
     syncUpdateCartButtonVisibility();
 
     if (!Array.isArray(cart) || cart.length === 0) {
@@ -1060,6 +1068,20 @@
       const schoolName = schoolsById.get(String(p.schoolId || ''))?.name || '';
       const qty = normalizeQty(Number(p.quantity), MIN_QTY);
       const total = itemTotal({ id: p.id, quantity: qty });
+      const displayId = String(c?.displayId || '').trim();
+      const metadataTags = Array.isArray(c?.tags)
+        ? c.tags
+            .map((tag) => String(tag || '').trim())
+            .filter(Boolean)
+            .filter((tag, tagIdx, arr) => arr.findIndex((value) => normKey(value) === normKey(tag)) === tagIdx)
+            .filter((tag) => {
+              const key = normKey(tag);
+              return key !== REQUEST_PRODUCTS_KEY && key !== WITHDRAW_PRODUCTS_KEY && key !== REQUEST_MAINTENANCE_KEY;
+            })
+        : [];
+      const secondaryMeta = isMaintenanceType()
+        ? (schoolName ? `School: ${schoolName}` : '')
+        : (useRequestCards && metadataTags.length ? metadataTags.slice(0, 2).join(' • ') : '');
 
       const row = document.createElement('div');
       row.className = `cart-row ${isMaintenanceType() ? 'cart-row--maintenance' : 'cart-row--standard'}`;
@@ -1088,8 +1110,11 @@
       let metaHtml = `
         <div class="prod-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
       `;
-      if (isMaintenanceType() && schoolName) {
-        metaHtml += `<div class="prod-submeta">School: ${escapeHtml(schoolName)}</div>`;
+      if (secondaryMeta) {
+        metaHtml += `<div class="prod-submeta" title="${escapeHtml(secondaryMeta)}">${escapeHtml(secondaryMeta)}</div>`;
+      }
+      if (useRequestCards && displayId) {
+        metaHtml += `<div class="prod-submeta prod-submeta--part">Part No: ${escapeHtml(displayId)}</div>`;
       }
       meta.innerHTML = metaHtml;
 
@@ -1123,6 +1148,116 @@
         row.appendChild(productCell);
         row.appendChild(issueCell);
         row.appendChild(actionCell);
+
+        cartItemsEl.appendChild(row);
+        return;
+      }
+
+      if (useRequestCards) {
+        row.classList.add('cart-row--request-card');
+        productCell.classList.add('cart-card-main');
+
+        const safeUrl = safeHttpUrl(c?.url);
+
+        // Quantity metric
+        const qtyCtl = document.createElement('div');
+        qtyCtl.className = 'qty-control';
+
+        const decBtn = document.createElement('button');
+        decBtn.className = 'qty-btn';
+        decBtn.type = 'button';
+        decBtn.textContent = '−';
+        decBtn.setAttribute('aria-label', 'Decrease quantity');
+
+        const qtyVal = document.createElement('div');
+        qtyVal.className = 'qty-value';
+        qtyVal.textContent = formatQty(qty);
+
+        const incBtn = document.createElement('button');
+        incBtn.className = 'qty-btn';
+        incBtn.type = 'button';
+        incBtn.textContent = '+';
+        incBtn.setAttribute('aria-label', 'Increase quantity');
+
+        qtyCtl.appendChild(decBtn);
+        qtyCtl.appendChild(qtyVal);
+        qtyCtl.appendChild(incBtn);
+
+        const metrics = document.createElement('div');
+        metrics.className = 'cart-card-metrics';
+
+        const qtyMetric = document.createElement('div');
+        qtyMetric.className = 'cart-card-metric cart-card-metric--qty';
+        qtyMetric.innerHTML = '<div class="cart-card-metric-label">Qty</div>';
+        qtyMetric.appendChild(qtyCtl);
+
+        const unitMetric = document.createElement('div');
+        unitMetric.className = 'cart-card-metric cart-card-metric--unit';
+        unitMetric.innerHTML = `
+          <div class="cart-card-metric-label">Unit</div>
+          <div class="cart-card-metric-value">${escapeHtml(formatMoney(c?.unitPrice))}</div>
+        `;
+
+        const totalMetric = document.createElement('div');
+        totalMetric.className = 'cart-card-metric cart-card-metric--total';
+        totalMetric.innerHTML = `
+          <div class="cart-card-metric-label">Total</div>
+          <div class="cart-card-metric-value">${escapeHtml(formatMoney(total))}</div>
+        `;
+
+        metrics.appendChild(qtyMetric);
+        metrics.appendChild(unitMetric);
+        metrics.appendChild(totalMetric);
+
+        const actions = document.createElement('div');
+        actions.className = 'cart-card-actions';
+
+        let openBtn;
+        if (safeUrl) {
+          openBtn = document.createElement('a');
+          openBtn.href = safeUrl;
+          openBtn.target = '_blank';
+          openBtn.rel = 'noopener noreferrer';
+          openBtn.title = safeUrl;
+        } else {
+          openBtn = document.createElement('button');
+          openBtn.type = 'button';
+          openBtn.disabled = true;
+          openBtn.setAttribute('aria-disabled', 'true');
+          openBtn.title = 'No valid product URL';
+        }
+        openBtn.className = 'cart-action-btn cart-action-btn--open';
+        openBtn.innerHTML = `${featherIconMarkup('external-link')}<span>Open</span>`;
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'cart-action-btn cart-action-btn--delete';
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.setAttribute('aria-label', 'Delete item');
+
+        actions.appendChild(openBtn);
+        actions.appendChild(deleteBtn);
+
+        const openEditor = () => openModalForEdit(p.id);
+
+        incBtn.addEventListener('click', () => changeQty(p.id, +1));
+        decBtn.addEventListener('click', () => changeQty(p.id, -1));
+        deleteBtn.addEventListener('click', () => removeItem(p.id));
+
+        productCell.style.cursor = 'pointer';
+        productCell.setAttribute('role', 'button');
+        productCell.setAttribute('tabindex', '0');
+        productCell.setAttribute('aria-label', `Edit ${name}`);
+        productCell.addEventListener('click', openEditor);
+        productCell.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          openEditor();
+        });
+
+        row.appendChild(productCell);
+        row.appendChild(metrics);
+        row.appendChild(actions);
 
         cartItemsEl.appendChild(row);
         return;
