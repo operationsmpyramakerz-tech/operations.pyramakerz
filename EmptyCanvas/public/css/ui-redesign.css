@@ -1396,6 +1396,10 @@ body.has-floating-search .main-header .searchbar{
   :root{
     --mobile-dock-bg: #0B0C10;
     --mobile-dock-shadow: 0 18px 40px rgba(15,23,42,0.18);
+    --mobile-dock-height: 80px;
+    --mobile-dock-bottom-gap: 18px;
+    --mobile-dock-content-clearance: calc(var(--mobile-dock-height) + var(--mobile-dock-bottom-gap) + 18px);
+    --mobile-dock-safe-clearance: calc(var(--mobile-dock-content-clearance) + env(safe-area-inset-bottom, 0px));
     --mobile-home-block-w: 88px;
     --mobile-home-gap: 18px;
     --mobile-home-bridge-w: 10px;
@@ -1465,8 +1469,8 @@ body.has-floating-search .main-header .searchbar{
     overflow-x: hidden !important;
     overscroll-behavior-y: contain !important;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
-    scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: var(--mobile-dock-safe-clearance) !important;
+    scroll-padding-bottom: calc(var(--mobile-dock-safe-clearance) + 10px) !important;
   }
 
   #menu-toggle,
@@ -1504,10 +1508,9 @@ body.has-floating-search .main-header .searchbar{
     position: relative !important;
     flex: none !important;
     display: block !important;
-    min-height: 80px !important;
+    min-height: var(--mobile-dock-height) !important;
     padding: 0 !important;
-    overflow-x: auto !important;
-    overflow-y: visible !important;
+    overflow: hidden !important;
     white-space: nowrap;
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -1546,31 +1549,43 @@ body.has-floating-search .main-header .searchbar{
   .sidebar-nav .nav-list{
     position: relative !important;
     z-index: 1 !important;
-    width: max-content !important;
-    min-width: 100% !important;
-    min-height: 80px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    min-height: var(--mobile-dock-height) !important;
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
     align-items: center !important;
     justify-content: flex-start !important;
-    gap: 10px !important;
+    gap: 4px !important;
     margin: 0 !important;
-    padding: 4px 14px 4px 0 !important;
+    padding: 4px 10px 4px 0 !important;
+    box-sizing: border-box !important;
   }
 
   .sidebar-nav .nav-list > li{
     width: auto !important;
+    min-width: 0 !important;
     flex: 0 0 auto !important;
-    display: block !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     position: relative !important;
     z-index: 1 !important;
+  }
+
+  .sidebar-nav .nav-list > li:not(:first-child){
+    flex: 1 1 0 !important;
   }
 
   .sidebar-nav .nav-list > li:first-child{
     position: sticky !important;
     left: 0 !important;
     z-index: 3 !important;
+    flex: 0 0 var(--mobile-home-block-w) !important;
+    width: var(--mobile-home-block-w) !important;
+    min-width: var(--mobile-home-block-w) !important;
     margin-right: var(--mobile-home-gap) !important;
     padding-right: 0 !important;
     background: transparent !important;
@@ -1609,10 +1624,19 @@ body.has-floating-search .main-header .searchbar{
   }
 
   .sidebar-nav .nav-link{
-    width: 42px !important;
-    min-width: 42px !important;
+    width: min(42px, 100%) !important;
+    min-width: 0 !important;
+    max-width: 42px !important;
     height: 42px !important;
+    margin-bottom: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0 !important;
     border-radius: 16px !important;
+    flex: 0 0 auto !important;
   }
 
   .sidebar-nav .nav-link svg{
@@ -1665,7 +1689,7 @@ body.has-floating-search .main-header .searchbar{
   }
 
   .sidebar-nav .nav-list > li:first-child + li{
-    margin-left: 12px !important;
+    margin-left: 0 !important;
   }
 
   .sidebar-nav .nav-link.active{
@@ -1877,9 +1901,12 @@ body.shell-embedded .main-content > main.container-full-width{
   body.shell-embedded .main-content > main,
   body.shell-embedded .main-content > main.tasks-v2-main,
   body.shell-embedded .main-content > main.container-full-width{
-    /* Let the mobile dock float over the content instead of reserving a large
-       white strip beneath it. */
-    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
-    scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
+    /* Keep the final actionable content above the fixed mobile dock. */
+    padding-bottom: var(--mobile-dock-safe-clearance) !important;
+    scroll-padding-bottom: calc(var(--mobile-dock-safe-clearance) + 10px) !important;
+  }
+
+  body.shell-embedded.page-home .main-content > main.container-full-width{
+    padding: 14px 14px var(--mobile-dock-safe-clearance) !important;
   }
 }
