@@ -1606,10 +1606,35 @@ function findLatestSettlementReceiptNumber(items, lastSettledAt) {
   return fallbackReceipt;
 }
 
-function formatLastSettledChipText(items, lastSettledAt) {
+function formatLastSettledReceiptLabel(items, lastSettledAt) {
   const receiptNumber = findLatestSettlementReceiptNumber(items, lastSettledAt);
-  if (!receiptNumber) return "No settlements yet";
+  if (!receiptNumber) return "";
   return `Receipt #${receiptNumber}`;
+}
+
+function formatLastSettledDateLabel(lastSettledAt, lastSettledDate) {
+  const rawDate = String(lastSettledDate || "").trim();
+  if (rawDate) {
+    return formatExpenseOrderDate(rawDate) || rawDate;
+  }
+
+  const rawTime = String(lastSettledAt || "").trim();
+  if (!rawTime) return "";
+
+  const parsed = new Date(rawTime);
+  if (Number.isNaN(parsed.getTime())) return rawTime;
+
+  return parsed.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function getHeroSummaryItems(items, lastSettledAt) {
+  const source = Array.isArray(items) ? items : [];
+  const split = splitExpensesByLastSettlement(source, lastSettledAt);
+  return Array.isArray(split?.recent) ? split.recent : source;
 }
 
 function syncExpenseFilterButtons() {
@@ -1653,18 +1678,19 @@ function renderExpensesListForActiveFilter() {
   });
 }
 
-function updateExpensesHeroSummary(items, lastSettledAt) {
+function updateExpensesHeroSummary(items, lastSettledAt, lastSettledDate) {
   const totalBox = document.getElementById("totalAmount");
   const cashInBox = document.getElementById("cashInTotal");
   const cashOutBox = document.getElementById("cashOutTotal");
   const lastSettledEl = document.getElementById("lastSettledTime");
 
   const source = Array.isArray(items) ? items : [];
+  const summaryItems = getHeroSummaryItems(source, lastSettledAt);
   let total = 0;
   let cashInTotal = 0;
   let cashOutTotal = 0;
 
-  source.forEach((item) => {
+  summaryItems.forEach((item) => {
     const cashIn = Number(item?.cashIn || 0);
     const cashOut = Number(item?.cashOut || 0);
     cashInTotal += cashIn;
@@ -1684,7 +1710,20 @@ function updateExpensesHeroSummary(items, lastSettledAt) {
     cashOutBox.textContent = formatHeroMoney(cashOutTotal, { sign: "-", absolute: true });
   }
   if (lastSettledEl) {
-    lastSettledEl.textContent = formatLastSettledChipText(source, lastSettledAt);
+    const dateEl = lastSettledEl.querySelector(".last-settled__date");
+    const receiptEl = lastSettledEl.querySelector(".last-settled__receipt");
+    const dateText = formatLastSettledDateLabel(lastSettledAt, lastSettledDate);
+    const receiptText = formatLastSettledReceiptLabel(source, lastSettledAt);
+    const hasSettlement = !!dateText || !!receiptText;
+
+    lastSettledEl.classList.toggle("last-settled--empty", !hasSettlement);
+
+    if (dateEl) {
+      dateEl.textContent = hasSettlement ? (dateText || "Latest settlement") : "No settlements yet";
+    }
+    if (receiptEl) {
+      receiptEl.textContent = receiptText || "";
+    }
   }
 }
 
@@ -2750,7 +2789,7 @@ async function loadExpenses() {
 
         const items = Array.isArray(data.items) ? data.items : [];
         EXPENSES_ALL_ITEMS = items;
-        updateExpensesHeroSummary(items, data.lastSettledAt);
+        updateExpensesHeroSummary(items, data.lastSettledAt, data.lastSettledDate);
 
         const now = new Date();
         const oneWeekAgo = new Date(now);
