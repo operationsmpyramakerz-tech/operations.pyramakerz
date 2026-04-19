@@ -1561,10 +1561,55 @@ function formatHeroMoney(value, { sign = "", absolute = false } = {}) {
   return `${sign}£${formatExpenseNumber(safe)}`;
 }
 
-function formatLastSettledChipText(lastSettledAt) {
-  const formatted = formatLastSettledAt(lastSettledAt);
-  if (formatted === "—") return "No settlements yet";
-  return formatted.replace(", ", " • ");
+function isSettledMyAccountItem(item) {
+  return normalizeFundsTypeKey(item?.fundsType) === "settledmyaccount";
+}
+
+function getSettlementReceiptNumber(item) {
+  return String(item?.reason || "").trim();
+}
+
+function findLatestSettlementReceiptNumber(items, lastSettledAt) {
+  const source = Array.isArray(items) ? items : [];
+  const exactCreatedTime = String(lastSettledAt || "").trim();
+
+  if (exactCreatedTime) {
+    const exactMatch = source.find((item) => {
+      return isSettledMyAccountItem(item)
+        && String(item?.createdTime || "").trim() === exactCreatedTime
+        && !!getSettlementReceiptNumber(item);
+    });
+    if (exactMatch) return getSettlementReceiptNumber(exactMatch);
+  }
+
+  let fallbackReceipt = "";
+  let fallbackTime = Number.NEGATIVE_INFINITY;
+
+  source.forEach((item) => {
+    if (!isSettledMyAccountItem(item)) return;
+
+    const receipt = getSettlementReceiptNumber(item);
+    if (!receipt) return;
+
+    const candidateTime = getExpenseTimeValue(item);
+    if (Number.isFinite(candidateTime) && candidateTime >= fallbackTime) {
+      fallbackTime = candidateTime;
+      fallbackReceipt = receipt;
+      return;
+    }
+
+    if (!fallbackReceipt) {
+      fallbackReceipt = receipt;
+    }
+  });
+
+  return fallbackReceipt;
+}
+
+function formatLastSettledChipText(items, lastSettledAt) {
+  const receiptNumber = findLatestSettlementReceiptNumber(items, lastSettledAt);
+  if (!receiptNumber) return "No settlements yet";
+  return `Receipt #${receiptNumber}`;
 }
 
 function syncExpenseFilterButtons() {
@@ -1639,7 +1684,7 @@ function updateExpensesHeroSummary(items, lastSettledAt) {
     cashOutBox.textContent = formatHeroMoney(cashOutTotal, { sign: "-", absolute: true });
   }
   if (lastSettledEl) {
-    lastSettledEl.textContent = formatLastSettledChipText(lastSettledAt);
+    lastSettledEl.textContent = formatLastSettledChipText(source, lastSettledAt);
   }
 }
 
