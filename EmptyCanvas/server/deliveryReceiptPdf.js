@@ -122,6 +122,7 @@ function pipeDeliveryReceiptPDF(
     documentTitle = "Delivery Receipt",
     recipientLabelLeft = "Delivered to",
     thirdSignatureLabel = null,
+    showFooterSignature = true,
   },
   stream,
 ) {
@@ -137,6 +138,8 @@ function pipeDeliveryReceiptPDF(
     text: "#111827",
     zebra: "#FAFAFA",
   };
+
+  const INCLUDE_FOOTER_SIGNATURE = showFooterSignature !== false;
 
   const safeRows = Array.isArray(rows) ? rows : [];
 
@@ -160,7 +163,9 @@ function pipeDeliveryReceiptPDF(
     boxH: 80,
     bottomGap: 6,
   };
-  const FOOTER_RESERVED = FOOTER.titleLineH + FOOTER.titleToBoxesGap + FOOTER.boxH + FOOTER.bottomGap + 6;
+  const FOOTER_RESERVED = INCLUDE_FOOTER_SIGNATURE
+    ? (FOOTER.titleLineH + FOOTER.titleToBoxesGap + FOOTER.boxH + FOOTER.bottomGap + 6)
+    : 0;
 
   function metrics() {
     const pageW = doc.page.width;
@@ -187,6 +192,8 @@ function pipeDeliveryReceiptPDF(
   }
 
   function drawFooterSignature() {
+    if (!INCLUDE_FOOTER_SIGNATURE) return;
+
     const { pageH, mL, mR, mB, contentW, bottomY } = metrics();
 
     const prevY = doc.y;

@@ -10523,6 +10523,7 @@ app.post(
           documentTitle: receiptView.documentTitle,
           recipientLabelLeft: receiptView.recipientLabelLeft,
           thirdSignatureLabel: receiptView.thirdSignatureLabel,
+          showFooterSignature: false,
         },
         res,
       );
