@@ -2947,10 +2947,39 @@ function escapeAttr(str) {
 function isOpsShellEmbeddedMode() {
   try {
     const url = new URL(window.location.href);
-    return url.searchParams.get('__shell') === 'content';
-  } catch {
-    return false;
-  }
+    if (url.searchParams.get('__shell') === 'content') return true;
+  } catch {}
+
+  try {
+    if (!window.parent || window.parent === window) return false;
+
+    const frameEl = window.frameElement || null;
+    if (frameEl && String(frameEl.id || '').trim() === 'ops-shell-frame') {
+      return true;
+    }
+
+    const sameOriginParent = (() => {
+      try {
+        return window.parent.location.origin === window.location.origin;
+      } catch {
+        return false;
+      }
+    })();
+
+    if (!sameOriginParent) return false;
+
+    const hostFrame = window.parent.document?.getElementById?.('ops-shell-frame') || null;
+    if (hostFrame && (hostFrame === frameEl || hostFrame.contentWindow === window)) {
+      return true;
+    }
+
+    const hostState = window.parent.__opsShellHostState || null;
+    if (hostState?.frame && (hostState.frame === frameEl || hostState.frame.contentWindow === window)) {
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 function getOpsPersistentShellFrame() {
