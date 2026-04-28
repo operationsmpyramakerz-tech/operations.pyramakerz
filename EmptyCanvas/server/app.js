@@ -1908,7 +1908,7 @@ app.post("/api/login", async (req, res) => {
         });
       });
     } else {
-      res.status(401).json({ error: "Invalid username or password" });
+      res.status(401).json({ error: "incorrect password" });
     }
   } catch (error) {
     console.error("Login error:", error);
@@ -6293,9 +6293,9 @@ app.post(
           });
         }
       }
-      if (clean.some((p) => !p.schoolId)) {
-        return res.status(400).json({ error: "Could not determine your school from your account." });
-      }
+      // School is linked when it can be resolved from the account, but it must not
+      // block Request Maintenance checkout because the UI does not ask the user
+      // to choose a school on this page.
       if (clean.some((p) => !p.issueDescription)) {
         return res.status(400).json({ error: "Each machine must include an Issue Description." });
       }
@@ -12210,9 +12210,9 @@ if (_isRequestMaintenance) {
       });
     }
   }
-  if (cleanedProducts.some(p => !p.schoolId)) {
-    return res.status(400).json({ success: false, message: "Could not determine your school from your account." });
-  }
+  // School is optional for Request Maintenance: link it if we can resolve it
+  // from the current account, but do not fail checkout when the account has no
+  // school relation because this page hides the school selector.
   if (cleanedProducts.some(p => !p.issueDescription)) {
     return res.status(400).json({ success: false, message: "Each product must include an Issue Description." });
   }
@@ -12313,7 +12313,7 @@ if (_isRequestMaintenance) {
       if (storedPassword === null || typeof storedPassword === "undefined" || String(storedPassword) !== password) {
         return res
           .status(401)
-          .json({ success: false, message: "Invalid password. Please try again." });
+          .json({ success: false, message: "incorrect password" });
       }
 
       // ===================== Edit mode =====================

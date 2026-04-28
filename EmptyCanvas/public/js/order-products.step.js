@@ -1927,7 +1927,7 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         if (res.status === 401) {
-          toast('error', 'Wrong password', data?.message || 'Invalid password.');
+          toast('error', 'incorrect password', data?.message || 'incorrect password');
           try { passwordInput?.focus?.(); passwordInput?.select?.(); } catch {}
           return;
         }

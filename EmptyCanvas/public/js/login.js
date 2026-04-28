@@ -49,7 +49,9 @@ document.addEventListener('DOMContentLoaded', function () {
         // Success - redirect to dashboard
         window.location.href = '/dashboard';
       } else {
-        showError(result.error || 'Login failed. Please try again.');
+        showError(response.status === 401 && result.error === 'incorrect password'
+          ? 'incorrect password'
+          : (result.error || 'Login failed. Please try again.'));
       }
     } catch (error) {
       console.error('Login error:', error);
