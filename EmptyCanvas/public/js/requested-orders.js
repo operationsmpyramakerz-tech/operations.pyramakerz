@@ -956,6 +956,239 @@ document.addEventListener("DOMContentLoaded", () => {
       "'": "&#39;",
     }[c]));
 
+  const creatorProfileCache = new Map();
+  let creatorProfilePopover = null;
+  let creatorProfileListenersBound = false;
+
+  function creatorInitials(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return 'U';
+    const first = parts[0]?.[0] || '';
+    const last = parts.length > 1 ? parts[parts.length - 1]?.[0] || '' : '';
+    return (first + last).toUpperCase() || 'U';
+  }
+
+  function creatorSafeHttpUrl(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    try {
+      const u = new URL(raw, window.location.origin);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+      return u.href;
+    } catch {
+      return '';
+    }
+  }
+
+  function creatorUrlHost(url) {
+    const clean = creatorSafeHttpUrl(url);
+    if (!clean) return '';
+    try {
+      return new URL(clean).hostname.replace(/^www\./i, '');
+    } catch {
+      return '';
+    }
+  }
+
+  function creatorButtonMarkup(userId, name) {
+    const cleanId = String(userId || '').trim();
+    const cleanName = String(name || '').trim() || 'Creator';
+    return `
+      <button class="co-right-ico co-creator-btn" type="button" data-creator-id="${escapeHTML(cleanId)}" data-creator-name="${escapeHTML(cleanName)}" aria-label="Created by ${escapeHTML(cleanName)}" title="Created by ${escapeHTML(cleanName)}">
+        <i data-feather="user"></i>
+      </button>
+    `;
+  }
+
+  function creatorProfileFileCards(files) {
+    const list = (Array.isArray(files) ? files : [])
+      .map((file, index) => ({
+        name: String(file?.name || '').trim() || `File ${index + 1}`,
+        url: creatorSafeHttpUrl(file?.url),
+      }))
+      .filter((file) => file.name || file.url);
+
+    if (!list.length) {
+      return `<div class="creator-profile-empty"><i data-feather="folder"></i><span>No files or media.</span></div>`;
+    }
+
+    return list.map((file) => {
+      const host = creatorUrlHost(file.url);
+      const body = `
+        <span class="creator-profile-file-icon"><i data-feather="paperclip"></i></span>
+        <span class="creator-profile-file-body">
+          <span class="creator-profile-file-name">${escapeHTML(file.name || host || 'File')}</span>
+          ${host ? `<span class="creator-profile-file-host">${escapeHTML(host)}</span>` : ''}
+        </span>
+        ${file.url ? '<span class="creator-profile-file-open"><i data-feather="external-link"></i></span>' : ''}
+      `;
+      return file.url
+        ? `<a class="creator-profile-file" href="${escapeHTML(file.url)}" target="_blank" rel="noopener noreferrer">${body}</a>`
+        : `<div class="creator-profile-file creator-profile-file--disabled">${body}</div>`;
+    }).join('');
+  }
+
+  function creatorProfileFieldsMarkup(profile) {
+    const fields = (Array.isArray(profile?.fields) ? profile.fields : [])
+      .filter((field) => {
+        const label = String(field?.label || '').trim();
+        const key = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!label || key === 'password') return false;
+        if (field?.type === 'files') return false;
+        return String(field?.value || '').trim();
+      });
+
+    if (!fields.length) {
+      return `<div class="creator-profile-empty creator-profile-empty--fields"><i data-feather="info"></i><span>No extra profile details.</span></div>`;
+    }
+
+    return fields.map((field) => `
+      <div class="creator-profile-field">
+        <span>${escapeHTML(field.label)}</span>
+        <strong>${escapeHTML(field.value)}</strong>
+      </div>
+    `).join('');
+  }
+
+  function renderCreatorProfileContent(profile, fallbackName = '', mode = 'ready') {
+    const name = String(profile?.name || fallbackName || 'Creator').trim() || 'Creator';
+    const position = String(profile?.position || '').trim();
+    const department = String(profile?.department || '').trim();
+    const subtitle = [position, department].filter(Boolean).join(' • ') || 'Team member';
+    const photo = creatorSafeHttpUrl(profile?.photoUrl);
+    const avatar = photo
+      ? `<img src="${escapeHTML(photo)}" alt="${escapeHTML(name)}" decoding="async" />`
+      : `<span>${escapeHTML(creatorInitials(name))}</span>`;
+
+    const loading = mode === 'loading';
+    const error = mode === 'error';
+
+    return `
+      <div class="creator-profile-window" role="dialog" aria-modal="false" aria-label="Created by profile">
+        <button type="button" class="creator-profile-close" aria-label="Close"><i data-feather="x"></i></button>
+        <div class="creator-profile-head">
+          <div class="creator-profile-avatar ${photo ? 'has-image' : ''}">${avatar}</div>
+          <div class="creator-profile-title-wrap">
+            <div class="creator-profile-kicker">Created by</div>
+            <div class="creator-profile-name">${escapeHTML(name)}</div>
+            <div class="creator-profile-subtitle">${escapeHTML(subtitle)}</div>
+          </div>
+        </div>
+
+        ${loading ? `
+          <div class="creator-profile-state"><i class="loading-icon" data-feather="loader"></i><span>Loading user details...</span></div>
+        ` : error ? `
+          <div class="creator-profile-state creator-profile-state--error"><i data-feather="alert-circle"></i><span>Could not load this user details.</span></div>
+        ` : `
+          <div class="creator-profile-section-title">Profile details</div>
+          <div class="creator-profile-fields">${creatorProfileFieldsMarkup(profile)}</div>
+          <div class="creator-profile-section-title creator-profile-section-title--files">Files &amp; media</div>
+          <div class="creator-profile-files">${creatorProfileFileCards(profile?.filesMedia)}</div>
+        `}
+      </div>
+    `;
+  }
+
+  function ensureCreatorProfilePopover() {
+    if (creatorProfilePopover) return creatorProfilePopover;
+    creatorProfilePopover = document.createElement('div');
+    creatorProfilePopover.className = 'creator-profile-popover';
+    creatorProfilePopover.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(creatorProfilePopover);
+
+    creatorProfilePopover.addEventListener('click', (event) => {
+      const closeBtn = event.target.closest('.creator-profile-close');
+      if (closeBtn) closeCreatorProfilePopover();
+    });
+
+    if (!creatorProfileListenersBound) {
+      creatorProfileListenersBound = true;
+      document.addEventListener('pointerdown', (event) => {
+        if (!creatorProfilePopover?.classList.contains('is-open')) return;
+        if (creatorProfilePopover.contains(event.target)) return;
+        if (event.target.closest?.('.co-creator-btn')) return;
+        closeCreatorProfilePopover();
+      }, true);
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeCreatorProfilePopover();
+      });
+      window.addEventListener('resize', closeCreatorProfilePopover);
+      window.addEventListener('scroll', closeCreatorProfilePopover, true);
+    }
+
+    return creatorProfilePopover;
+  }
+
+  function closeCreatorProfilePopover() {
+    if (!creatorProfilePopover) return;
+    creatorProfilePopover.classList.remove('is-open');
+    creatorProfilePopover.setAttribute('aria-hidden', 'true');
+    creatorProfilePopover.style.left = '';
+    creatorProfilePopover.style.top = '';
+  }
+
+  function positionCreatorProfilePopover(anchor) {
+    const pop = ensureCreatorProfilePopover();
+    if (!anchor) return;
+    const margin = 14;
+    const rect = anchor.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    const width = popRect.width || 360;
+    const height = popRect.height || 420;
+
+    let left = rect.right - width;
+    left = Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin));
+
+    let top = rect.bottom + 10;
+    if (top + height > window.innerHeight - margin) {
+      top = rect.top - height - 10;
+    }
+    top = Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin));
+
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+  }
+
+  async function openCreatorProfilePopover(anchor, userId, fallbackName = '') {
+    const pop = ensureCreatorProfilePopover();
+    const cleanId = String(userId || '').trim();
+    const cleanName = String(fallbackName || '').trim() || 'Creator';
+
+    pop.innerHTML = renderCreatorProfileContent({ name: cleanName }, cleanName, 'loading');
+    pop.classList.add('is-open');
+    pop.setAttribute('aria-hidden', 'false');
+    if (window.feather) window.feather.replace();
+    requestAnimationFrame(() => positionCreatorProfilePopover(anchor));
+
+    if (!cleanId) {
+      pop.innerHTML = renderCreatorProfileContent({ name: cleanName, fields: [], filesMedia: [] }, cleanName, 'error');
+      if (window.feather) window.feather.replace();
+      requestAnimationFrame(() => positionCreatorProfilePopover(anchor));
+      return;
+    }
+
+    try {
+      let profile = creatorProfileCache.get(cleanId);
+      if (!profile) {
+        const res = await fetch(`/api/team-members/${encodeURIComponent(cleanId)}/public`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+        profile = json;
+        creatorProfileCache.set(cleanId, profile);
+      }
+
+      pop.innerHTML = renderCreatorProfileContent(profile, cleanName, 'ready');
+    } catch (error) {
+      pop.innerHTML = renderCreatorProfileContent({ name: cleanName }, cleanName, 'error');
+    }
+
+    if (window.feather) window.feather.replace();
+    requestAnimationFrame(() => positionCreatorProfilePopover(anchor));
+  }
+
   ensureModernSelect(maintenanceResolutionSelect);
   ensureModernSelect(maintenanceSparePartSelect);
 
@@ -1823,7 +2056,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const first = (g.items || [])[0] || {};
     const title = escapeHTML(g.orderIdRange || g.reason || "Order");
     const sub = escapeHTML(fmtDateOnly(g.latestCreated) || "—");
-    const createdBy = escapeHTML(String(g.createdByName || first.createdByName || "").trim() || "—");
+    const createdByRaw = String(g.createdByName || first.createdByName || "").trim() || "—";
+    const createdBy = escapeHTML(createdByRaw);
+    const creatorId = String(g.createdById || first.createdById || "").trim();
 
     const thumbHTML = orderTypeThumbMarkup(
       g.orderType || first.orderType,
@@ -1885,10 +2120,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
         <div class="co-actions">
           <span class="co-status-btn" style="${statusStyle}">${escapeHTML(stage.label)}</span>
-          <span class="co-right-ico" aria-hidden="true"><i data-feather="percent"></i></span>
+          ${creatorButtonMarkup(creatorId, createdByRaw)}
         </div>
       </div>
     `;
+
+    const creatorBtn = card.querySelector(".co-creator-btn");
+    creatorBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openCreatorProfilePopover(creatorBtn, creatorBtn.dataset.creatorId, creatorBtn.dataset.creatorName);
+    });
 
     card.addEventListener("click", () => openOrderModal(g));
     card.addEventListener("keydown", (e) => {

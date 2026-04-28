@@ -293,6 +293,8 @@ async function clearUserServerCaches(req, opts = {}) {
 
   if (normalizedUserId) {
     tasks.push(cacheDel(`cache:api:account:${normalizedUserId}:v2`));
+    tasks.push(cacheDel(`cache:api:account:${normalizedUserId}:v3`));
+    tasks.push(cacheDel(`cache:api:team-member-public:${normalizedUserId}:v1`));
     tasks.push(cacheDel(`cache:api:expenses:user:${normalizedUserId}:v1`));
     tasks.push(cacheDel(`cache:api:expenses:user:${normalizedUserId}:v2`));
   }
@@ -684,6 +686,243 @@ function extractProfilePhotoUrlFromProps(props) {
   const propName = findProfilePhotoPropName(props);
   if (!propName) return "";
   return _firstNotionFileUrl(props?.[propName]) || "";
+}
+
+function findFilesMediaPropName(props) {
+  const exact = pickPropName(props, [
+    "Files & media",
+    "Files & Media",
+    "Files and media",
+    "Files And Media",
+    "Files",
+    "Media",
+    "Attachments",
+    "Attachment",
+  ]);
+  if (exact && props?.[exact]?.type === "files") return exact;
+
+  try {
+    for (const [key, prop] of Object.entries(props || {})) {
+      if (prop?.type !== "files") continue;
+      const clean = String(key || "").toLowerCase();
+      if (/profile|avatar|photo|picture|image/.test(clean)) continue;
+      if (/file|media|attachment|document|doc/.test(clean)) return key;
+    }
+  } catch {}
+
+  return "";
+}
+
+function extractFilesMediaFromProps(props) {
+  const propName = findFilesMediaPropName(props);
+  if (!propName) return [];
+  return notionFileMetas(props?.[propName]);
+}
+
+function _publicProfilePropKey(name) {
+  return normKey(String(name || ""));
+}
+
+function _isPrivatePublicProfileProp(name) {
+  const key = _publicProfilePropKey(name);
+  return key === "password" || key === "passcode" || key === "pin" || key === "pwd";
+}
+
+function _isProfilePicturePublicProp(name, prop) {
+  if (!prop || prop.type !== "files") return false;
+  return /profile|avatar|photo|picture|image/i.test(String(name || ""));
+}
+
+function _publicProfileDateText(dateObj) {
+  if (!dateObj) return "";
+  const start = String(dateObj.start || "").trim();
+  const end = String(dateObj.end || "").trim();
+  if (start && end) return `${start} → ${end}`;
+  return start || end || "";
+}
+
+function _publicProfileFormulaValue(prop) {
+  try {
+    const f = prop?.formula;
+    if (!f) return "";
+    if (f.type === "string") return String(f.string || "").trim();
+    if (f.type === "number") return f.number === null || f.number === undefined ? "" : String(f.number);
+    if (f.type === "boolean") return f.boolean ? "Yes" : "No";
+    if (f.type === "date") return _publicProfileDateText(f.date);
+  } catch {}
+  return "";
+}
+
+async function _publicProfileRelationValue(prop) {
+  const rel = Array.isArray(prop?.relation) ? prop.relation : [];
+  if (!rel.length) return "";
+
+  const visible = rel.slice(0, 12);
+  const names = await Promise.all(
+    visible.map(async (item) => {
+      const id = item?.id;
+      if (!id) return "";
+      try {
+        return String(await pageTitleById(id) || "").trim();
+      } catch {
+        return "";
+      }
+    }),
+  );
+
+  const parts = names
+    .map((name, idx) => String(name || rel[idx]?.id || "").trim())
+    .filter(Boolean);
+
+  if (rel.length > visible.length) parts.push(`+${rel.length - visible.length} more`);
+  return parts.join(", ");
+}
+
+async function _publicProfileRollupValue(prop) {
+  try {
+    const r = prop?.rollup;
+    if (!r) return "";
+    if (r.type === "number") return r.number === null || r.number === undefined ? "" : String(r.number);
+    if (r.type === "date") return _publicProfileDateText(r.date);
+    if (r.type === "array") {
+      const parts = [];
+      for (const item of r.array || []) {
+        const text = await _publicProfileValueFromProp(item, "", { forRollup: true });
+        if (text?.value) parts.push(text.value);
+      }
+      return toUniqueStringArray(parts).join(", ");
+    }
+  } catch {}
+  return "";
+}
+
+async function _publicProfileValueFromProp(prop, propName = "", options = {}) {
+  if (!prop) return { value: "", files: [] };
+
+  try {
+    switch (prop.type) {
+      case "title":
+        return { value: (prop.title || []).map((x) => x?.plain_text || "").join("").trim(), files: [] };
+      case "rich_text":
+        return { value: (prop.rich_text || []).map((x) => x?.plain_text || "").join("").trim(), files: [] };
+      case "number":
+        return { value: prop.number === null || prop.number === undefined ? "" : String(prop.number), files: [] };
+      case "select":
+        return { value: prop.select?.name || "", files: [] };
+      case "status":
+        return { value: prop.status?.name || "", files: [] };
+      case "multi_select":
+        return { value: (prop.multi_select || []).map((x) => x?.name || "").filter(Boolean).join(", "), files: [] };
+      case "phone_number":
+        return { value: String(prop.phone_number || "").trim(), files: [] };
+      case "email":
+        return { value: String(prop.email || "").trim(), files: [] };
+      case "url":
+        return { value: String(prop.url || "").trim(), files: [] };
+      case "checkbox":
+        return { value: prop.checkbox ? "Yes" : "No", files: [] };
+      case "date":
+        return { value: _publicProfileDateText(prop.date), files: [] };
+      case "files": {
+        const files = notionFileMetas(prop);
+        return {
+          value: files.map((x) => String(x?.name || x?.url || "").trim()).filter(Boolean).join(", "),
+          files,
+        };
+      }
+      case "relation":
+        return { value: await _publicProfileRelationValue(prop), files: [] };
+      case "people":
+        return {
+          value: (prop.people || []).map((x) => x?.name || x?.person?.email || x?.id || "").filter(Boolean).join(", "),
+          files: [],
+        };
+      case "formula":
+        return { value: _publicProfileFormulaValue(prop), files: [] };
+      case "rollup":
+        return { value: await _publicProfileRollupValue(prop), files: [] };
+      case "created_time":
+        return { value: String(prop.created_time || "").trim(), files: [] };
+      case "last_edited_time":
+        return { value: String(prop.last_edited_time || "").trim(), files: [] };
+      case "created_by":
+        return { value: prop.created_by?.name || prop.created_by?.id || "", files: [] };
+      case "last_edited_by":
+        return { value: prop.last_edited_by?.name || prop.last_edited_by?.id || "", files: [] };
+      case "unique_id":
+        return { value: _formatUniqueId(prop), files: [] };
+      default: {
+        const fallback = _extractPropText(prop);
+        return { value: fallback === null || fallback === undefined ? "" : String(fallback).trim(), files: [] };
+      }
+    }
+  } catch {
+    return { value: "", files: [] };
+  }
+}
+
+async function serializeTeamMemberPublicProfile(page) {
+  const props = page?.properties || {};
+  const filesMediaPropName = findFilesMediaPropName(props);
+  const filesMedia = filesMediaPropName ? notionFileMetas(props?.[filesMediaPropName]) : [];
+
+  const preferredOrder = [
+    "Name",
+    "Department",
+    "Position",
+    "Phone",
+    "Email",
+    "Employee Code",
+    "School",
+    "Allowed Pages",
+    "S.V Schools",
+    "Files & media",
+  ];
+
+  const entries = Object.entries(props || {});
+  const orderedNames = [];
+  for (const name of preferredOrder) {
+    const actual = entries.find(([key]) => normKey(key) === normKey(name))?.[0];
+    if (actual && !orderedNames.includes(actual)) orderedNames.push(actual);
+  }
+  for (const [key] of entries) {
+    if (!orderedNames.includes(key)) orderedNames.push(key);
+  }
+
+  const fields = [];
+  for (const key of orderedNames) {
+    const prop = props?.[key];
+    if (!prop) continue;
+    if (_isPrivatePublicProfileProp(key)) continue;
+    if (_isProfilePicturePublicProp(key, prop)) continue;
+
+    const { value, files } = await _publicProfileValueFromProp(prop, key);
+    const cleanValue = String(value || "").trim();
+    const cleanFiles = Array.isArray(files) ? files.filter((f) => f?.name || f?.url) : [];
+    if (!cleanValue && !cleanFiles.length) continue;
+
+    fields.push({
+      label: key,
+      value: cleanValue,
+      type: prop.type || "text",
+      files: cleanFiles,
+    });
+  }
+
+  const name = _extractPropText(props?.Name) || "";
+  return {
+    id: page?.id || "",
+    name,
+    username: name,
+    department: props?.Department?.select?.name || "",
+    position: props?.Position?.select?.name || "",
+    phone: props?.Phone?.phone_number || "",
+    email: props?.Email?.email || "",
+    employeeCode: props?.["Employee Code"]?.number ?? null,
+    photoUrl: extractProfilePhotoUrlFromProps(props) || "",
+    filesMedia,
+    fields,
+  };
 }
 
 // Helpers: Allowed pages control
@@ -1892,6 +2131,7 @@ app.post("/api/login", async (req, res) => {
           phone: p?.Phone?.phone_number || "",
           email: p?.Email?.email || "",
           employeeCode: p?.["Employee Code"]?.number ?? null,
+          filesMedia: extractFilesMediaFromProps(p),
           passwordSet: (_extractPropText(p?.Password) ?? null) !== null,
           allowedPages: allowedUI,
         };
@@ -1974,7 +2214,7 @@ app.get("/api/account", requireAuth, async (req, res) => {
   try {
     const cached = req.session?.accountCache;
     const ts = Number(req.session?.accountCacheTs || 0);
-    if (cached && ts && Date.now() - ts < ACCOUNT_CACHE_TTL_MS) {
+    if (cached && ts && Date.now() - ts < ACCOUNT_CACHE_TTL_MS && Array.isArray(cached.filesMedia)) {
       return res.json(cached);
     }
   } catch {}
@@ -1983,7 +2223,7 @@ app.get("/api/account", requireAuth, async (req, res) => {
     const userId = await getSessionUserNotionId(req);
     if (!userId) return res.status(404).json({ error: "User not found." });
 
-    const accountCacheKey = `cache:api:account:${normalizeNotionId(userId)}:v2`;
+    const accountCacheKey = `cache:api:account:${normalizeNotionId(userId)}:v3`;
     const data = await cacheGetOrSet(accountCacheKey, 5 * 60, async () => {
       const userPage = await notion.pages.retrieve({ page_id: userId });
       const p = userPage.properties || {};
@@ -2000,6 +2240,7 @@ app.get("/api/account", requireAuth, async (req, res) => {
         phone: p?.Phone?.phone_number || "",
         email: p?.Email?.email || "",
         employeeCode: p?.["Employee Code"]?.number ?? null,
+        filesMedia: extractFilesMediaFromProps(p),
         passwordSet: (_extractPropText(p?.Password) ?? null) !== null,
         allowedPages: allowedUI,
       };
@@ -2020,6 +2261,45 @@ app.get("/api/account", requireAuth, async (req, res) => {
 
 
 
+
+
+
+app.get("/api/team-members/:id/public", requireAuth, async (req, res) => {
+  if (!teamMembersDatabaseId) {
+    return res.status(500).json({ error: "Team_Members database ID is not configured." });
+  }
+
+  try {
+    const rawId = String(req.params?.id || "").trim();
+    if (!rawId) return res.status(400).json({ error: "Team member ID is required." });
+
+    res.set("Cache-Control", "no-store");
+    const cacheKey = `cache:api:team-member-public:${normalizeNotionId(rawId)}:v1`;
+    const profile = await cacheGetOrSet(cacheKey, 5 * 60, async () => {
+      const page = await notion.pages.retrieve({ page_id: rawId });
+
+      const parentDb = page?.parent?.database_id || "";
+      if (
+        parentDb &&
+        teamMembersDatabaseId &&
+        normalizeNotionId(parentDb) !== normalizeNotionId(teamMembersDatabaseId)
+      ) {
+        const err = new Error("Team member not found.");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      return await serializeTeamMemberPublicProfile(page);
+    });
+
+    return res.json(profile);
+  } catch (error) {
+    const status = Number(error?.statusCode) || Number(error?.status) || 500;
+    if (status === 404) return res.status(404).json({ error: "Team member not found." });
+    console.error("GET /api/team-members/:id/public error:", error?.body || error);
+    return res.status(500).json({ error: "Failed to load team member profile." });
+  }
+});
 
 
 app.post("/api/hard-refresh", requireAuth, async (req, res) => {

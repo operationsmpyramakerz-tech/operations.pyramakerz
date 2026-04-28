@@ -118,6 +118,91 @@ document.addEventListener('DOMContentLoaded', async () => {
     `;
   }
 
+  function normalizeFilesMedia(files) {
+    return (Array.isArray(files) ? files : [])
+      .map((file, index) => ({
+        name: String(file?.name || '').trim() || `File ${index + 1}`,
+        url: String(file?.url || '').trim(),
+      }))
+      .filter((file) => file.name || file.url);
+  }
+
+  function safeUrl(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    try {
+      const u = new URL(raw, window.location.origin);
+      if (!/^https?:$/i.test(u.protocol)) return '';
+      return u.href;
+    } catch {
+      return '';
+    }
+  }
+
+  function urlHost(url) {
+    const clean = safeUrl(url);
+    if (!clean) return '';
+    try {
+      return new URL(clean).hostname.replace(/^www\./i, '');
+    } catch {
+      return '';
+    }
+  }
+
+  function fileIconName(file) {
+    const text = `${file?.name || ''} ${file?.url || ''}`.toLowerCase();
+    if (/\.(png|jpe?g|webp|gif|bmp|svg|avif)(\?|#|$)/i.test(text)) return 'image';
+    if (/\.pdf(\?|#|$)/i.test(text)) return 'file-text';
+    if (/\.(xls|xlsx|csv)(\?|#|$)/i.test(text)) return 'grid';
+    if (/\.(doc|docx)(\?|#|$)/i.test(text)) return 'file-text';
+    if (/\.(ppt|pptx)(\?|#|$)/i.test(text)) return 'monitor';
+    if (/\.(zip|rar|7z)(\?|#|$)/i.test(text)) return 'archive';
+    return 'paperclip';
+  }
+
+  function renderFilesMediaSection() {
+    const files = normalizeFilesMedia(state?.filesMedia);
+    const filesMarkup = files.length
+      ? files.map((file) => {
+          const url = safeUrl(file.url);
+          const host = urlHost(url);
+          const icon = fileIconName(file);
+          const inner = `
+            <span class="profile-media-file-icon"><i data-feather="${escapeHTML(icon)}"></i></span>
+            <span class="profile-media-file-body">
+              <span class="profile-media-file-name">${escapeHTML(file.name || host || 'File')}</span>
+              ${host ? `<span class="profile-media-file-url">${escapeHTML(host)}</span>` : ''}
+            </span>
+            ${url ? '<span class="profile-media-file-open"><i data-feather="external-link"></i></span>' : ''}
+          `;
+
+          return url
+            ? `<a class="profile-media-file-card" href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+            : `<div class="profile-media-file-card profile-media-file-card--disabled">${inner}</div>`;
+        }).join('')
+      : `
+        <div class="profile-media-empty">
+          <span class="profile-media-empty-icon"><i data-feather="folder"></i></span>
+          <span>No files or links added yet.</span>
+        </div>
+      `;
+
+    return `
+      <section class="profile-files-media-section" aria-label="Files and media">
+        <div class="profile-files-media-head">
+          <span class="profile-files-media-badge"><i data-feather="paperclip"></i></span>
+          <div>
+            <div class="profile-files-media-title">Files &amp; media</div>
+            <div class="profile-files-media-sub">${files.length ? `${files.length} item${files.length === 1 ? '' : 's'} attached to your Notion profile` : 'Attachments from your Team Members record'}</div>
+          </div>
+        </div>
+        <div class="profile-media-files-grid">
+          ${filesMarkup}
+        </div>
+      </section>
+    `;
+  }
+
   function render() {
     container.innerHTML = `
       <div class="account-panel account-panel--profile account-profile-modern">
@@ -125,6 +210,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div class="profile-fields-list">
           ${FIELD_META.map(profileFieldCard).join('')}
         </div>
+        ${renderFilesMediaSection()}
       </div>
     `;
 
@@ -583,6 +669,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           ? String(data.employeeCode ?? '').trim()
           : '',
         photoUrl: data.photoUrl || '',
+        filesMedia: normalizeFilesMedia(data.filesMedia),
         passwordSet: !!data.passwordSet,
       };
 
