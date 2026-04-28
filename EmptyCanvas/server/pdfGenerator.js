@@ -1,21 +1,20 @@
 const PDFDocument = require("pdfkit");
 const { attachPageNumbers } = require("./pdfPageNumbers");
 const { drawStocktakingHeader } = require("./pdfHeader");
+const { enableArabicPdf, ensurePdfArabicSupport } = require("./pdfArabicSupport");
 
-// Helper بسيط جدًا عشان نحسّن شكل العربي في PDFKit
+// Arabic text shaping is handled globally by pdfArabicSupport.
 function fixRTL(text) {
-  if (!text) return text;
-  // لو مفيش حروف عربية رجّع النص زي ما هو
-  if (!/[\u0600-\u06FF]/.test(text)) return text;
-  // نقلب الحروف علشان pdfkit بيرسم من الشمال لليمين
-  return text.split("").reverse().join("");
+  return text;
 }
 
-function generateExpensePDF({ userName, userId, items, dateFrom, dateTo }, callback) {
+async function generateExpensePDF({ userName, userId, items, dateFrom, dateTo }, callback) {
   const rows = Array.isArray(items) ? items : [];
 
   try {
+    await ensurePdfArabicSupport();
     const doc = new PDFDocument({ size: "A4", margin: 40, bufferPages: true });
+    enableArabicPdf(doc);
     const buffers = [];
     doc.on("data", buffers.push.bind(buffers));
     doc.on("end", () => callback(null, Buffer.concat(buffers)));

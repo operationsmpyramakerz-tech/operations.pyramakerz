@@ -2,6 +2,7 @@ const PDFDocument = require("pdfkit");
 const path = require("path");
 const { attachPageNumbers } = require("./pdfPageNumbers");
 const { drawStocktakingHeader } = require("./pdfHeader");
+const { enableArabicPdf, ensurePdfArabicSupport } = require("./pdfArabicSupport");
 
 function formatDateTime(date) {
   try {
@@ -113,7 +114,9 @@ function drawFieldCard(doc, x, y, w, label, value, options = {}) {
 }
 
 async function pipeMaintenanceReceiptPDF(params = {}, stream) {
+  await ensurePdfArabicSupport();
   const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
+  enableArabicPdf(doc);
   doc.pipe(stream);
   attachPageNumbers(doc);
 

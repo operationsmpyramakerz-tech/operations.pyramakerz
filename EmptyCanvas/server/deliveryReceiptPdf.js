@@ -2,6 +2,7 @@ const PDFDocument = require("pdfkit");
 const path = require("path");
 const { attachPageNumbers } = require("./pdfPageNumbers");
 const { drawStocktakingHeader } = require("./pdfHeader");
+const { enableArabicPdf, ensurePdfArabicSupport } = require("./pdfArabicSupport");
 
 function moneyGBP(n) {
   const num = Number(n) || 0;
@@ -101,7 +102,7 @@ function groupByReason(rows) {
  * @param {number} params.grandTotal
  * @param {import('stream').Writable} stream
  */
-function pipeDeliveryReceiptPDF(
+async function pipeDeliveryReceiptPDF(
   {
     orderId,
     createdAt,
@@ -126,7 +127,9 @@ function pipeDeliveryReceiptPDF(
   },
   stream,
 ) {
+  await ensurePdfArabicSupport();
   const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
+  enableArabicPdf(doc);
   doc.pipe(stream);
   // Page numbering (helps ordering when printing/sharing)
   // Attach after piping so the first page number is included in the output stream.

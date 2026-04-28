@@ -5,6 +5,7 @@ const { Client } = require("@notionhq/client");
 const PDFDocument = require("pdfkit"); // PDF
 const { attachPageNumbers } = require("./pdfPageNumbers");
 const { drawStocktakingHeader } = require("./pdfHeader");
+const { enableArabicPdf, ensurePdfArabicSupport } = require("./pdfArabicSupport");
 
 // Web Push (Notifications)
 let webpush = null;
@@ -5786,7 +5787,9 @@ app.get(
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
+      await ensurePdfArabicSupport();
       const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
+      enableArabicPdf(doc);
       doc.pipe(res);
       attachPageNumbers(doc);
 
@@ -9715,7 +9718,7 @@ app.post(
 
       // Generate a nicer PDF (logo + meta table + better signatures layout)
       const { pipeDeliveryReceiptPDF } = require("./deliveryReceiptPdf");
-      pipeDeliveryReceiptPDF(
+      await pipeDeliveryReceiptPDF(
         {
           orderId: orderIdRange,
           createdAt,
@@ -10779,7 +10782,7 @@ app.post(
         Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "No Reason";
 
       const { pipeDeliveryReceiptPDF } = require("./deliveryReceiptPdf");
-      pipeDeliveryReceiptPDF(
+      await pipeDeliveryReceiptPDF(
         {
           orderId: orderIdRange,
           createdAt,
@@ -11652,7 +11655,9 @@ app.get(
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
 
+      await ensurePdfArabicSupport();
       const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
+      enableArabicPdf(doc);
       doc.pipe(res);
       attachPageNumbers(doc);
 
@@ -11809,7 +11814,9 @@ app.get(
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
 
+      await ensurePdfArabicSupport();
       const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
+      enableArabicPdf(doc);
       doc.pipe(res);
       attachPageNumbers(doc);
 
@@ -13691,7 +13698,9 @@ app.all(
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
       res.set("Cache-Control", "no-store");
 
+      await ensurePdfArabicSupport();
       const doc = new PDFDocument({ size: "A4", margin: 36, bufferPages: true });
+      enableArabicPdf(doc);
       doc.pipe(res);
       attachPageNumbers(doc);
 
@@ -17274,7 +17283,9 @@ app.get('/api/damaged-assets/report/:reportId/pdf', requireAuth, requirePage('Da
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
 
+    await ensurePdfArabicSupport();
     const doc = new PDFDocument({ size: 'A4', margin: 36, bufferPages: true });
+    enableArabicPdf(doc);
     doc.pipe(res);
     attachPageNumbers(doc);
 
