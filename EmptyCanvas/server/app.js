@@ -295,6 +295,7 @@ async function clearUserServerCaches(req, opts = {}) {
     tasks.push(cacheDel(`cache:api:account:${normalizedUserId}:v2`));
     tasks.push(cacheDel(`cache:api:account:${normalizedUserId}:v3`));
     tasks.push(cacheDel(`cache:api:team-member-public:${normalizedUserId}:v1`));
+    tasks.push(cacheDel(`cache:api:team-member-public:${normalizedUserId}:v2`));
     tasks.push(cacheDel(`cache:api:expenses:user:${normalizedUserId}:v1`));
     tasks.push(cacheDel(`cache:api:expenses:user:${normalizedUserId}:v2`));
   }
@@ -866,35 +867,32 @@ async function serializeTeamMemberPublicProfile(page) {
   const filesMediaPropName = findFilesMediaPropName(props);
   const filesMedia = filesMediaPropName ? notionFileMetas(props?.[filesMediaPropName]) : [];
 
-  const preferredOrder = [
+  const publicProfileDisplayOrder = [
     "Name",
     "Department",
     "Position",
     "Phone",
     "Email",
     "Employee Code",
-    "School",
-    "Allowed Pages",
-    "S.V Schools",
     "Files & media",
   ];
+  const publicProfileAllowedKeys = new Set(publicProfileDisplayOrder.map((name) => normKey(name)));
 
   const entries = Object.entries(props || {});
   const orderedNames = [];
-  for (const name of preferredOrder) {
+  for (const name of publicProfileDisplayOrder) {
     const actual = entries.find(([key]) => normKey(key) === normKey(name))?.[0];
     if (actual && !orderedNames.includes(actual)) orderedNames.push(actual);
-  }
-  for (const [key] of entries) {
-    if (!orderedNames.includes(key)) orderedNames.push(key);
   }
 
   const fields = [];
   for (const key of orderedNames) {
     const prop = props?.[key];
     if (!prop) continue;
+    if (!publicProfileAllowedKeys.has(normKey(key))) continue;
     if (_isPrivatePublicProfileProp(key)) continue;
     if (_isProfilePicturePublicProp(key, prop)) continue;
+    if (prop.type === "files") continue; // Files & media is returned separately as filesMedia.
 
     const { value, files } = await _publicProfileValueFromProp(prop, key);
     const cleanValue = String(value || "").trim();
@@ -2274,7 +2272,7 @@ app.get("/api/team-members/:id/public", requireAuth, async (req, res) => {
     if (!rawId) return res.status(400).json({ error: "Team member ID is required." });
 
     res.set("Cache-Control", "no-store");
-    const cacheKey = `cache:api:team-member-public:${normalizeNotionId(rawId)}:v1`;
+    const cacheKey = `cache:api:team-member-public:${normalizeNotionId(rawId)}:v2`;
     const profile = await cacheGetOrSet(cacheKey, 5 * 60, async () => {
       const page = await notion.pages.retrieve({ page_id: rawId });
 

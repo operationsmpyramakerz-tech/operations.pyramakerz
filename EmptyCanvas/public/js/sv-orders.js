@@ -244,18 +244,75 @@
     }).join('');
   }
 
+  const CREATOR_PROFILE_FIELD_ORDER = [
+    {
+      label: 'Name',
+      aliases: ['Name'],
+      value: (profile) => profile?.name || profile?.username,
+    },
+    {
+      label: 'Department',
+      aliases: ['Department'],
+      value: (profile) => profile?.department,
+    },
+    {
+      label: 'Position',
+      aliases: ['Position'],
+      value: (profile) => profile?.position,
+    },
+    {
+      label: 'Phone',
+      aliases: ['Phone', 'Mobile', 'Phone Number'],
+      value: (profile) => profile?.phone,
+    },
+    {
+      label: 'Email',
+      aliases: ['Email', 'E-mail'],
+      value: (profile) => profile?.email,
+    },
+    {
+      label: 'Employee Code',
+      aliases: ['Employee Code', 'Employee ID', 'Code'],
+      value: (profile) => profile?.employeeCode,
+    },
+  ];
+
+  function creatorProfileFieldKey(label) {
+    return String(label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function creatorProfileValueFromTopLevel(profile, getter) {
+    const value = typeof getter === 'function' ? getter(profile || {}) : '';
+    if (value === null || value === undefined) return '';
+    return String(value).trim();
+  }
+
+  function creatorProfileValueFromFields(profile, aliases) {
+    const wanted = new Set((aliases || []).map(creatorProfileFieldKey));
+    const fields = Array.isArray(profile?.fields) ? profile.fields : [];
+    const found = fields.find((field) => {
+      if (field?.type === 'files') return false;
+      const key = creatorProfileFieldKey(field?.label);
+      if (!wanted.has(key)) return false;
+      return String(field?.value ?? '').trim();
+    });
+    return found ? String(found.value ?? '').trim() : '';
+  }
+
   function creatorProfileFieldsMarkup(profile) {
-    const fields = (Array.isArray(profile?.fields) ? profile.fields : [])
-      .filter((field) => {
-        const label = String(field?.label || '').trim();
-        const key = label.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (!label || key === 'password') return false;
-        if (field?.type === 'files') return false;
-        return String(field?.value || '').trim();
-      });
+    const fields = CREATOR_PROFILE_FIELD_ORDER
+      .map((field) => {
+        const fromTopLevel = creatorProfileValueFromTopLevel(profile, field.value);
+        const fromFields = creatorProfileValueFromFields(profile, field.aliases);
+        return {
+          label: field.label,
+          value: fromTopLevel || fromFields,
+        };
+      })
+      .filter((field) => String(field.value || '').trim());
 
     if (!fields.length) {
-      return `<div class="creator-profile-empty creator-profile-empty--fields"><i data-feather="info"></i><span>No extra profile details.</span></div>`;
+      return `<div class="creator-profile-empty creator-profile-empty--fields"><i data-feather="info"></i><span>No profile details available.</span></div>`;
     }
 
     return fields.map((field) => `
@@ -281,7 +338,7 @@
 
     return `
       <div class="creator-profile-window" role="dialog" aria-modal="false" aria-label="Created by profile">
-        <button type="button" class="creator-profile-close" aria-label="Close"><i data-feather="x"></i></button>
+        <button type="button" class="creator-profile-close" aria-label="Close" title="Close"><span class="creator-profile-close-x" aria-hidden="true">&times;</span></button>
         <div class="creator-profile-head">
           <div class="creator-profile-avatar ${photo ? 'has-image' : ''}">${avatar}</div>
           <div class="creator-profile-title-wrap">
