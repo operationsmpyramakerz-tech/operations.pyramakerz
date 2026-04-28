@@ -6,10 +6,18 @@ const https = require("https");
 const ARABIC_REGULAR_FONT = "PyramakerzArabicRegular";
 const ARABIC_BOLD_FONT = "PyramakerzArabicBold";
 
-const DEFAULT_ARABIC_FONT_URL =
-  "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf";
-const DEFAULT_ARABIC_BOLD_FONT_URL =
-  "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf";
+const DEFAULT_ARABIC_FONT_URLS = [
+  "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf",
+  "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/amiri/Amiri-Regular.ttf",
+  "https://cdn.jsdelivr.net/fontsource/fonts/amiri@latest/arabic-400-normal.ttf",
+  "https://cdn.jsdelivr.net/fontsource/fonts/amiri@latest/arabic-400-normal.woff2",
+];
+const DEFAULT_ARABIC_BOLD_FONT_URLS = [
+  "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf",
+  "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/amiri/Amiri-Bold.ttf",
+  "https://cdn.jsdelivr.net/fontsource/fonts/amiri@latest/arabic-700-normal.ttf",
+  "https://cdn.jsdelivr.net/fontsource/fonts/amiri@latest/arabic-700-normal.woff2",
+];
 
 let cachedFontPaths = null;
 let ensurePromise = null;
@@ -28,9 +36,35 @@ function projectRoot() {
   return path.join(__dirname, "..");
 }
 
-function commonFontCandidates(kind = "regular") {
+function splitEnvList(value) {
+  return String(value || "")
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function fontsourceCandidates(kind = "regular") {
+  try {
+    const pkgPath = require.resolve("@fontsource/amiri/package.json", {
+      paths: [projectRoot(), __dirname, process.cwd()],
+    });
+    const dir = path.dirname(pkgPath);
+    const weight = kind === "bold" ? "700" : "400";
+    return [
+      path.join(dir, "files", `amiri-arabic-${weight}-normal.woff2`),
+      path.join(dir, "files", `amiri-arabic-${weight}-normal.woff`),
+      path.join(dir, "files", `amiri-all-${weight}-normal.woff2`),
+      path.join(dir, "files", `amiri-all-${weight}-normal.woff`),
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function commonFontCandidates(kind = "regular", options = {}) {
   const root = projectRoot();
   const isBold = kind === "bold";
+  const includeSystem = options.includeSystem !== false;
   const envPath = isBold
     ? (process.env.PDF_ARABIC_BOLD_FONT_PATH || process.env.ARABIC_BOLD_FONT_PATH)
     : (process.env.PDF_ARABIC_FONT_PATH || process.env.ARABIC_FONT_PATH);
@@ -38,21 +72,30 @@ function commonFontCandidates(kind = "regular") {
   const tmpDir = path.join(os.tmpdir(), "pyramakerz-pdf-fonts");
   const downloadedName = isBold ? "Amiri-Bold.ttf" : "Amiri-Regular.ttf";
 
-  return [
+  const projectCandidates = [
     envPath,
     path.join(tmpDir, downloadedName),
     path.join(root, "fonts", downloadedName),
     path.join(root, "public", "fonts", downloadedName),
     path.join(root, "server", "fonts", downloadedName),
-    isBold ? "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    isBold ? "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf" : "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-    isBold ? "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf" : "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
-    isBold ? "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf" : "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
-  ].filter(Boolean);
+    ...fontsourceCandidates(kind),
+  ];
+
+  const systemCandidates = includeSystem
+    ? [
+        isBold ? "/usr/share/fonts/truetype/amiri/Amiri-Bold.ttf" : "/usr/share/fonts/truetype/amiri/Amiri-Regular.ttf",
+        isBold ? "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf" : "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+        isBold ? "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf" : "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        isBold ? "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        isBold ? "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf" : "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+      ]
+    : [];
+
+  return projectCandidates.concat(systemCandidates).filter(Boolean);
 }
 
-function findLocalFontPath(kind = "regular") {
-  for (const candidate of commonFontCandidates(kind)) {
+function findLocalFontPath(kind = "regular", options = {}) {
+  for (const candidate of commonFontCandidates(kind, options)) {
     if (safeStatFile(candidate)) return candidate;
   }
   return null;
@@ -112,32 +155,36 @@ async function downloadBuffer(url) {
 }
 
 async function ensureFontDownloaded(kind = "regular") {
-  const local = findLocalFontPath(kind);
-  if (local) return local;
+  // Prefer project-bundled / cached fonts first. System fonts are a final fallback
+  // because Vercel/serverless images do not always include Arabic-capable fonts.
+  const bundled = findLocalFontPath(kind, { includeSystem: false });
+  if (bundled) return bundled;
 
   const isBold = kind === "bold";
-  const url = isBold
-    ? (process.env.PDF_ARABIC_BOLD_FONT_URL || DEFAULT_ARABIC_BOLD_FONT_URL)
-    : (process.env.PDF_ARABIC_FONT_URL || process.env.ARABIC_FONT_URL || DEFAULT_ARABIC_FONT_URL);
-  if (!url) return null;
+  const urls = isBold
+    ? splitEnvList(process.env.PDF_ARABIC_BOLD_FONT_URL).concat(DEFAULT_ARABIC_BOLD_FONT_URLS)
+    : splitEnvList(process.env.PDF_ARABIC_FONT_URL || process.env.ARABIC_FONT_URL).concat(DEFAULT_ARABIC_FONT_URLS);
 
-  try {
-    const dir = path.join(os.tmpdir(), "pyramakerz-pdf-fonts");
-    fs.mkdirSync(dir, { recursive: true });
-    const filePath = path.join(dir, isBold ? "Amiri-Bold.ttf" : "Amiri-Regular.ttf");
-    if (safeStatFile(filePath)) return filePath;
+  const dir = path.join(os.tmpdir(), "pyramakerz-pdf-fonts");
+  const filePath = path.join(dir, isBold ? "Amiri-Bold.ttf" : "Amiri-Regular.ttf");
+  if (safeStatFile(filePath)) return filePath;
 
-    const buffer = await downloadBuffer(url);
-    if (!buffer || buffer.length < 8 * 1024) return null;
+  for (const url of urls) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const buffer = await downloadBuffer(url);
+      if (!buffer || buffer.length < 8 * 1024) continue;
 
-    const tmpPath = `${filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(tmpPath, buffer);
-    fs.renameSync(tmpPath, filePath);
-    return filePath;
-  } catch (err) {
-    console.warn(`[pdf-arabic] Could not load ${kind} Arabic font:`, err?.message || err);
-    return null;
+      const tmpPath = `${filePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tmpPath, buffer);
+      fs.renameSync(tmpPath, filePath);
+      return filePath;
+    } catch (err) {
+      console.warn(`[pdf-arabic] Could not load ${kind} Arabic font from ${url}:`, err?.message || err);
+    }
   }
+
+  return findLocalFontPath(kind, { includeSystem: true });
 }
 
 async function ensurePdfArabicSupport() {
@@ -398,6 +445,7 @@ function enableArabicPdf(doc) {
   const originalWidthOfString = doc.widthOfString;
   const originalHeightOfString = doc.heightOfString;
   let requestedFont = "Helvetica";
+  let arabicFontDepth = 0;
 
   function restoreRequestedFont() {
     try {
@@ -412,6 +460,13 @@ function enableArabicPdf(doc) {
 
   function withArabicFontIfNeeded(value, fn) {
     const raw = coerceText(value);
+
+    // PDFKit lays out text by calling widthOfString/heightOfString internally.
+    // Keep the Arabic font during those nested calls and avoid preparing text twice.
+    if (arabicFontDepth > 0) {
+      return fn(raw);
+    }
+
     if (!containsArabic(raw)) return fn(raw);
 
     const fontName = fontLooksBold(requestedFont) ? ARABIC_BOLD_FONT : ARABIC_REGULAR_FONT;
@@ -419,8 +474,10 @@ function enableArabicPdf(doc) {
 
     try {
       originalFont.call(doc, fontName);
+      arabicFontDepth += 1;
       return fn(prepared);
     } finally {
+      arabicFontDepth = Math.max(0, arabicFontDepth - 1);
       restoreRequestedFont();
     }
   }
