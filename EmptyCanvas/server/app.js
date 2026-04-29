@@ -76,6 +76,42 @@ function formatDateTime(date) {
   }
 }
 
+function formatDateOnly(date) {
+  try {
+    const raw = String(date || "").trim();
+    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const d = iso
+      ? new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])))
+      : (date instanceof Date ? date : new Date(date));
+    if (Number.isNaN(d.getTime())) return raw || "-";
+    return d.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+  } catch {
+    return String(date || "-");
+  }
+}
+
+function _resolveInventoryExportDate(meta = {}, query = {}) {
+  const explicit =
+    _normalizeISODateInput(query?.inventoryDate) ||
+    _normalizeISODateInput(query?.dateISO) ||
+    _normalizeISODateInput(query?.date);
+
+  const fromMeta =
+    _normalizeISODateInput(meta?.inventoryDate) ||
+    _normalizeISODateInput(meta?.defectedDate);
+
+  const fromInventoryName = String(meta?.inventoryPropName || "").match(/\b(\d{4}-\d{2}-\d{2})\b/)?.[1] || "";
+  const fromDefectedName = String(meta?.defectedPropName || "").match(/\b(\d{4}-\d{2}-\d{2})\b/)?.[1] || "";
+  const fromName = _normalizeISODateInput(fromInventoryName) || _normalizeISODateInput(fromDefectedName);
+
+  return explicit || fromMeta || fromName || "";
+}
+
 
 // Middleware
 app.use(express.json({ limit: '30mb' }));
@@ -5140,7 +5176,7 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
   const id = String(schoolId || "").trim();
   if (!id) return { meta: {}, items: [] };
 
-  const cacheKey = `cache:api:b2b:school-stock:${id}:v7`;
+  const cacheKey = `cache:api:b2b:school-stock:${id}:v8`;
   return await cacheGetOrSet(cacheKey, 60, async () => {
     const school = await _getB2BSchoolById(id);
     if (!school) return { meta: {}, items: [] };
@@ -5543,7 +5579,7 @@ app.post(
 
       // Invalidate school stock cache so UI shows the new columns immediately.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${id}:v7`);
+        await cacheDel(`cache:api:b2b:school-stock:${id}:v8`);
       } catch {}
 
       return res.json({
@@ -5646,7 +5682,7 @@ app.patch(
 
       // Invalidate school stock cache so UI reflects updates.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v7`);
+        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v8`);
       } catch {}
 
       return res.json({ ok: true, inventoryPropName, inventoryDate, value });
@@ -5747,7 +5783,7 @@ app.patch(
 
       // Invalidate school stock cache so UI reflects updates.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v7`);
+        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v8`);
       } catch {}
 
       return res.json({ ok: true, defectedPropName, defectedDate, value });
@@ -5834,14 +5870,19 @@ app.get(
           tag: r.tag,
         }))
         .filter((r) => {
-          const qOk = Number(r.quantity) > 0;
-          const invOk = includeInventoryCol && r.inventory !== null && Number(r.inventory) >= 0;
-          const defOk = includeDefectedCol && r.defected !== null && Number(r.defected) >= 0;
+          const quantity = Number(r.quantity);
+          const qOk = Number.isFinite(quantity) && quantity !== 0;
+          const invValue = Number(r.inventory);
+          const defValue = Number(r.defected);
+          const invOk = includeInventoryCol && r.inventory !== null && Number.isFinite(invValue);
+          const defOk = includeDefectedCol && r.defected !== null && Number.isFinite(defValue);
           return qOk || invOk || defOk;
         });
 
       const createdAt = new Date();
-      const dateStr = createdAt.toISOString().slice(0, 10);
+      const inventoryExportDate = _resolveInventoryExportDate(meta, req.query || {});
+      const exportDateLabel = inventoryExportDate ? formatDateOnly(inventoryExportDate) : formatDateTime(createdAt);
+      const dateStr = inventoryExportDate || createdAt.toISOString().slice(0, 10);
       const fileName = `Stocktaking-${dateStr}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
@@ -5947,7 +5988,7 @@ app.get(
       // Header (Stocktaking style) — without the divider line (to save space)
       drawStocktakingHeader(doc, {
         title: "Stocktaking",
-        subtitle: `School: ${schoolName}  •  Generated: ${formatDateTime(createdAt)}`,
+        subtitle: `School: ${schoolName}  •  Inventory date: ${exportDateLabel}`,
         logoPath,
         colors: COLORS,
       });
@@ -5998,7 +6039,7 @@ app.get(
           .text(String(value || "-"), x + 10, boxY + 18, { width: boxW - 20 });
       };
       drawInfoBox(mL, "School", schoolName);
-      drawInfoBox(mL + boxW + boxGap, "Date", formatDateTime(createdAt));
+      drawInfoBox(mL + boxW + boxGap, "Date", exportDateLabel);
       doc.y = boxY + boxH + 16;
 
       // Signature blocks
@@ -6326,9 +6367,12 @@ app.get(
             r.defected === null || typeof r.defected === "undefined" ? null : Number(r.defected),
         }))
         .filter((r) => {
-          const qOk = Number(r.quantity) > 0;
-          const invOk = includeInventoryCol && r.inventory !== null && Number(r.inventory) >= 0;
-          const defOk = includeDefectedCol && r.defected !== null && Number(r.defected) >= 0;
+          const quantity = Number(r.quantity);
+          const qOk = Number.isFinite(quantity) && quantity !== 0;
+          const invValue = Number(r.inventory);
+          const defValue = Number(r.defected);
+          const invOk = includeInventoryCol && r.inventory !== null && Number.isFinite(invValue);
+          const defOk = includeDefectedCol && r.defected !== null && Number.isFinite(defValue);
           return qOk || invOk || defOk;
         })
         .slice()
@@ -6345,7 +6389,8 @@ app.get(
       const ws = wb.addWorksheet("Stocktaking");
 
       const createdAt = new Date();
-      const formattedDate = formatDateTime(createdAt);
+      const inventoryExportDate = _resolveInventoryExportDate(meta, req.query || {});
+      const exportDateLabel = inventoryExportDate ? formatDateOnly(inventoryExportDate) : formatDateTime(createdAt);
 
       // Excel styling helpers
       // - Use BLACK borders to match Excel's "All Borders" look (as in the user's manual edit)
@@ -6400,7 +6445,7 @@ app.get(
       ws.mergeCells(`A2:${leftEnd}2`);
       ws.mergeCells(`${rightStart}2:${lastCol}2`);
       ws.getCell("A2").value = `School: ${schoolName}`;
-      ws.getCell(`${rightStart}2`).value = `Date: ${formattedDate}`;
+      ws.getCell(`${rightStart}2`).value = `Date: ${exportDateLabel}`;
       ["A2", `${rightStart}2`].forEach((addr) => {
         const c = ws.getCell(addr);
         c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
