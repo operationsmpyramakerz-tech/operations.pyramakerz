@@ -358,29 +358,106 @@ function shapeArabicLogical(value) {
   return out;
 }
 
-function reversePreservingLtrTokens(value) {
-  const text = String(value || "");
+function firstStrongDirection(value) {
+  for (const ch of Array.from(String(value || ""))) {
+    if (ARABIC_LETTER_RE.test(ch) || /[\uFB50-\uFDFF\uFE70-\uFEFF]/.test(ch)) return "rtl";
+    if (/[A-Za-z]/.test(ch)) return "ltr";
+  }
+  return containsArabic(value) ? "rtl" : "ltr";
+}
+
+function isWhitespace(ch) {
+  return /\s/.test(ch || "");
+}
+
+function isLtrStarter(ch) {
+  return /[A-Za-z0-9£$€]/.test(ch || "");
+}
+
+function isLtrRunChar(ch) {
+  return /[A-Za-z0-9._%+@:;\/\\#&=,\-+()[\]{}£$€]/.test(ch || "");
+}
+
+function readLtrRun(chars, start) {
+  let i = start;
+  let out = "";
+
+  while (i < chars.length) {
+    const ch = chars[i];
+
+    if (isLtrRunChar(ch)) {
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    if (isWhitespace(ch)) {
+      let j = i;
+      let spaces = "";
+      while (j < chars.length && isWhitespace(chars[j])) {
+        spaces += chars[j];
+        j += 1;
+      }
+
+      // Keep spaces inside one English/number phrase, e.g. "Laser Machine" or "2 bed".
+      if (j < chars.length && isLtrStarter(chars[j])) {
+        out += spaces;
+        i = j;
+        continue;
+      }
+    }
+
+    break;
+  }
+
+  return { token: out, next: i };
+}
+
+function tokenizeVisualRuns(value) {
+  const chars = Array.from(String(value || ""));
   const tokens = [];
   let i = 0;
 
-  while (i < text.length) {
-    const ch = text[i];
-    if (/[A-Za-z0-9]/.test(ch)) {
-      let j = i + 1;
-      while (j < text.length && /[A-Za-z0-9._%+@:\/\\#-]/.test(text[j])) j += 1;
-      tokens.push(text.slice(i, j));
-      i = j;
+  while (i < chars.length) {
+    const ch = chars[i];
+    if (isLtrStarter(ch)) {
+      const run = readLtrRun(chars, i);
+      tokens.push(run.token);
+      i = run.next;
       continue;
     }
-    if (/[£$€]/.test(ch)) {
-      let j = i + 1;
-      while (j < text.length && /[\s0-9.,-]/.test(text[j])) j += 1;
-      tokens.push(text.slice(i, j));
-      i = j;
-      continue;
-    }
+
     tokens.push(ch);
     i += 1;
+  }
+
+  return tokens;
+}
+
+function visualOrderShapedText(shaped, baseDirection = "rtl") {
+  const tokens = tokenizeVisualRuns(shaped);
+
+  if (baseDirection === "ltr") {
+    const output = [];
+    let rtlRun = [];
+
+    const flushRtl = () => {
+      if (!rtlRun.length) return;
+      output.push(rtlRun.reverse().join(""));
+      rtlRun = [];
+    };
+
+    for (const token of tokens) {
+      if (containsArabic(token) || (rtlRun.length && isWhitespace(token))) {
+        rtlRun.push(token);
+      } else {
+        flushRtl();
+        output.push(token);
+      }
+    }
+
+    flushRtl();
+    return output.join("");
   }
 
   return tokens.reverse().join("");
@@ -390,13 +467,19 @@ const LTR_LABEL_PREFIX_RE = /^([A-Za-z][A-Za-z0-9 ._()\/\[\]&+\-]*:\s*)([\s\S]*[
 const INLINE_SEPARATOR_RE = /(\s+[•|]\s+)/;
 
 function prepareArabicSegmentForPdf(part) {
-  if (!containsArabic(part)) return part;
-  const shaped = shapeArabicLogical(part);
-  const prefix = shaped.match(LTR_LABEL_PREFIX_RE);
-  if (prefix) {
-    return prefix[1] + reversePreservingLtrTokens(prefix[2]);
+  const raw = String(part ?? "");
+  if (!containsArabic(raw)) return raw;
+
+  // Keep English labels readable in mixed strings such as "Reason: ...".
+  const prefixed = raw.match(LTR_LABEL_PREFIX_RE);
+  if (prefixed) {
+    const suffix = shapeArabicLogical(prefixed[2]);
+    return prefixed[1] + visualOrderShapedText(suffix, "rtl");
   }
-  return reversePreservingLtrTokens(shaped);
+
+  const baseDirection = firstStrongDirection(raw);
+  const shaped = shapeArabicLogical(raw);
+  return visualOrderShapedText(shaped, baseDirection);
 }
 
 function preparePdfTextForArabic(value) {
@@ -415,6 +498,75 @@ function preparePdfTextForArabic(value) {
     .join("");
 }
 
+function wrapLongLogicalToken(token, maxWidth, measurePrepared) {
+  const chars = Array.from(String(token || ""));
+  const lines = [];
+  let current = "";
+
+  for (const ch of chars) {
+    const candidate = current + ch;
+    const prepared = preparePdfTextForArabic(candidate);
+    if (current && measurePrepared(prepared) > maxWidth) {
+      lines.push(current);
+      current = ch;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current || !lines.length) lines.push(current);
+  return lines;
+}
+
+function wrapLogicalArabicLine(line, maxWidth, measurePrepared) {
+  const raw = String(line ?? "");
+  if (!containsArabic(raw) || !Number.isFinite(maxWidth) || maxWidth <= 0) {
+    return [preparePdfTextForArabic(raw)];
+  }
+
+  const tokens = raw.match(/\s+|\S+/g) || [""];
+  const logicalLines = [];
+  let current = "";
+
+  const fits = (text) => measurePrepared(preparePdfTextForArabic(text)) <= maxWidth;
+
+  for (const token of tokens) {
+    const candidate = current + token;
+    if (!current || fits(candidate)) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) logicalLines.push(current.replace(/\s+$/g, ""));
+    current = token.replace(/^\s+/g, "");
+
+    if (current && !fits(current)) {
+      const chunks = wrapLongLogicalToken(current, maxWidth, measurePrepared);
+      logicalLines.push(...chunks.slice(0, -1));
+      current = chunks[chunks.length - 1] || "";
+    }
+  }
+
+  if (current || !logicalLines.length) logicalLines.push(current.replace(/\s+$/g, ""));
+  return logicalLines.map((entry) => preparePdfTextForArabic(entry));
+}
+
+function prepareWrappedPdfTextForArabic(value, maxWidth, measurePrepared) {
+  const input = String(value ?? "");
+  if (!containsArabic(input) || !Number.isFinite(maxWidth) || maxWidth <= 0 || typeof measurePrepared !== "function") {
+    return preparePdfTextForArabic(input);
+  }
+
+  return input
+    .split(/(\r?\n)/)
+    .map((part) => {
+      if (/^\r?\n$/.test(part)) return part;
+      if (!containsArabic(part)) return part;
+      return wrapLogicalArabicLine(part, maxWidth, measurePrepared).join("\n");
+    })
+    .join("");
+}
+
 function fontLooksBold(name) {
   return /bold|black|heavy|semi|demi/i.test(String(name || ""));
 }
@@ -424,20 +576,64 @@ function coerceText(value) {
   return String(value);
 }
 
+function findOptionsArg(args) {
+  for (let i = args.length - 1; i >= 0; i -= 1) {
+    const value = args[i];
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      !(typeof Buffer !== "undefined" && Buffer.isBuffer(value))
+    ) {
+      return { index: i, options: value };
+    }
+  }
+  return { index: -1, options: null };
+}
+
+function getOptionWidth(options) {
+  if (!options || !Number.isFinite(Number(options.width))) return null;
+  const width = Number(options.width);
+  return width > 0 ? width : null;
+}
+
+function shouldAutoRightAlign(raw, options) {
+  if (!options || !containsArabic(raw)) return false;
+  if (options.continued || options.lineBreak === false) return false;
+  if (firstStrongDirection(raw) !== "rtl") return false;
+  return !options.align || options.align === "left";
+}
+
+function prepareArgsForArabicText(raw, args) {
+  const meta = findOptionsArg(args);
+  if (!meta.options) return { args, options: null };
+
+  let options = meta.options;
+  let nextArgs = args;
+
+  if (shouldAutoRightAlign(raw, options)) {
+    options = { ...options, align: "right" };
+    nextArgs = args.slice();
+    nextArgs[meta.index] = options;
+  }
+
+  return { args: nextArgs, options };
+}
+
 function enableArabicPdf(doc) {
   if (!doc || doc.__pdfArabicSupportEnabled) return Boolean(doc && doc.__pdfArabicSupportEnabled);
 
   const paths = getCachedArabicFontPaths();
-  if (!paths || !paths.regular) {
-    return false;
-  }
+  let arabicFontsRegistered = false;
 
-  try {
-    doc.registerFont(ARABIC_REGULAR_FONT, paths.regular);
-    doc.registerFont(ARABIC_BOLD_FONT, paths.bold || paths.regular);
-  } catch (err) {
-    console.warn("[pdf-arabic] Could not register Arabic font:", err?.message || err);
-    return false;
+  if (paths && paths.regular) {
+    try {
+      doc.registerFont(ARABIC_REGULAR_FONT, paths.regular);
+      doc.registerFont(ARABIC_BOLD_FONT, paths.bold || paths.regular);
+      arabicFontsRegistered = true;
+    } catch (err) {
+      console.warn("[pdf-arabic] Could not register Arabic font:", err?.message || err);
+    }
   }
 
   const originalFont = doc.font;
@@ -458,7 +654,7 @@ function enableArabicPdf(doc) {
     }
   }
 
-  function withArabicFontIfNeeded(value, fn) {
+  function withArabicFontIfNeeded(value, fn, options = null) {
     const raw = coerceText(value);
 
     // PDFKit lays out text by calling widthOfString/heightOfString internally.
@@ -469,16 +665,46 @@ function enableArabicPdf(doc) {
 
     if (!containsArabic(raw)) return fn(raw);
 
-    const fontName = fontLooksBold(requestedFont) ? ARABIC_BOLD_FONT : ARABIC_REGULAR_FONT;
-    const prepared = preparePdfTextForArabic(raw);
+    const fontName = arabicFontsRegistered
+      ? (fontLooksBold(requestedFont) ? ARABIC_BOLD_FONT : ARABIC_REGULAR_FONT)
+      : null;
 
+    let switchedFont = false;
     try {
-      originalFont.call(doc, fontName);
+      if (fontName) {
+        originalFont.call(doc, fontName);
+        switchedFont = true;
+      }
+
       arabicFontDepth += 1;
+
+      const wrapWidth = getOptionWidth(options);
+      const canWrapManually = Boolean(
+        wrapWidth &&
+        options &&
+        !options.continued &&
+        options.lineBreak !== false &&
+        !options.ellipsis
+      );
+      const measurePrepared = (prepared) => {
+        try {
+          return originalWidthOfString.call(doc, prepared, options || undefined);
+        } catch {
+          return String(prepared || "").length * 7;
+        }
+      };
+      const prepared = canWrapManually
+        ? prepareWrappedPdfTextForArabic(raw, wrapWidth, measurePrepared)
+        : preparePdfTextForArabic(raw);
+
       return fn(prepared);
+    } catch (err) {
+      // Keep PDF generation working even if a font is unavailable in a serverless runtime.
+      console.warn("[pdf-arabic] Arabic text rendering fallback:", err?.message || err);
+      return fn(preparePdfTextForArabic(raw));
     } finally {
       arabicFontDepth = Math.max(0, arabicFontDepth - 1);
-      restoreRequestedFont();
+      if (switchedFont) restoreRequestedFont();
     }
   }
 
@@ -488,23 +714,36 @@ function enableArabicPdf(doc) {
   };
 
   doc.text = function patchedText(value, ...args) {
-    return withArabicFontIfNeeded(value, (prepared) => originalText.call(this, prepared, ...args));
+    const preparedArgs = prepareArgsForArabicText(coerceText(value), args);
+    return withArabicFontIfNeeded(
+      value,
+      (prepared) => originalText.call(this, prepared, ...preparedArgs.args),
+      preparedArgs.options,
+    );
   };
 
   doc.widthOfString = function patchedWidthOfString(value, ...args) {
-    return withArabicFontIfNeeded(value, (prepared) => originalWidthOfString.call(this, prepared, ...args));
+    return withArabicFontIfNeeded(
+      value,
+      (prepared) => originalWidthOfString.call(this, prepared, ...args),
+      findOptionsArg(args).options,
+    );
   };
 
   doc.heightOfString = function patchedHeightOfString(value, ...args) {
-    return withArabicFontIfNeeded(value, (prepared) => originalHeightOfString.call(this, prepared, ...args));
+    const preparedArgs = prepareArgsForArabicText(coerceText(value), args);
+    return withArabicFontIfNeeded(
+      value,
+      (prepared) => originalHeightOfString.call(this, prepared, ...preparedArgs.args),
+      preparedArgs.options,
+    );
   };
 
   doc.__pdfArabicSupportEnabled = true;
-  doc.__pdfArabicFontNames = {
-    regular: ARABIC_REGULAR_FONT,
-    bold: ARABIC_BOLD_FONT,
-  };
-  return true;
+  doc.__pdfArabicFontNames = arabicFontsRegistered
+    ? { regular: ARABIC_REGULAR_FONT, bold: ARABIC_BOLD_FONT }
+    : { regular: null, bold: null };
+  return arabicFontsRegistered;
 }
 
 module.exports = {
