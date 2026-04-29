@@ -204,57 +204,85 @@ document.addEventListener('DOMContentLoaded', () => {
   const AdminAuth = (() => {
     const MODAL_ID = 'adminPasswordModal';
 
-    /** @type {null | {modal:HTMLElement, title:HTMLElement, hint:HTMLElement, extraWrap:HTMLElement, fileTypeSel:HTMLSelectElement, colsSel:HTMLSelectElement, input:HTMLInputElement, err:HTMLElement, confirm:HTMLButtonElement, cancel:HTMLButtonElement, close:HTMLButtonElement, backdrop:HTMLElement}} */
+    /** @type {null | {modal:HTMLElement, title:HTMLElement, eyebrow:HTMLElement, hint:HTMLElement, startWrap:HTMLElement, finishWrap:HTMLElement, dateInput:HTMLInputElement, fileTypeSel:HTMLSelectElement, colsSel:HTMLSelectElement, input:HTMLInputElement, err:HTMLElement, confirm:HTMLButtonElement, cancel:HTMLButtonElement, close:HTMLButtonElement, backdrop:HTMLElement}} */
     let ui = null;
     let currentResolve = null;
     let currentActionLabel = '';
-    /** @type {null | ((opts: {fileType:string, cols:string}) => Promise<void>)} */
+    /** @type {null | ((opts: {inventoryDate:string, fileType:string, cols:string}) => Promise<void>)} */
     let currentOnVerified = null;
-    let currentMode = 'simple'; // simple | finish
+    let currentMode = 'simple'; // simple | start | finish
+
+    const isISODate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
 
     const ensure = () => {
       if (ui) return ui;
 
       const modal = document.createElement('div');
       modal.id = MODAL_ID;
-      modal.className = 'modal hidden';
+      modal.className = 'modal admin-modal hidden';
       modal.innerHTML = `
-        <div class="modal__backdrop" data-admin-backdrop></div>
-        <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="adminPwdTitle">
-          <div class="modal__header">
-            <div style="font-weight:800;" id="adminPwdTitle" data-admin-title>Admin verification</div>
-            <button class="modal__close" type="button" aria-label="Close" data-admin-close>&times;</button>
-          </div>
-          <div class="modal__body">
-            <div class="hint" style="margin-bottom:10px;" data-admin-hint></div>
-            <div data-admin-extras style="display:none; margin-bottom:10px;">
-              <div class="hint" style="margin-bottom:6px;">Choose file type to download</div>
-              <select class="input" data-admin-filetype>
-                <option value="pdf">PDF</option>
-                <option value="excel">Excel</option>
-              </select>
-
-              <div class="hint" style="margin-top:10px; margin-bottom:6px;">Choose columns</div>
-              <select class="input" data-admin-cols>
-                <option value="inventory">Inventory column only</option>
-                <option value="defected">Defected column only</option>
-                <option value="both">Inventory &amp; Defected</option>
-              </select>
+        <div class="modal__backdrop admin-modal__backdrop" data-admin-backdrop></div>
+        <div class="modal__dialog admin-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="adminPwdTitle">
+          <div class="modal__header admin-modal__header">
+            <div class="admin-modal__icon" aria-hidden="true"><i data-feather="shield"></i></div>
+            <div class="admin-modal__heading">
+              <div class="admin-modal__eyebrow" data-admin-eyebrow>Secure action</div>
+              <div class="admin-modal__title" id="adminPwdTitle" data-admin-title>Admin verification</div>
+              <div class="admin-modal__hint" data-admin-hint></div>
             </div>
-            <input class="input" type="password" autocomplete="current-password" placeholder="Password" data-admin-input />
-            <div class="hint" style="margin-top:10px; color:#DC2626; display:none;" data-admin-err></div>
+            <button class="modal__close admin-modal__close" type="button" aria-label="Close" data-admin-close>&times;</button>
           </div>
-          <div class="modal__footer">
+
+          <div class="modal__body admin-modal__body">
+            <div class="admin-form-grid" data-admin-start-extras style="display:none;">
+              <label class="admin-field">
+                <span class="admin-field__label">Inventory date</span>
+                <input class="input admin-input" type="date" data-admin-date />
+              </label>
+              <div class="admin-modal__note">This date will be used to create the Notion columns for Inventory and Defected.</div>
+            </div>
+
+            <div class="admin-form-grid" data-admin-finish-extras style="display:none;">
+              <label class="admin-field">
+                <span class="admin-field__label">Download file type</span>
+                <select class="input admin-input" data-admin-filetype>
+                  <option value="pdf">PDF</option>
+                  <option value="excel">Excel</option>
+                </select>
+              </label>
+
+              <label class="admin-field">
+                <span class="admin-field__label">Columns to include</span>
+                <select class="input admin-input" data-admin-cols>
+                  <option value="inventory">Inventory column only</option>
+                  <option value="defected">Defected column only</option>
+                  <option value="both">Inventory &amp; Defected</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="admin-field">
+              <span class="admin-field__label">Admin password</span>
+              <input class="input admin-input" type="password" autocomplete="current-password" placeholder="Enter admin password" data-admin-input />
+            </label>
+
+            <div class="hint admin-modal__error" style="display:none;" data-admin-err></div>
+          </div>
+
+          <div class="modal__footer admin-modal__footer">
             <button class="btn btn--light" type="button" data-admin-cancel>Cancel</button>
-            <button class="btn" type="button" data-admin-confirm>Confirm</button>
+            <button class="btn admin-modal__confirm" type="button" data-admin-confirm>Confirm</button>
           </div>
         </div>
       `;
       document.body.appendChild(modal);
 
       const title = modal.querySelector('[data-admin-title]');
+      const eyebrow = modal.querySelector('[data-admin-eyebrow]');
       const hint = modal.querySelector('[data-admin-hint]');
-      const extraWrap = modal.querySelector('[data-admin-extras]');
+      const startWrap = modal.querySelector('[data-admin-start-extras]');
+      const finishWrap = modal.querySelector('[data-admin-finish-extras]');
+      const dateInput = modal.querySelector('[data-admin-date]');
       const fileTypeSel = modal.querySelector('[data-admin-filetype]');
       const colsSel = modal.querySelector('[data-admin-cols]');
       const input = modal.querySelector('[data-admin-input]');
@@ -268,10 +296,12 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           modal.classList.add('hidden');
           modal.style.display = 'none';
-          extraWrap.style.display = 'none';
+          startWrap.style.display = 'none';
+          finishWrap.style.display = 'none';
           err.style.display = 'none';
           err.textContent = '';
           input.value = '';
+          dateInput.value = '';
           currentOnVerified = null;
           currentMode = 'simple';
           if (typeof currentResolve === 'function') {
@@ -288,12 +318,15 @@ document.addEventListener('DOMContentLoaded', () => {
       close.addEventListener('click', () => closeWith(false));
       cancel.addEventListener('click', () => closeWith(false));
 
-      // Enter submits
+      // Enter submits from password field, Escape closes from anywhere in the modal.
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           confirm.click();
         }
+      });
+
+      modal.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
           closeWith(false);
@@ -303,8 +336,16 @@ document.addEventListener('DOMContentLoaded', () => {
       // Verify on confirm
       confirm.addEventListener('click', async () => {
         const pw = String(input.value || '').trim();
+        const inventoryDate = String(dateInput?.value || '').trim();
         err.style.display = 'none';
         err.textContent = '';
+
+        if (currentMode === 'start' && !isISODate(inventoryDate)) {
+          err.textContent = 'Please choose the inventory date.';
+          err.style.display = 'block';
+          dateInput.focus();
+          return;
+        }
 
         if (!pw) {
           err.textContent = 'Please enter the Admin password.';
@@ -347,13 +388,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
 
-          // success
-          // If this is the Finish Inventory modal, run the extra action before closing.
-          if (typeof currentOnVerified === 'function') {
+          // success: run the requested action before closing, so errors stay inside the modal.
+          const hadAction = typeof currentOnVerified === 'function';
+          if (hadAction) {
             try {
               const fileType = String(fileTypeSel?.value || 'pdf').toLowerCase();
               const cols = String(colsSel?.value || 'both').toLowerCase();
-              await currentOnVerified({ fileType, cols });
+              await currentOnVerified({ inventoryDate, fileType, cols });
             } catch (e) {
               err.textContent = e?.message || 'Failed to complete the action.';
               err.style.display = 'block';
@@ -361,8 +402,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           }
 
-          closeWith(true);
-          if (window.UI && UI.toast) {
+          closeWith(currentMode === 'start' ? { ok: true, inventoryDate } : true);
+          if (!hadAction && window.UI && UI.toast) {
             UI.toast({
               type: 'success',
               title: 'Verified',
@@ -380,7 +421,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      ui = { modal, title, hint, extraWrap, fileTypeSel, colsSel, input, err, confirm, cancel, close, backdrop };
+      ui = { modal, title, eyebrow, hint, startWrap, finishWrap, dateInput, fileTypeSel, colsSel, input, err, confirm, cancel, close, backdrop };
+      if (window.feather) feather.replace();
       return ui;
     };
 
@@ -389,27 +431,51 @@ document.addEventListener('DOMContentLoaded', () => {
       currentActionLabel = String(actionLabel || '').trim();
       currentMode = String(mode || 'simple');
       currentOnVerified = typeof onVerified === 'function' ? onVerified : null;
-      x.title.textContent = 'Admin verification';
-      x.hint.textContent = currentActionLabel
-        ? `Enter Admin password to ${currentActionLabel}.`
-        : 'Enter Admin password.';
+
+      const titleByMode = {
+        start: 'Make inventory',
+        finish: 'Finish inventory',
+        simple: 'Admin verification',
+      };
+      const hintByMode = {
+        start: 'Enter the admin password and choose the date that will be used in Notion column names.',
+        finish: 'Enter the admin password, then choose the export options for this inventory.',
+        simple: currentActionLabel ? `Enter Admin password to ${currentActionLabel}.` : 'Enter Admin password.',
+      };
+
+      x.eyebrow.textContent = currentMode === 'finish' ? 'Export & close' : (currentMode === 'start' ? 'Inventory setup' : 'Secure action');
+      x.title.textContent = titleByMode[currentMode] || titleByMode.simple;
+      x.hint.textContent = hintByMode[currentMode] || hintByMode.simple;
       x.err.style.display = 'none';
       x.err.textContent = '';
       x.input.value = '';
+      x.dateInput.value = '';
 
-      // Show/hide extras (Finish inventory only)
-      if (currentMode === 'finish') {
-        x.extraWrap.style.display = 'block';
-        const d = defaults && typeof defaults === 'object' ? defaults : {};
+      const d = defaults && typeof defaults === 'object' ? defaults : {};
+      if (currentMode === 'start') {
+        x.startWrap.style.display = 'grid';
+        x.finishWrap.style.display = 'none';
+        x.dateInput.value = String(d.inventoryDate || '').trim();
+      } else if (currentMode === 'finish') {
+        x.startWrap.style.display = 'none';
+        x.finishWrap.style.display = 'grid';
         x.fileTypeSel.value = String(d.fileType || 'pdf').toLowerCase();
         x.colsSel.value = String(d.cols || 'both').toLowerCase();
       } else {
-        x.extraWrap.style.display = 'none';
+        x.startWrap.style.display = 'none';
+        x.finishWrap.style.display = 'none';
       }
 
       x.modal.classList.remove('hidden');
       x.modal.style.display = 'flex';
-      setTimeout(() => x.input.focus(), 50);
+      setTimeout(() => {
+        if (currentMode === 'start' && !x.dateInput.value) {
+          x.dateInput.focus();
+        } else {
+          x.input.focus();
+        }
+      }, 50);
+
       return new Promise((resolve) => {
         currentResolve = resolve;
       });
@@ -418,6 +484,15 @@ document.addEventListener('DOMContentLoaded', () => {
     return {
       verify: async (actionLabel) => {
         const ok = await open({ actionLabel, mode: 'simple', defaults: null, onVerified: null });
+        return !!ok;
+      },
+      start: async ({ onVerified, defaults } = {}) => {
+        const ok = await open({
+          actionLabel: 'start inventory',
+          mode: 'start',
+          defaults: defaults || { inventoryDate: '' },
+          onVerified: typeof onVerified === 'function' ? onVerified : null,
+        });
         return !!ok;
       },
       finish: async ({ onVerified, defaults } = {}) => {
@@ -879,42 +954,43 @@ document.addEventListener('DOMContentLoaded', () => {
         setInventoryButtonUI(false);
 
         const startInventory = async () => {
-          const ok = await AdminAuth.verify('start inventory');
+          const ok = await AdminAuth.start({
+            defaults: { inventoryDate: '' },
+            onVerified: async ({ inventoryDate }) => {
+              const r = await fetch(`/api/b2b/schools/${encodeURIComponent(id)}/inventory`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ inventoryDate }),
+              });
+              const j = await r.json().catch(() => ({}));
+              if (r.redirected) {
+                window.location.href = '/login';
+                return;
+              }
+              if (!r.ok) throw new Error(j.details || j.error || 'Failed to create inventory columns.');
+
+              // Refresh stock data to show the selected-date columns + values
+              const refreshed = await fetchStock(id);
+              allStock = refreshed.items;
+              stockMeta = { ...stockMeta, ...(refreshed.meta || {}) };
+
+              inventoryMode = true;
+              setInventoryButtonUI(true);
+              applyFilter();
+
+              if (window.UI && UI.toast) {
+                const label = j?.inventoryPropName || stockMeta?.inventoryPropName || 'Inventory';
+                UI.toast({
+                  type: 'success',
+                  title: 'Inventory',
+                  message: `${label} is ready for ${inventoryDate}.`,
+                });
+              }
+            },
+          });
+
           if (!ok) return;
-
-          try {
-            const r = await fetch(`/api/b2b/schools/${encodeURIComponent(id)}/inventory`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({}),
-            });
-            const j = await r.json().catch(() => ({}));
-            if (r.redirected) {
-              window.location.href = '/login';
-              return;
-            }
-            if (!r.ok) throw new Error(j.details || j.error || 'Failed to create inventory column.');
-
-            // Refresh stock data to show the new column + values
-            const refreshed = await fetchStock(id);
-            allStock = refreshed.items;
-            stockMeta = { ...stockMeta, ...(refreshed.meta || {}) };
-
-            inventoryMode = true;
-            setInventoryButtonUI(true);
-            applyFilter();
-
-            if (window.UI && UI.toast) {
-              const label = j?.inventoryPropName || stockMeta?.inventoryPropName || 'Inventory';
-              UI.toast({ type: 'success', title: 'Inventory', message: `${label} is ready.` });
-            }
-          } catch (err) {
-            console.error(err);
-            if (window.UI && UI.toast) {
-              UI.toast({ type: 'error', title: 'Inventory', message: err.message || 'Failed to create inventory column.' });
-            }
-          }
         };
 
         const finishInventory = async () => {

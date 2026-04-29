@@ -4521,6 +4521,24 @@ function _cairoDateISO(date = new Date()) {
   return new Date(date).toISOString().slice(0, 10);
 }
 
+function _normalizeISODateInput(value) {
+  const s = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+
+  const [year, month, day] = s.split('-').map((part) => Number(part));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return '';
+
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(dt.getTime())) return '';
+
+  const valid =
+    dt.getUTCFullYear() === year &&
+    dt.getUTCMonth() === month - 1 &&
+    dt.getUTCDate() === day;
+
+  return valid ? s : '';
+}
+
 function _makeInventoryPropName(schoolName, dateISO) {
   const base = String(schoolName || '').trim();
   const d = String(dateISO || '').trim();
@@ -5122,7 +5140,7 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
   const id = String(schoolId || "").trim();
   if (!id) return { meta: {}, items: [] };
 
-  const cacheKey = `cache:api:b2b:school-stock:${id}:v6`;
+  const cacheKey = `cache:api:b2b:school-stock:${id}:v7`;
   return await cacheGetOrSet(cacheKey, 60, async () => {
     const school = await _getB2BSchoolById(id);
     if (!school) return { meta: {}, items: [] };
@@ -5189,7 +5207,7 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
             `${schoolName} Done`;
 
           const doneQuantity = numberOrNull(props[doneKey]);
-          const doneBool = _boolFrom(props[doneKey]) || Number(doneQuantity || 0) > 0;
+          const doneBool = _boolFrom(props[doneKey]) || (typeof doneQuantity === "number" && Number(doneQuantity) !== 0);
 
           let inventory = null;
           if (inventoryPropName) {
@@ -5273,10 +5291,20 @@ async function _getB2BSchoolStocktakingPayload(schoolId) {
       startCursor = resp.next_cursor || undefined;
     }
 
-    // Keep rows that have either a positive "<School> Done" value OR any inventory value.
-    const filtered = (allStock || []).filter(
-      (it) => Number(it.doneQuantity) > 0 || (it.inventory !== null && Number(it.inventory) >= 0) || (it.defected !== null && Number(it.defected) >= 0),
-    );
+    // Keep rows that have any non-zero "<School> Done" value (positive or negative)
+    // OR any entered inventory/defected value. Withdraw Products often uses negative
+    // quantities, so filtering by > 0 hides valid stock rows.
+    const hasNumericValue = (value) =>
+      value !== null && typeof value !== "undefined" && value !== "" && Number.isFinite(Number(value));
+
+    const filtered = (allStock || []).filter((it) => {
+      const doneValue = Number(it.doneQuantity);
+      return (
+        (Number.isFinite(doneValue) && doneValue !== 0) ||
+        hasNumericValue(it.inventory) ||
+        hasNumericValue(it.defected)
+      );
+    });
 
     return {
       meta: {
@@ -5469,8 +5497,8 @@ app.post(
   },
 );
 
-// ===== B2B — Create (or get) today's inventory column for a school =====
-// Creates a new Number property in the School Stocktaking database:
+// ===== B2B — Create (or get) selected-date inventory columns for a school =====
+// Creates new Number properties in the School Stocktaking database:
 //   "<School> Inventory YYYY-MM-DD"
 app.post(
   "/api/b2b/schools/:id/inventory",
@@ -5493,7 +5521,16 @@ app.post(
       const schoolName = String(school.name || "").trim();
       if (!schoolName) return res.status(400).json({ error: "Invalid school name." });
 
-      const dateISO = _cairoDateISO(new Date());
+      const dateISO = _normalizeISODateInput(
+        req?.body?.inventoryDate || req?.body?.dateISO || req?.body?.date,
+      );
+      if (!dateISO) {
+        return res.status(400).json({
+          error: "Inventory date is required.",
+          details: "Please choose a valid inventory date before creating inventory columns.",
+        });
+      }
+
       const inventoryPropName = await _ensureInventoryPropExists({
         schoolName,
         dateISO,
@@ -5506,7 +5543,7 @@ app.post(
 
       // Invalidate school stock cache so UI shows the new columns immediately.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${id}:v6`);
+        await cacheDel(`cache:api:b2b:school-stock:${id}:v7`);
       } catch {}
 
       return res.json({
@@ -5555,10 +5592,17 @@ app.patch(
       if (!schoolName) return res.status(400).json({ error: "Invalid school name." });
 
       // Prefer the inventory column requested by the client (if provided),
-      // then fall back to the latest existing inventory column; if none exists, create today's.
+      // then fall back to the latest existing inventory column. New columns require a selected date.
       const schemaProps = await _getStocktakingDBProps();
       const requestedInvProp = typeof req?.body?.inventoryPropName === "string" ? String(req.body.inventoryPropName).trim() : "";
-      const requestedInvDate = typeof req?.body?.inventoryDate === "string" ? String(req.body.inventoryDate).trim() : "";
+      const rawRequestedInvDate =
+        typeof req?.body?.inventoryDate === "string"
+          ? String(req.body.inventoryDate).trim()
+          : (typeof req?.body?.dateISO === "string" ? String(req.body.dateISO).trim() : "");
+      const requestedInvDate = _normalizeISODateInput(rawRequestedInvDate);
+      if (rawRequestedInvDate && !requestedInvDate) {
+        return res.status(400).json({ error: "Invalid inventory date." });
+      }
 
       let inventoryPropName = null;
       let inventoryDate = null;
@@ -5574,7 +5618,10 @@ app.patch(
       if (!inventoryPropName && requestedInvDate) {
         const candidate = _makeInventoryPropName(schoolName, requestedInvDate);
         inventoryPropName = _findPropNameByNorm(schemaProps, candidate) || (schemaProps?.[candidate] ? candidate : null);
-        inventoryDate = inventoryPropName ? requestedInvDate : null;
+        if (!inventoryPropName) {
+          inventoryPropName = await _ensureInventoryPropExists({ schoolName, dateISO: requestedInvDate });
+        }
+        inventoryDate = requestedInvDate;
       }
 
       if (!inventoryPropName) {
@@ -5584,9 +5631,10 @@ app.patch(
       }
 
       if (!inventoryPropName) {
-        const dateISO = _cairoDateISO(new Date());
-        inventoryPropName = await _ensureInventoryPropExists({ schoolName, dateISO });
-        inventoryDate = dateISO;
+        return res.status(400).json({
+          error: "Inventory date is required.",
+          details: "Start inventory and choose a date before saving inventory values.",
+        });
       }
 
       await notion.pages.update({
@@ -5598,7 +5646,7 @@ app.patch(
 
       // Invalidate school stock cache so UI reflects updates.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v6`);
+        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v7`);
       } catch {}
 
       return res.json({ ok: true, inventoryPropName, inventoryDate, value });
@@ -5644,7 +5692,14 @@ app.patch(
 
       const schemaProps = await _getStocktakingDBProps();
       const requestedDefProp = typeof req?.body?.defectedPropName === "string" ? String(req.body.defectedPropName).trim() : "";
-      const requestedDefDate = typeof req?.body?.defectedDate === "string" ? String(req.body.defectedDate).trim() : "";
+      const rawRequestedDefDate =
+        typeof req?.body?.defectedDate === "string"
+          ? String(req.body.defectedDate).trim()
+          : (typeof req?.body?.inventoryDate === "string" ? String(req.body.inventoryDate).trim() : "");
+      const requestedDefDate = _normalizeISODateInput(rawRequestedDefDate);
+      if (rawRequestedDefDate && !requestedDefDate) {
+        return res.status(400).json({ error: "Invalid defected date." });
+      }
 
       let defectedPropName = null;
       let defectedDate = null;
@@ -5664,7 +5719,10 @@ app.patch(
         defectedPropName =
           _findPropNameByNorm(schemaProps, candidate) ||
           (schemaProps?.[candidate] ? candidate : null);
-        defectedDate = defectedPropName ? requestedDefDate : null;
+        if (!defectedPropName) {
+          defectedPropName = await _ensureDefectedPropExists({ schoolName, dateISO: requestedDefDate });
+        }
+        defectedDate = requestedDefDate;
       }
 
       if (!defectedPropName) {
@@ -5674,9 +5732,10 @@ app.patch(
       }
 
       if (!defectedPropName) {
-        const dateISO = _cairoDateISO(new Date());
-        defectedPropName = await _ensureDefectedPropExists({ schoolName, dateISO });
-        defectedDate = dateISO;
+        return res.status(400).json({
+          error: "Defected date is required.",
+          details: "Start inventory and choose a date before saving defected values.",
+        });
       }
 
       await notion.pages.update({
@@ -5688,7 +5747,7 @@ app.patch(
 
       // Invalidate school stock cache so UI reflects updates.
       try {
-        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v6`);
+        await cacheDel(`cache:api:b2b:school-stock:${schoolId}:v7`);
       } catch {}
 
       return res.json({ ok: true, defectedPropName, defectedDate, value });

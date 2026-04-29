@@ -568,3 +568,263 @@ body {
     font-size: 0.8rem;
   }
 }
+
+/* Modern B2B inventory admin modal */
+#adminPasswordModal.admin-modal.hidden {
+  display: none !important;
+}
+
+#adminPasswordModal.admin-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1rem, 3vw, 2rem);
+}
+
+#adminPasswordModal .admin-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(249, 115, 22, 0.16), transparent 28%),
+    rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(8px);
+}
+
+#adminPasswordModal .admin-modal__dialog {
+  position: relative;
+  width: min(100%, 480px);
+  max-width: 480px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top right, rgba(249, 115, 22, 0.1), transparent 30%),
+    linear-gradient(180deg, #ffffff, #fbfdff);
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.28);
+  transform-origin: center;
+  animation: adminModalIn 160ms ease-out both;
+}
+
+@keyframes adminModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+#adminPasswordModal .admin-modal__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: start;
+  padding: 1.25rem 1.25rem 0.95rem;
+  border-bottom: 0;
+}
+
+#adminPasswordModal .admin-modal__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+  border: 1px solid rgba(249, 115, 22, 0.18);
+  background: rgba(249, 115, 22, 0.1);
+  color: #c2410c;
+  box-shadow: 0 12px 24px rgba(249, 115, 22, 0.12);
+}
+
+#adminPasswordModal .admin-modal__icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+#adminPasswordModal .admin-modal__heading {
+  min-width: 0;
+}
+
+#adminPasswordModal .admin-modal__eyebrow {
+  margin-bottom: 0.18rem;
+  color: #c2410c;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+#adminPasswordModal .admin-modal__title {
+  color: #0f172a;
+  font-size: 1.35rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+#adminPasswordModal .admin-modal__hint {
+  margin-top: 0.3rem;
+  color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+#adminPasswordModal .admin-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #0f172a;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+#adminPasswordModal .admin-modal__close:hover {
+  transform: translateY(-1px);
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+#adminPasswordModal .admin-modal__body {
+  display: grid;
+  gap: 0.95rem;
+  padding: 0 1.25rem 1.15rem;
+}
+
+#adminPasswordModal .admin-form-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+#adminPasswordModal .admin-field {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+#adminPasswordModal .admin-field__label {
+  color: #475569;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#adminPasswordModal .admin-input {
+  min-height: 46px;
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.9);
+  color: #0f172a;
+  font-size: 0.98rem;
+  font-weight: 700;
+  padding: 0.75rem 0.9rem;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+#adminPasswordModal .admin-input:focus {
+  border-color: #fb923c;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.14);
+}
+
+#adminPasswordModal select.admin-input {
+  cursor: pointer;
+}
+
+#adminPasswordModal .admin-modal__note {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #fed7aa;
+  border-radius: 16px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+#adminPasswordModal .admin-modal__error {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #fecaca;
+  border-radius: 16px;
+  background: #fef2f2;
+  color: #b91c1c !important;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+#adminPasswordModal .admin-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  padding: 1rem 1.25rem 1.25rem;
+  border-top: 1px solid rgba(226, 232, 240, 0.72);
+  background: rgba(248, 250, 252, 0.66);
+}
+
+#adminPasswordModal .admin-modal__footer .btn {
+  min-height: 42px;
+  border-radius: 14px;
+  font-weight: 900;
+}
+
+#adminPasswordModal .admin-modal__confirm {
+  border: 1px solid #f97316;
+  background: #f97316;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(249, 115, 22, 0.22);
+}
+
+#adminPasswordModal .admin-modal__confirm:hover {
+  background: #ea580c;
+  border-color: #ea580c;
+}
+
+#adminPasswordModal .admin-modal__confirm.is-busy {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+@media (max-width: 520px) {
+  #adminPasswordModal.admin-modal {
+    align-items: flex-end;
+    padding: 0.75rem;
+  }
+
+  #adminPasswordModal .admin-modal__dialog {
+    width: 100%;
+    max-width: none;
+    border-radius: 24px;
+  }
+
+  #adminPasswordModal .admin-modal__header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding: 1rem 1rem 0.8rem;
+  }
+
+  #adminPasswordModal .admin-modal__body {
+    padding: 0 1rem 1rem;
+  }
+
+  #adminPasswordModal .admin-modal__footer {
+    padding: 0.95rem 1rem 1rem;
+  }
+
+  #adminPasswordModal .admin-modal__footer .btn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+}
