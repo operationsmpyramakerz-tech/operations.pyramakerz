@@ -463,20 +463,15 @@ function visualOrderShapedText(shaped, baseDirection = "rtl") {
   return tokens.reverse().join("");
 }
 
-const LTR_LABEL_PREFIX_RE = /^([A-Za-z][A-Za-z0-9 ._()\/\[\]&+\-]*:\s*)([\s\S]*[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF][\s\S]*)$/;
 const INLINE_SEPARATOR_RE = /(\s+[•|]\s+)/;
 
 function prepareArabicSegmentForPdf(part) {
   const raw = String(part ?? "");
   if (!containsArabic(raw)) return raw;
 
-  // Keep English labels readable in mixed strings such as "Reason: ...".
-  const prefixed = raw.match(LTR_LABEL_PREFIX_RE);
-  if (prefixed) {
-    const suffix = shapeArabicLogical(prefixed[2]);
-    return prefixed[1] + visualOrderShapedText(suffix, "rtl");
-  }
-
+  // Preserve the paragraph base direction for mixed LTR/RTL values.
+  // Only Arabic runs are shaped and visually reordered; surrounding English text
+  // stays in the same logical place (important for Operations Orders reasons).
   const baseDirection = firstStrongDirection(raw);
   const shaped = shapeArabicLogical(raw);
   return visualOrderShapedText(shaped, baseDirection);
