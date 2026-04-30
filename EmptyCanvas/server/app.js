@@ -8876,7 +8876,7 @@ app.post(
       }));
       const primaryReceiptPageId = orderPages?.[0]?.id || null;
 
-      await Promise.all(
+      const updatedOrderPages = await Promise.all(
         orderPages.map((page, pageIndex) => {
           const id = page?.id;
           const pageProps = page?.properties || {};
@@ -8952,9 +8952,15 @@ app.post(
       const stocktakingSyncResults = [];
       const stocktakingSyncErrors = [];
 
-      for (const item of pagesBeforeUpdate) {
+      for (let index = 0; index < pagesBeforeUpdate.length; index += 1) {
+        const item = pagesBeforeUpdate[index];
+        // Use the updated page for Stocktaking sync. Withdrawal orders receive their
+        // store receipt number in this same Mark as Delivered action, so syncing the
+        // pre-update page made Stocktaking Receipt Number stay empty/0.
+        const pageForSync = updatedOrderPages?.[index] || item?.page || null;
+
         try {
-          const pageOrderTypeInfo = _extractOrderTypeInfo(item?.page?.properties || {});
+          const pageOrderTypeInfo = _extractOrderTypeInfo(pageForSync?.properties || item?.page?.properties || {});
           const pageOrderType = _canonicalOrderTypeLabel(pageOrderTypeInfo?.orderType || "");
           const pageOrderTypeKey = _normKeyOrderType(pageOrderType);
           const needsStocktakingSync =
@@ -8963,16 +8969,16 @@ app.post(
 
           if (!needsStocktakingSync) continue;
 
-          const syncResult = await _syncArrivedOrderToStocktaking(item.page, {
-            dedupe: item.wasArrivedLike,
+          const syncResult = await _syncArrivedOrderToStocktaking(pageForSync, {
+            dedupe: item?.wasArrivedLike,
           });
           stocktakingSyncResults.push({
-            orderId: String(item?.page?.id || "").trim() || null,
+            orderId: String(pageForSync?.id || item?.page?.id || "").trim() || null,
             ...syncResult,
           });
         } catch (syncErr) {
           stocktakingSyncErrors.push({
-            orderId: String(item?.page?.id || "").trim() || null,
+            orderId: String(pageForSync?.id || item?.page?.id || "").trim() || null,
             message: String(syncErr?.message || "Failed to sync stocktaking row.").trim(),
           });
         }
